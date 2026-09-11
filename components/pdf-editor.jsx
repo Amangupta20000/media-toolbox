@@ -5,6 +5,7 @@ import { AlertTriangle, CheckCircle2, Download, FilePlus2, FileText, GripVertica
 import { AppShell } from "./app-shell.jsx";
 import { formatBytes } from "./file-dropzone.jsx";
 import { ProcessingMode } from "./processing-mode.jsx";
+import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 
 const MAX_PDFS = 5;
@@ -270,6 +271,7 @@ export function PdfEditor() {
   const [processingMode, setProcessingMode] = useState("local");
   const [jobMode, setJobMode] = useState("local");
   const [keepResult, setKeepResult] = useState(false);
+  const [activeView, setActiveView] = useState("tool");
   const pdfInputRef = useRef(null);
   const imageInputRef = useRef(null);
   const pageListRef = useRef(null);
@@ -842,6 +844,8 @@ export function PdfEditor() {
 
   return <AppShell>
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools · Beta <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · 50 MB each</span></div><h1>PDF editor</h1><p>Merge documents, reorder pages, remove pages, and add images to PDF pages or new blank pages.</p></div></div>
+    <ToolViewTabs value={activeView} onChange={setActiveView} />
+    {activeView === "history" ? <ToolHistory tool="pdf-editor" /> : <>
     {!job && <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />}
     {job ? <PdfJobCard job={job} mode={jobMode} onReset={reset} onContinue={continueEditing} /> : <section className={`pdf-editor-shell ${pdfDragActive ? "pdf-drop-active" : ""}`} onDragOver={handlePdfDragOver} onDragLeave={handlePdfDragLeave} onDrop={handlePdfDrop}>
       <div className="pdf-editor-toolbar"><div><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDFS} PDFs · {pages.length} pages</span></div><div className="pdf-editor-actions"><button className="secondary-button" type="button" onClick={() => pdfInputRef.current?.click()} disabled={loadingFiles || pdfFiles.length >= MAX_PDFS}><Plus size={17} /> Add PDF</button><button className="secondary-button" type="button" onClick={addBlankPage}><FilePlus2 size={17} /> Blank page</button>{selectedPage && <button className="secondary-button" type="button" onClick={() => imageInputRef.current?.click()}><ImagePlus size={17} /> Add images</button>}{selectedPageImages.length > 0 && <button className="secondary-button" type="button" onClick={() => removeAllImages(selectedPage.id)}><Trash2 size={16} /> Remove images</button>}{selectedPage && <button className="icon-button delete-page-button" type="button" aria-label="Delete selected page" title="Delete selected page" onClick={() => deletePage(selectedPage.id)}><Trash2 size={17} /></button>}<button className="primary-button" type="button" onClick={submit} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles}><WandSparkles size={17} /> {uploadProgress ? `Uploading ${uploadProgress}%` : "Export PDF"}</button></div></div>
@@ -854,6 +858,7 @@ export function PdfEditor() {
       </div>}
       {error && <div className="error-banner"><AlertTriangle size={18} /><span>{error}</span></div>}
     </section>}
+    </>}
   </AppShell>;
 }
 
@@ -1048,10 +1053,93 @@ function ImageOverlayLayer({ page, onChange, onRemove }) {
   return <div ref={layerRef} className="pdf-image-overlay-layer" onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>{images.map((image, index) => <div className="pdf-image-overlay" key={image.id || index} style={{ left: `${image.x / page.width * 100}%`, top: `${image.y / page.height * 100}%`, width: `${image.width / page.width * 100}%`, height: `${image.height / page.height * 100}%`, zIndex: index + 1 }} onPointerDown={(event) => onPointerDown(event, "move", image)}><img src={image.url} alt={`Placed image ${index + 1}`} draggable="false" /><button type="button" className="image-remove-handle" aria-label={`Remove image ${index + 1}`} title="Remove image" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove?.(image.id); }}><X size={11} /></button><button type="button" className="image-ratio-handle" aria-label={image.lockAspectRatio === false ? `Keep image ${index + 1} aspect ratio` : `Allow image ${index + 1} free resizing`} title={image.lockAspectRatio === false ? "Keep aspect ratio" : "Allow free resizing"} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); toggleAspectRatio(image.id); }}>{image.lockAspectRatio === false ? <Unlock size={10} /> : <Lock size={10} />}</button><button type="button" className="image-resize-handle" aria-label={`Resize image ${index + 1}`} onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, "resize", image); }} /></div>)}</div>;
 }
 
+function pdfPreviewUrl(downloadUrl) {
+  if (!downloadUrl) return "";
+  return `${downloadUrl}${downloadUrl.includes("?") ? "&" : "?"}preview=1`;
+}
+
+function PdfResultPreview({ result }) {
+  const [pages, setPages] = useState([]);
+  const [totalPages, setTotalPages] = useState(result?.pageCount || 0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    setPages([]);
+    setTotalPages(result?.pageCount || 0);
+    setLoading(true);
+    setError("");
+
+    const loadPreview = async () => {
+      try {
+        const sourceUrl = pdfPreviewUrl(result?.downloadUrl);
+        if (!sourceUrl) throw new Error("The PDF preview URL is unavailable.");
+        const response = await fetch(sourceUrl, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) {
+          let detail = "The generated PDF could not be loaded for preview.";
+          try {
+            const payload = await response.json();
+            if (payload?.error) detail = payload.error;
+          } catch { /* The response may be a non-JSON error page. */ }
+          throw new Error(detail);
+        }
+        const data = new Uint8Array(await response.arrayBuffer());
+        const pdfLibrary = await loadPdfLibrary();
+        const documentProxy = await pdfLibrary.getDocument({ data }).promise;
+        if (!active) return;
+        setTotalPages(documentProxy.numPages);
+
+        for (let pageNumber = 1; pageNumber <= documentProxy.numPages; pageNumber += 1) {
+          const pdfPage = await documentProxy.getPage(pageNumber);
+          const baseViewport = pdfPage.getViewport({ scale: 1 });
+          const scale = Math.min(1, 860 / baseViewport.width);
+          const viewport = pdfPage.getViewport({ scale });
+          const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.ceil(viewport.width * pixelRatio);
+          canvas.height = Math.ceil(viewport.height * pixelRatio);
+          const context = canvas.getContext("2d", { alpha: false });
+          if (!context) throw new Error("This browser could not create a PDF preview canvas.");
+          await pdfPage.render({
+            canvasContext: context,
+            viewport: pdfPage.getViewport({ scale: scale * pixelRatio }),
+          }).promise;
+          const source = canvas.toDataURL("image/jpeg", 0.82);
+          if (!active) return;
+          setPages((current) => [...current, { pageNumber, source }]);
+        }
+        if (active) setLoading(false);
+      } catch (previewError) {
+        if (!active || previewError?.name === "AbortError") return;
+        setError(previewError instanceof Error ? previewError.message : "The generated PDF preview could not be rendered.");
+        setLoading(false);
+      }
+    };
+
+    loadPreview();
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [result?.downloadUrl, result?.pageCount]);
+
+  return <div className="pdf-result-preview-scroll" aria-label={`Preview of all ${totalPages || 0} output pages`}>
+    {pages.map(({ pageNumber, source }) => <figure className="pdf-result-page" key={pageNumber}>
+      <img src={source} alt={`Preview of page ${pageNumber} of ${result.filename}`} />
+      <figcaption>Page {pageNumber}</figcaption>
+    </figure>)}
+    {loading && <div className="pdf-preview-progress"><LoaderCircle className="spin" size={18} /><span>Rendering page {Math.min(pages.length + 1, totalPages || pages.length + 1)} of {totalPages || "…"}</span></div>}
+    {!loading && error && <div className="preview-unavailable"><AlertTriangle size={18} /><span>{error} Download the PDF to view it.</span></div>}
+    {!loading && !error && pages.length === 0 && <div className="preview-unavailable"><AlertTriangle size={18} /><span>No pages were available for preview. The PDF is ready to download.</span></div>}
+    {error && pages.length > 0 && <div className="pdf-preview-error"><AlertTriangle size={16} /><span>Preview rendering stopped after {pages.length} of {totalPages} pages. The complete PDF is ready to download.</span></div>}
+  </div>;
+}
+
 function PdfJobCard({ job: initialJob, mode = "server", onReset, onContinue }) {
   const [job, setJob] = useState(initialJob);
   useEffect(() => {
-    if (mode === "browser") return undefined;
     let active = true;
     const poll = async () => {
       try {
@@ -1070,7 +1158,5 @@ function PdfJobCard({ job: initialJob, mode = "server", onReset, onContinue }) {
   const done = job.status === "completed";
   const failed = job.status === "failed";
   const progress = Math.max(0, Math.min(100, job.progress || 0));
-  const previewImages = job.result?.previewImages || [];
-  const previewLabel = previewImages.length && previewImages.length < (job.result?.pageCount || 0) ? `${previewImages.length} of ${job.result.pageCount} pages` : `All ${job.result?.pageCount || 0} pages`;
-  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : job.status === "queued" ? "Queued" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be created" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<div className="pdf-job-log"><div className="job-log-heading"><span>{mode === "browser" ? "Browser log" : "Worker log"}</span><span>{(job.logs || []).length} events</span></div><div className="job-log-list">{job.logs?.length ? job.logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for progress…</div>}</div></div>{done && job.result && <><div className="pdf-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>{previewLabel}</small></div>{previewImages.length ? <div className="pdf-result-preview-scroll" aria-label={`Preview of ${previewImages.length} output pages`}>{previewImages.map((src, index) => { const pageNumber = index + 1; return <figure className="pdf-result-page" key={pageNumber}><img loading={pageNumber === 1 ? "eager" : "lazy"} src={src} alt={`Preview of page ${pageNumber} of ${job.result.filename}`} /><figcaption>Page {pageNumber}</figcaption></figure>; })}</div> : mode === "browser" ? <div className="preview-unavailable"><AlertTriangle size={18} /><span>The PDF was created successfully, but this browser could not render the preview. Download the PDF to view it.</span></div> : <div className="pdf-result-preview-scroll" aria-label={`Preview of all ${job.result.pageCount} output pages`}>{Array.from({ length: job.result.pageCount }, (_, index) => { const pageNumber = index + 1; const src = mode === "local" ? `${job.result.previewUrl}&page=${pageNumber}` : `/api/jobs/${job.id}/preview?page=${pageNumber}`; return <figure className="pdf-result-page" key={pageNumber}><img loading={pageNumber === 1 ? "eager" : "lazy"} src={src} alt={`Preview of page ${pageNumber} of ${job.result.filename}`} /><figcaption>Page {pageNumber}</figcaption></figure>; })}</div>}{job.result.previewError && previewImages.length > 0 && <div className="pdf-preview-error"><AlertTriangle size={16} /><span>Preview rendering stopped after {previewImages.length} of {job.result.pageCount} pages. The complete PDF is ready to download.</span></div>}</div><div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Pages</span><strong>{job.result.pageCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div></>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={job.result.downloadUrl} download={job.result.filename}><Download size={18} /> Download PDF</a><button className="secondary-button" type="button" onClick={() => onContinue?.(job.result)}><FilePlus2 size={17} /> Continue editing</button></>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
+  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : job.status === "queued" ? "Queued" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be created" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<div className="pdf-job-log"><div className="job-log-heading"><span>Worker log</span><span>{(job.logs || []).length} events</span></div><div className="job-log-list">{job.logs?.length ? job.logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for progress…</div>}</div></div>{done && job.result && <><div className="pdf-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>All {job.result.pageCount || ""} pages</small></div><PdfResultPreview result={job.result} /></div><div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Pages</span><strong>{job.result.pageCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div></>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={job.result.downloadUrl} download={job.result.filename}><Download size={18} /> Download PDF</a><button className="secondary-button" type="button" onClick={() => onContinue?.(job.result)}><FilePlus2 size={17} /> Continue editing</button></>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
 }

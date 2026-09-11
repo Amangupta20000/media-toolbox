@@ -21,7 +21,7 @@ Private image conversion, video repair, and PDF editing tools. The website runs 
 
 ## Local processing agent
 
-The Local agent is an optional desktop application for macOS, Windows, and Linux. It runs the same worker functions as the server, listens only on `127.0.0.1:4789`, starts at login after installation, and processes one job at a time. A paired browser can upload to it without sending the source files to the server. The agent never accepts shell commands or arbitrary filesystem paths from the website.
+The Local agent is an optional desktop application for macOS, Windows, and Linux. It runs the same worker functions as the server, listens only on `127.0.0.1:4789`, starts at login after installation, and processes one job at a time. A paired browser can upload to it without sending the source files to the server. The agent never accepts shell commands or arbitrary filesystem paths from the website; its download-delete action accepts only a named regular file inside the user's Downloads folder.
 
 Start the development agent in a second terminal:
 
@@ -36,6 +36,8 @@ npm run agent
 ```
 
 Build an installer for the current operating system with `npm run agent:package`. GitHub Actions builds macOS, Windows, and Linux installers on an `agent-v*` tag. Set `NEXT_PUBLIC_AGENT_RELEASES_URL` in the website environment to the repository's latest Releases page. The setup page links users to those installers.
+
+For a Vercel frontend that uses the Local agent, set `APP_USERNAME`, `APP_PASSWORD`, `AUTH_SECRET`, `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_AGENT_URL` (`http://127.0.0.1:4789`), `NEXT_PUBLIC_AGENT_RELEASES_URL`, and `NEXT_PUBLIC_MACOS_AGENT_SIGNED`. Do not set `NEXT_PUBLIC_AGENT_URL` to a cloud URL: the browser must reach the agent on the same computer. The Vercel filesystem is ephemeral and Vercel does not run the separate worker process, so server processing and server history require a persistent backend deployment such as the Docker deployment described below.
 
 ### macOS release signing and notarization
 

@@ -126,6 +126,31 @@ export async function deleteProcessingJob(mode, id) {
   return fetchJson(endpoint(mode, `/jobs/${encodeURIComponent(id)}`), requestOptions(mode, { method: "DELETE" }));
 }
 
+export async function getLocalHistory(tool) {
+  const query = `?tool=${encodeURIComponent(tool)}`;
+  return fetchJson(`${agentBaseUrl()}/v1/history${query}`, requestOptions("local"));
+}
+
+export async function deleteLocalHistory(id) {
+  return fetchJson(`${agentBaseUrl()}/v1/history/${encodeURIComponent(id)}`, requestOptions("local", { method: "DELETE" }));
+}
+
+export async function deleteDownloadedFile(folderPath, filename) {
+  return fetchJson(`${agentBaseUrl()}/v1/files/delete`, requestOptions("local", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folderPath, filename }),
+  }));
+}
+
+export async function getServerHistory(tool) {
+  return fetchJson(`/api/history?tool=${encodeURIComponent(tool)}`);
+}
+
+export async function deleteServerHistory(id) {
+  return fetchJson(`/api/history/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 export function processingCapabilities(locations, mode) {
   return locations?.[mode]?.capabilities || null;
 }

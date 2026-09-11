@@ -5,6 +5,7 @@ import { AlertTriangle, CheckCircle2, Clock3, Download, FileCheck2, Info, Loader
 import { AppShell } from "./app-shell.jsx";
 import { FileDropzone, formatBytes } from "./file-dropzone.jsx";
 import { ProcessingMode } from "./processing-mode.jsx";
+import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 
 const imageFormats = [
@@ -44,6 +45,7 @@ export function ToolPage({ tool }) {
   const [locations, setLocations] = useState(null);
   const [processingMode, setProcessingMode] = useState("server");
   const [keepResult, setKeepResult] = useState(false);
+  const [activeView, setActiveView] = useState("tool");
 
   useEffect(() => {
     let active = true;
@@ -143,6 +145,8 @@ export function ToolPage({ tool }) {
 
   return <AppShell>
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> {eyebrow}</div><h1>{title}</h1><p>{description}</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Original files stay untouched</span></div></div>
+    <ToolViewTabs value={activeView} onChange={setActiveView} />
+    {activeView === "history" ? <ToolHistory tool={tool} /> : <>
     <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />
     <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${capabilities?.status === "ready" ? "ready" : ""}`} /><span>{capabilities?.status === "ready" ? `${processingMode === "local" ? "Local agent" : "Server"} worker online` : "Connecting to processing worker"}</span></div>{isImage ? <span>{heicReady ? (capabilities?.image?.heic ? "HEIC enabled" : "HEIC enabled via local fallback") : capabilities?.status === "ready" ? "HEIC unavailable" : "HEIC capability checking"}</span> : <span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery + fallback" : "Reference recovery · upload a reference") : capabilities?.status === "ready" ? "FFmpeg recovery enabled · reference recovery unavailable" : "Video capabilities checking"}</span>}</div>
     {job ? <JobStatusCard job={job} isImage={isImage} onReset={reset} /> : <div className="workspace-grid">
@@ -153,6 +157,7 @@ export function ToolPage({ tool }) {
     {!job && !isImage && <VideoRecoverySummary hasServerReference={serverReferenceReady} hasUntrunc={capabilities?.video?.untrunc} />}
     {error && <div className="error-banner"><AlertTriangle size={18} /><span>{error}</span></div>}
     {!job && <div className="trust-row"><div><CheckCircle2 size={16} /> No resizing by default</div><div><Clock3 size={16} /> Temporary processing only</div><div><ShieldCheck size={16} /> Private worker pipeline</div></div>}
+    </>}
   </AppShell>;
 }
 
@@ -203,7 +208,7 @@ function JobStatusCard({ job, isImage, onReset }) {
     {done && job.result && !isImage && <ResultVideoPreview result={job.result} />}
     {done && job.result && <div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div>{isImage && job.result.targetSizeKb && <div><span>Size target</span><strong>{job.result.targetMet ? `Near ${job.result.targetSizeKb} KB` : "Not reached"}</strong></div>}{isImage && job.result.width && <div><span>Resolution</span><strong>{job.result.width} × {job.result.height}</strong></div>}<div><span>Method</span><strong>{job.result.method || "Completed"}</strong></div></div>}
     {job.warnings.length > 0 && <div className="warning-list">{job.warnings.map((warning) => <div key={warning}><AlertTriangle size={16} /><span>{warning}</span></div>)}</div>}
-    <div className="job-actions">{done && job.result && <a className="primary-button" href={job.result.downloadUrl}><Download size={18} /> Download result</a>}<button className="secondary-button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Process another file" : "Cancel"}</button></div>
+    <div className="job-actions">{done && job.result && <a className="primary-button" href={job.result.downloadUrl} download={job.result.filename}><Download size={18} /> Download result</a>}<button className="secondary-button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Process another file" : "Cancel"}</button></div>
   </section>;
 }
 

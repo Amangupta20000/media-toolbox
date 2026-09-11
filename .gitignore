@@ -5,6 +5,7 @@ data/*
 !data/.gitkeep
 .env
 .env.local
+.env.vercel
 vendor/untrunc-macos/
 release/
 npm-debug.log*

@@ -7,6 +7,7 @@ import { firstAvailable, runCommand } from "../lib/command.js";
 
 const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-agent-test-"));
 process.env.DATA_DIR = path.join(testRoot, "data");
+process.env.MEDIA_TOOLBOX_DOWNLOADS_DIR = path.join(testRoot, "Downloads");
 process.env.AGENT_PORT = "0";
 const agent = await import("../agent/server.js");
 let server;
@@ -56,6 +57,39 @@ test("agent rejects a different origin after pairing", async () => {
   assert.equal(response.status, 401);
 });
 
+test("agent deletes a named downloaded server result only inside Downloads", async () => {
+  const downloadsDirectory = path.join(testRoot, "Downloads");
+  const resultName = "server-result.pdf";
+  await fs.mkdir(downloadsDirectory, { recursive: true });
+  await fs.writeFile(path.join(downloadsDirectory, resultName), "downloaded result");
+
+  const unauthorized = await fetch(url("/v1/files/delete"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
+    body: JSON.stringify({ folderPath: downloadsDirectory, filename: resultName }),
+  });
+  assert.equal(unauthorized.status, 401);
+
+  const deleted = await fetch(url("/v1/files/delete"), {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${sessionToken}`, "Content-Type": "application/json", Origin: "http://localhost:3000" },
+    body: JSON.stringify({ folderPath: downloadsDirectory, filename: resultName }),
+  });
+  assert.equal(deleted.status, 200);
+  assert.equal((await fs.stat(path.join(downloadsDirectory, resultName)).catch(() => null)), null);
+
+  const outsideDirectory = path.join(testRoot, "outside");
+  await fs.mkdir(outsideDirectory, { recursive: true });
+  await fs.writeFile(path.join(outsideDirectory, resultName), "must stay");
+  const rejected = await fetch(url("/v1/files/delete"), {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${sessionToken}`, "Content-Type": "application/json", Origin: "http://localhost:3000" },
+    body: JSON.stringify({ folderPath: outsideDirectory, filename: resultName }),
+  });
+  assert.equal(rejected.status, 400);
+  assert.equal((await fs.stat(path.join(outsideDirectory, resultName))).isFile(), true);
+});
+
 test("agent accepts an authenticated image job and returns a local result", async (t) => {
   const imageTool = await firstAvailable(["magick", "convert"]);
   if (!imageTool) {
@@ -71,6 +105,7 @@ test("agent accepts an authenticated image job and returns a local result", asyn
   form.append("format", "png");
   form.append("method", "imagemagick");
   form.append("jpegConfirmed", "false");
+  form.append("retention", "keep");
   form.append("source", new Blob([await fs.readFile(sourcePath)], { type: "image/png" }), "agent-source.png");
   const response = await fetch(url("/v1/jobs"), {
     method: "POST",
@@ -94,4 +129,17 @@ test("agent accepts an authenticated image job and returns a local result", asyn
   assert.equal(download.status, 200);
   assert.equal(download.headers.get("content-type"), "image/png");
   assert.equal((await download.arrayBuffer()).byteLength > 0, true);
+
+  const historyResponse = await fetch(url("/v1/history?tool=image-converter"), { headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" } });
+  assert.equal(historyResponse.status, 200);
+  const history = await historyResponse.json();
+  const retained = history.items.find((item) => item.id === createdJob.jobId);
+  assert.ok(retained);
+  assert.equal(retained.storedLocally, true);
+  assert.match(retained.location, /Results folder/);
+
+  const deleted = await fetch(url(`/v1/history/${createdJob.jobId}`), { method: "DELETE", headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" } });
+  assert.equal(deleted.status, 200);
+  const missing = await fetch(url(`/v1/jobs/${createdJob.jobId}`), { headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" } });
+  assert.equal(missing.status, 404);
 });

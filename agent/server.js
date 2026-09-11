@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomInt, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { getJob, getJobForPublic, claimNextJob, deleteJob, listExpiredJobs, updateJob, appendJobLog } from "../lib/db.js";
+import { getJob, getJobForPublic, claimNextJob, deleteJob, listExpiredJobs, listRetainedJobs, updateJob, appendJobLog } from "../lib/db.js";
 import { config, paths } from "../lib/config.js";
 import { acceptMultipartJob } from "../lib/job-intake.js";
 import { firstAvailable, runCommand } from "../lib/command.js";
@@ -15,6 +15,7 @@ const AGENT_VERSION = process.env.AGENT_VERSION || "0.1.0";
 const PROTOCOL_VERSION = 1;
 const DEFAULT_PORT = 4789;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const HISTORY_TOOLS = new Set(["image-converter", "video-repair", "pdf-editor"]);
 const state = {
   server: null,
   port: DEFAULT_PORT,
@@ -107,6 +108,54 @@ function safeDownloadName(name) {
   return String(name || "download").replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+function isWithinDirectory(candidate, directory) {
+  const resolvedCandidate = path.resolve(candidate);
+  const resolvedDirectory = path.resolve(directory);
+  return resolvedCandidate === resolvedDirectory || resolvedCandidate.startsWith(`${resolvedDirectory}${path.sep}`);
+}
+
+function expandHomePath(value) {
+  const input = String(value || "").trim();
+  if (input === "~") return os.homedir();
+  if (input.startsWith("~/") || input.startsWith("~\\")) return path.join(os.homedir(), input.slice(2));
+  return input;
+}
+
+async function deleteDownloadedResult(folderPath, filename) {
+  const requestedFolder = expandHomePath(folderPath);
+  if (!requestedFolder || !path.isAbsolute(requestedFolder)) throw new Error("Enter an absolute Downloads folder path, such as ~/Downloads.");
+
+  const downloadRoot = path.resolve(config.downloadsDirectory);
+  const folder = path.resolve(requestedFolder);
+  if (!isWithinDirectory(folder, downloadRoot)) throw new Error("For safety, choose the Downloads folder or a folder inside it.");
+
+  let realRoot;
+  let realFolder;
+  try {
+    realRoot = await fsp.realpath(downloadRoot);
+    realFolder = await fsp.realpath(folder);
+  } catch {
+    throw new Error("The Downloads folder could not be found on this device.");
+  }
+  if (!isWithinDirectory(realFolder, realRoot)) throw new Error("The selected folder is not inside the Downloads folder.");
+
+  const requestedName = String(filename || "").trim();
+  if (!requestedName || requestedName === "." || requestedName === ".." || requestedName.includes("\0") || requestedName.includes("/") || requestedName.includes("\\") || path.basename(requestedName) !== requestedName) {
+    throw new Error("The downloaded filename is invalid.");
+  }
+  const target = path.resolve(realFolder, requestedName);
+  if (!isWithinDirectory(target, realRoot)) throw new Error("The requested file is outside the Downloads folder.");
+
+  let targetStat;
+  try { targetStat = await fsp.lstat(target); } catch (error) {
+    if (error?.code === "ENOENT") throw new Error(`The downloaded file \"${requestedName}\" was not found in that folder.`);
+    throw error;
+  }
+  if (!targetStat.isFile() || targetStat.isSymbolicLink()) throw new Error("The matching download is not a regular file.");
+  await fsp.unlink(target);
+  return requestedName;
+}
+
 function rawResult(job) {
   if (!job?.result_json) return null;
   try { return JSON.parse(job.result_json); } catch { return null; }
@@ -118,7 +167,6 @@ function localJob(job, token) {
   const base = `http://127.0.0.1:${state.port}`;
   value.result.downloadUrl = `${base}/v1/jobs/${encodeURIComponent(job.id)}/download?access_token=${encodeURIComponent(token)}`;
   value.result.previewUrl = `${base}/v1/jobs/${encodeURIComponent(job.id)}/download?preview=1&access_token=${encodeURIComponent(token)}`;
-  if (job.tool === "pdf-editor") value.result.previewUrl = `${base}/v1/jobs/${encodeURIComponent(job.id)}/preview?access_token=${encodeURIComponent(token)}`;
   return value;
 }
 
@@ -317,6 +365,29 @@ async function handle(request, response) {
     }
   }
 
+  if (url.pathname === "/v1/history" && request.method === "GET") {
+    const tool = String(url.searchParams.get("tool") || "").trim();
+    if (!HISTORY_TOOLS.has(tool)) return json(response, 400, { error: "Choose a supported tool for history." }, request, origin);
+    const items = listRetainedJobs(tool)
+      .filter((row) => {
+        const resultPath = resultPathFor(row);
+        return Boolean(resultPath && fs.existsSync(resultPath));
+      })
+      .map((row) => ({ ...localJob(row, auth.token), storedLocally: true, location: "Local agent Results folder" }));
+    return json(response, 200, { items }, request, origin);
+  }
+
+  if (url.pathname === "/v1/files/delete" && request.method === "POST") {
+    try {
+      const body = await readJson(request);
+      const deleted = await deleteDownloadedResult(body.folderPath, body.filename);
+      return json(response, 200, { ok: true, deleted }, request, origin);
+    } catch (error) {
+      const status = /not found/i.test(error?.message || "") ? 404 : 400;
+      return json(response, status, { error: error instanceof Error ? error.message : "The downloaded file could not be deleted." }, request, origin);
+    }
+  }
+
   if (url.pathname === "/v1/jobs" && request.method === "POST") {
     const id = randomUUID();
     const jobDir = path.join(paths.jobs, id);
@@ -352,6 +423,18 @@ async function handle(request, response) {
       await cleanupJob(id);
       return json(response, 200, { ok: true }, request, origin);
     }
+  }
+
+  const historyMatch = url.pathname.match(/^\/v1\/history\/([^/]+)$/);
+  if (historyMatch && request.method === "DELETE") {
+    const id = decodeURIComponent(historyMatch[1]);
+    const job = getJob(id);
+    if (!job) return json(response, 404, { error: "History item not found." }, request, origin);
+    let options = {};
+    try { options = JSON.parse(job.options_json || "{}"); } catch { /* treat as non-retained */ }
+    if (job.status !== "completed" || options.retention !== "keep") return json(response, 404, { error: "This result is not a retained history item." }, request, origin);
+    await cleanupJob(id);
+    return json(response, 200, { ok: true, deleted: id }, request, origin);
   }
 
   return json(response, 404, { error: "Agent route not found." }, request, origin);
