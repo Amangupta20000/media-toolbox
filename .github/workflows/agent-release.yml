@@ -36,12 +36,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for variable in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-            if [ -z "${!variable:-}" ]; then
-              echo "Missing required GitHub Secret for macOS release signing: $variable"
-              exit 1
-            fi
-          done
+          if [ -n "${CSC_LINK:-}" ] && [ -n "${CSC_KEY_PASSWORD:-}" ] && \
+             [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ] && \
+             [ -n "${APPLE_TEAM_ID:-}" ]; then
+            echo "All macOS signing and notarization credentials are configured."
+          else
+            echo "::warning::macOS signing credentials are incomplete; this build will be unsigned and may show a Gatekeeper warning."
+          fi
       - name: Package macOS installer
         if: matrix.platform == 'mac'
         env:
