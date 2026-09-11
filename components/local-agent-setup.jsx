@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Download, ExternalLink, Laptop, LoaderCircle, RefreshCw, ShieldCheck, TerminalSquare, XCircle } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { agentBaseUrl, pairLocalAgent, probeLocalAgent } from "./processing-client.js";
@@ -13,13 +13,22 @@ export function LocalAgentSetup() {
   const [code, setCode] = useState("");
   const [pairing, setPairing] = useState(false);
   const [error, setError] = useState("");
+  const checkingRef = useRef(false);
 
   const check = useCallback(async () => {
+    if (checkingRef.current) return;
+    checkingRef.current = true;
     setError("");
     try { setStatus(await probeLocalAgent()); } catch (checkError) { setStatus({ available: false, connected: false, error: checkError instanceof Error ? checkError.message : "The local agent is not running." }); }
+    finally { checkingRef.current = false; }
   }, []);
 
-  useEffect(() => { check(); const timer = window.setInterval(check, 5000); return () => window.clearInterval(timer); }, [check]);
+  useEffect(() => {
+    check();
+    if (pairing) return undefined;
+    const timer = window.setInterval(check, 5000);
+    return () => window.clearInterval(timer);
+  }, [check, pairing]);
 
   const pair = async (event) => {
     event.preventDefault();
