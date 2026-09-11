@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "description": "Private media conversion, repair, and PDF editing tools with an optional local processing agent.",
-  "author": "Media Toolbox",
+  "author": {
+    "name": "Media Toolbox",
+    "email": "support@media-toolbox.app"
+  },
   "type": "module",
   "engines": {
     "node": ">=20.9.0",
