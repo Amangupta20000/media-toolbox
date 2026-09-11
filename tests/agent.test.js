@@ -44,6 +44,11 @@ test("agent reports health, rejects unauthenticated jobs, and pairs with a one-t
 
   const capabilities = await fetch(url("/v1/capabilities"), { headers: { Authorization: `Bearer ${paired.token}`, Origin: "http://localhost:3000" } });
   assert.equal(capabilities.status, 200);
+
+  // Native/non-browser callers may omit Origin. A valid paired token must
+  // still authorize the request; this also covers the browser pairing race.
+  const capabilitiesWithoutOrigin = await fetch(url("/v1/capabilities"), { headers: { Authorization: `Bearer ${paired.token}` } });
+  assert.equal(capabilitiesWithoutOrigin.status, 200);
 });
 
 test("agent rejects a different origin after pairing", async () => {

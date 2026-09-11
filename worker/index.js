@@ -7,6 +7,13 @@ import { config, paths, untruncCandidates } from "../lib/config.js";
 import { appendJobLog, claimNextJob, deleteJob, getJob, listExpiredJobs, updateJob } from "../lib/db.js";
 import { commandExists, firstAvailable, runCommand } from "../lib/command.js";
 
+let sharpPromise;
+
+async function loadSharp() {
+  if (!sharpPromise) sharpPromise = import("sharp").then((module) => module.default || module).catch(() => null);
+  return sharpPromise;
+}
+
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -162,6 +169,27 @@ async function imageConvert(imageTool, args) {
   if (result.code !== 0) throw new Error(result.stderr.trim() || "The image conversion failed.");
 }
 
+async function sharpMetadata(source) {
+  const sharp = await loadSharp();
+  if (!sharp) throw new Error("The bundled image engine is unavailable.");
+  const metadata = await sharp(source).metadata();
+  if (!metadata.width || !metadata.height) throw new Error("The image dimensions could not be read.");
+  return { format: metadata.format || "unknown", width: metadata.width, height: metadata.height, channels: metadata.hasAlpha ? "rgba" : "" };
+}
+
+async function sharpConvert(source, destination, targetFormat, quality) {
+  const sharp = await loadSharp();
+  if (!sharp) throw new Error("The bundled image engine is unavailable.");
+  if (targetFormat === "heic") throw new Error("HEIC output needs ImageMagick/libheif or macOS sips on this device.");
+  let pipeline = sharp(source);
+  if (targetFormat === "jpeg") pipeline = pipeline.jpeg({ quality: quality === undefined ? 90 : quality });
+  else if (targetFormat === "png") pipeline = pipeline.png({ compressionLevel: 9 });
+  else if (targetFormat === "tiff") pipeline = pipeline.tiff({ quality: quality === undefined ? 90 : quality });
+  else if (targetFormat === "gif") pipeline = pipeline.gif();
+  else throw new Error(`The bundled image engine cannot create ${targetFormat.toUpperCase()} files.`);
+  await pipeline.toFile(destination);
+}
+
 async function sipsConvert(source, destination, targetFormat, quality) {
   const args = ["-s", "format", targetFormat];
   if (quality !== undefined) args.push("-s", "formatOptions", String(quality));
@@ -271,7 +299,8 @@ async function processImage(job) {
   if (!["auto", "imagemagick", "sips"].includes(requestedMethod)) throw new Error("Choose a supported processing method.");
   const imageTool = await firstAvailable(["magick", "convert"]);
   const sipsTool = await firstAvailable(["sips"]);
-  if (!imageTool && !sipsTool) throw new Error("ImageMagick is not installed in the worker image.");
+  const sharpTool = await loadSharp();
+  if (!imageTool && !sipsTool && !sharpTool) throw new Error("No image conversion engine is available in the worker.");
   if (requestedMethod === "imagemagick" && !imageTool) throw new Error("ImageMagick is not available in this worker.");
   if (requestedMethod === "sips" && !sipsTool) throw new Error("macOS sips is not available in this worker. Select Auto or ImageMagick.");
 
@@ -281,14 +310,19 @@ async function processImage(job) {
     ? "sips"
     : requestedMethod === "imagemagick"
       ? imageTool
-      : (heicSource || heicTarget || !imageTool) && sipsTool ? "sips" : imageTool;
+      : (heicSource || heicTarget || !imageTool) && sipsTool ? "sips" : imageTool || "sharp";
   let metadata;
   try {
-    metadata = processingTool === "sips" ? await sipsMetadata(job.source_path) : await imageMetadata(processingTool, job.source_path);
+    metadata = processingTool === "sips" ? await sipsMetadata(job.source_path) : processingTool === "sharp" ? await sharpMetadata(job.source_path) : await imageMetadata(processingTool, job.source_path);
   } catch (error) {
-    if (requestedMethod !== "auto" || !sipsTool || processingTool === "sips") throw error;
-    processingTool = "sips";
-    metadata = await sipsMetadata(job.source_path);
+    if (requestedMethod !== "auto" || processingTool === "sips" || (!sipsTool && !sharpTool)) throw error;
+    if (sipsTool) {
+      processingTool = "sips";
+      metadata = await sipsMetadata(job.source_path);
+    } else {
+      processingTool = "sharp";
+      metadata = await sharpMetadata(job.source_path);
+    }
   }
   const inputFormat = normalizeImageFormat(metadata.format, job.source_name);
   const targetFormat = options.format === "original" ? inputFormat : options.format;
@@ -314,6 +348,8 @@ async function processImage(job) {
   };
   const convertImage = (destination, quality) => processingTool === "sips"
     ? sipsConvert(job.source_path, destination, targetFormat, quality)
+    : processingTool === "sharp"
+      ? sharpConvert(job.source_path, destination, targetFormat, quality)
     : imageConvert(processingTool, convertArgs(destination, quality));
   const convertPngPalette = (destination, colors) => imageConvert(processingTool, [
     job.source_path,
@@ -342,7 +378,7 @@ async function processImage(job) {
   if (options.format === "original" && !targetBytes) {
     update(job.id, 45, "Copying source", "No re-encoding was requested.");
     await fsp.copyFile(job.source_path, outputPath);
-  } else if (targetBytes && targetFormat === "png" && processingTool !== "sips") {
+  } else if (targetBytes && targetFormat === "png" && processingTool !== "sips" && processingTool !== "sharp") {
     update(job.id, 25, "Checking PNG size", "Trying a lossless PNG conversion first.");
     const losslessPath = path.join(workDir, "png-lossless.png");
     await convertImage(losslessPath);
@@ -420,13 +456,13 @@ async function processImage(job) {
   }
   let outputMetadata;
   try {
-    outputMetadata = processingTool === "sips" ? await sipsMetadata(outputPath) : await imageMetadata(processingTool, outputPath);
+    outputMetadata = processingTool === "sips" ? await sipsMetadata(outputPath) : processingTool === "sharp" ? await sharpMetadata(outputPath) : await imageMetadata(processingTool, outputPath);
   } catch (error) {
     if (!paddingState) throw error;
     await fsp.writeFile(outputPath, paddingState.original);
     paddingState = null;
     warnings.push("The requested target could not be padded safely for this image format; the unpadded conversion was kept.");
-    outputMetadata = processingTool === "sips" ? await sipsMetadata(outputPath) : await imageMetadata(processingTool, outputPath);
+    outputMetadata = processingTool === "sips" ? await sipsMetadata(outputPath) : processingTool === "sharp" ? await sharpMetadata(outputPath) : await imageMetadata(processingTool, outputPath);
   }
   const outputBytes = await bytes(outputPath);
   if (outputMetadata.width !== metadata.width || outputMetadata.height !== metadata.height) {
@@ -452,7 +488,7 @@ async function processImage(job) {
     targetSizeKb: options.maxSizeKb,
     inputFormat,
     outputFormat: targetFormat,
-    method: options.format === "original" && !targetBytes ? "Original-format copy" : processingTool === "sips" ? "macOS sips fallback" : "ImageMagick conversion",
+    method: options.format === "original" && !targetBytes ? "Original-format copy" : processingTool === "sips" ? "macOS sips fallback" : processingTool === "sharp" ? "Bundled image engine" : "ImageMagick conversion",
   };
   appendJobLog(job.id, `Created ${outputName} successfully.`, "complete");
   updateJob(job.id, { status: "completed", progress: 100, stage: "Complete", message: "The image is ready to download.", warnings, result });
@@ -468,12 +504,17 @@ async function embedPdfImage(pdf, page, workDir, index) {
   if (imageExtension === "png" || page.imageMime === "image/png") return pdf.embedPng(imageBytes);
   if (isJpegImage(page.imageName || page.imagePath, page.imageMime)) return pdf.embedJpg(imageBytes);
 
-  const imageTool = await firstAvailable(["magick", "convert"]);
-  if (!imageTool) throw new Error(`${page.imageName || "The inserted image"} needs ImageMagick for PDF embedding.`);
   const normalizedPath = path.join(workDir, `pdf-image-${index}.png`);
-  const command = imageTool === "magick" ? imageTool : "convert";
-  const normalized = await runCommand(command, [page.imagePath, "-auto-orient", `png32:${normalizedPath}`]);
-  if (normalized.code !== 0 || !fs.existsSync(normalizedPath)) throw new Error(`${page.imageName || "The inserted image"} could not be normalized for PDF embedding.`);
+  const imageTool = await firstAvailable(["magick", "convert"]);
+  if (imageTool) {
+    const command = imageTool === "magick" ? imageTool : "convert";
+    const normalized = await runCommand(command, [page.imagePath, "-auto-orient", `png32:${normalizedPath}`]);
+    if (normalized.code !== 0 || !fs.existsSync(normalizedPath)) throw new Error(`${page.imageName || "The inserted image"} could not be normalized for PDF embedding.`);
+  } else {
+    const sharp = await loadSharp();
+    if (!sharp) throw new Error(`${page.imageName || "The inserted image"} needs an image engine for PDF embedding.`);
+    await sharp(page.imagePath).rotate().png().toFile(normalizedPath);
+  }
   return pdf.embedPng(await fsp.readFile(normalizedPath));
 }
 
@@ -746,16 +787,27 @@ async function processJob(job) {
 async function writeCapabilities() {
   const imageTool = await firstAvailable(["magick", "convert"]);
   const identify = await firstAvailable(["identify"]);
-  let heic = false;
+  const sips = await commandExists("sips");
+  const heifTool = await firstAvailable(["heif-convert", "heif-enc"]);
+  let imageMagickHeic = false;
   if (identify) {
     const result = await runCommand(identify, ["-list", "format"], { timeoutMs: 5000 });
-    heic = result.code === 0 && /HEIC|HEIF/i.test(result.stdout);
+    imageMagickHeic = result.code === 0 && /HEIC|HEIF/i.test(result.stdout);
   }
+  // macOS sips is a supported HEIC path even when the ImageMagick build does
+  // not expose a HEIC coder. Keep the lower-level libheif flag separate so the
+  // UI can explain which implementation is actually available.
+  const sharp = await loadSharp();
+  const sharpHeic = Boolean(sharp?.format?.heif?.input);
+  const heic = imageMagickHeic || sips || sharpHeic;
+  const libheif = imageMagickHeic || Boolean(heifTool) || sharpHeic;
+  const ffmpeg = await commandExists("ffmpeg");
+  const mkvmerge = await commandExists("mkvmerge");
   const values = {
     status: "ready",
     checkedAt: new Date().toISOString(),
-    image: { imagemagick: Boolean(imageTool), sips: await commandExists("sips"), heic, libheif: heic, formats: ["jpeg", "png", "heic", "tiff", "gif", "bmp"] },
-    video: { ffmpeg: await commandExists("ffmpeg"), ffprobe: await commandExists("ffprobe"), mkvmerge: await commandExists("mkvmerge"), untrunc: Boolean(await firstAvailable(untruncCandidates)), defaultReference: fs.existsSync(config.untruncReferencePath) },
+    image: { imagemagick: Boolean(imageTool), sharp: Boolean(sharp), sips, heic: heic || sips, libheif, formats: ["jpeg", "png", "heic", "tiff", "gif", "bmp"] },
+    video: { ffmpeg, ffprobe: await commandExists("ffprobe"), mkvmerge, mkvFallback: ffmpeg, untrunc: Boolean(await firstAvailable(untruncCandidates)), defaultReference: fs.existsSync(config.untruncReferencePath) },
   };
   await fsp.mkdir(config.dataDir, { recursive: true });
   await fsp.writeFile(paths.capabilities, JSON.stringify(values, null, 2));

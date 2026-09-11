@@ -24,6 +24,20 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Install macOS Untrunc build dependency
+        if: matrix.platform == 'mac'
+        run: brew install yasm
+      - name: Install Linux Untrunc build dependencies
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y ca-certificates g++ git make wget xz-utils yasm
+      - name: Prepare bundled Untrunc on macOS or Linux
+        if: matrix.platform != 'win'
+        shell: bash
+        run: bash scripts/prepare-untrunc.sh
+      - name: Prepare bundled Untrunc on Windows
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: ./scripts/prepare-untrunc-windows.ps1
       - run: npm ci --legacy-peer-deps
       - name: Check macOS signing credentials
         if: matrix.platform == 'mac'

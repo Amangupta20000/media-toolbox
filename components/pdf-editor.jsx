@@ -35,7 +35,11 @@ function isImage(file) {
 }
 
 async function loadPdfLibrary() {
-  return import("pdfjs-dist/legacy/build/pdf.mjs");
+  const library = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  if (typeof window !== "undefined" && library.GlobalWorkerOptions) {
+    library.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url).toString();
+  }
+  return library;
 }
 
 async function inspectPdfOnServer(file) {
@@ -53,7 +57,7 @@ async function loadPdfFile(file, pdfLibrary, { allowServerFallback = false } = {
   let browserError = null;
   if (pdfLibrary) {
     try {
-      const task = pdfLibrary.getDocument({ data, disableWorker: true });
+      const task = pdfLibrary.getDocument({ data });
       const documentProxy = await task.promise;
       return { data, documentProxy, pageCount: documentProxy.numPages, fallbackDocument: null, pageSizes: null, serverFallback: false };
     } catch (error) {
@@ -71,7 +75,7 @@ async function loadPdfFile(file, pdfLibrary, { allowServerFallback = false } = {
   } catch (fallbackError) {
     if (!allowServerFallback) {
       const detail = fallbackError instanceof Error ? fallbackError.message : browserError?.message;
-      throw new Error(detail ? `The browser PDF preview and editor parser could not read this PDF: ${detail}` : "This PDF could not be read in Browser mode. Choose Local agent or Server.");
+      throw new Error(detail ? `The PDF preview and editor parser could not read this PDF: ${detail}` : "This PDF could not be read. Choose Local agent or Server.");
     }
     try {
       const inspection = await inspectPdfOnServer(file);
@@ -126,47 +130,124 @@ function fallbackThumbnail(label) {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-async function exportPdfInBrowser(pdfFiles, pages, pdfLibrary, onProgress) {
-  const { PDFDocument, degrees } = await import("pdf-lib");
-  const output = await PDFDocument.create();
-  const sourceDocuments = await Promise.all(pdfFiles.map(async (record) => PDFDocument.load(await record.file.arrayBuffer())));
+function withTimeout(promise, timeoutMs, message) {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    Promise.resolve(promise).then((value) => {
+      window.clearTimeout(timer);
+      resolve(value);
+    }, (error) => {
+      window.clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
+async function renderPdfPageToJpeg(pdfPage) {
+  const baseViewport = pdfPage.getViewport({ scale: 1, rotation: 0 });
+  const scale = Math.min(1, 1200 / Math.max(1, baseViewport.width));
+  const viewport = pdfPage.getViewport({ scale, rotation: 0 });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.ceil(viewport.width));
+  canvas.height = Math.max(1, Math.ceil(viewport.height));
+  await withTimeout(pdfPage.render({ canvasContext: canvas.getContext("2d"), viewport }).promise, 15000, "A PDF page took too long to render in Browser mode.");
+  const blob = await withTimeout(new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92)), 30000, "The browser could not encode a PDF page.");
+  if (!blob) throw new Error("The browser could not encode a PDF page.");
+  return blob.arrayBuffer();
+}
+
+async function rasterizeBrowserPages(pages, sourceDocuments, preparedPages, onProgress) {
+  const rasterPages = [];
   for (const [index, page] of pages.entries()) {
-    let target;
+    const preparedPage = preparedPages[index];
     if (page.kind === "source") {
-      const [copied] = await output.copyPages(sourceDocuments[page.pdfIndex], [page.pageIndex]);
-      target = output.addPage(copied);
+      const documentProxy = sourceDocuments?.[page.pdfIndex];
+      if (!documentProxy) throw new Error("This PDF page cannot be rendered in Browser mode. Choose Local agent or Server for this file.");
+      onProgress?.(17);
+      const pdfPage = page.pdfPage || await withTimeout(documentProxy.getPage(page.pageIndex + 1), 60000, "A PDF page took too long to load in Browser mode.");
+      onProgress?.(18);
+      const bytes = await renderPdfPageToJpeg(pdfPage);
+      rasterPages.push({ kind: "raster", width: page.width, height: page.height, rotation: page.rotation || 0, baseImage: { extension: ".jpg", bytes }, images: preparedPage.images || [] });
     } else {
-      target = output.addPage([page.width, page.height]);
-      if (page.rotation) target.setRotation(degrees(page.rotation));
+      rasterPages.push({ kind: "blank", width: page.width, height: page.height, rotation: page.rotation || 0, images: preparedPage.images || [] });
     }
-    const images = getPageImages(page);
-    for (const image of images) {
+    onProgress?.(18 + Math.round(((index + 1) / Math.max(1, pages.length)) * 44));
+  }
+  return rasterPages;
+}
+
+async function exportPdfInBrowser(pdfFiles, pages, sourceDocuments, pdfLibrary, onProgress) {
+  onProgress?.(1);
+  for (const [index, record] of pdfFiles.entries()) {
+    onProgress?.(Math.max(2, Math.round(((index + 1) / Math.max(1, pdfFiles.length)) * 8)));
+  }
+
+  const preparedPages = [];
+  for (const [index, page] of pages.entries()) {
+    const images = [];
+    for (const image of getPageImages(page)) {
       const extension = fileExtension(image.file?.name);
       if (![".png", ".jpg", ".jpeg"].includes(extension)) throw new Error("Browser PDF mode supports PNG, JPG, and JPEG images. Choose Local agent or Server for HEIC and other image formats.");
-      const bytes = new Uint8Array(await image.file.arrayBuffer());
-      const embedded = extension === ".png" ? await output.embedPng(bytes) : await output.embedJpg(bytes);
-      target.drawImage(embedded, { x: image.x, y: target.getHeight() - image.y - image.height, width: image.width, height: image.height });
+      const bytes = image.sourceBytes
+        ? image.sourceBytes.slice(0)
+        : await withTimeout(image.file.arrayBuffer(), 30000, `Timed out while reading ${image.file.name}. Choose Local agent or Server for this file.`);
+      images.push({ x: image.x, y: image.y, width: image.width, height: image.height, extension, bytes });
     }
-    onProgress?.(Math.round(((index + 1) / pages.length) * 70));
+    preparedPages.push({ kind: page.kind, pdfIndex: page.pdfIndex, pageIndex: page.pageIndex, width: page.width, height: page.height, rotation: page.rotation, images });
+    onProgress?.(10 + Math.round(((index + 1) / Math.max(1, pages.length)) * 6));
   }
-  const bytes = await output.save();
+
+  onProgress?.(16);
+  const rasterPages = await rasterizeBrowserPages(pages, sourceDocuments, preparedPages, onProgress);
+  onProgress?.(64);
+  const { PDFDocument, degrees } = await import("pdf-lib");
+  const output = await PDFDocument.create();
+  for (const [index, page] of rasterPages.entries()) {
+    const target = output.addPage([page.width, page.height]);
+    if (page.rotation) target.setRotation(degrees(page.rotation));
+    if (page.baseImage) {
+      const embeddedPage = await output.embedJpg(new Uint8Array(page.baseImage.bytes));
+      target.drawImage(embeddedPage, { x: 0, y: 0, width: target.getWidth(), height: target.getHeight() });
+    }
+    for (const image of page.images || []) {
+      const embedded = image.extension === ".png"
+        ? await output.embedPng(new Uint8Array(image.bytes))
+        : await output.embedJpg(new Uint8Array(image.bytes));
+      target.drawImage(embedded, {
+        x: image.x,
+        y: target.getHeight() - image.y - image.height,
+        width: image.width,
+        height: image.height,
+      });
+    }
+    onProgress?.(64 + Math.round(((index + 1) / Math.max(1, rasterPages.length)) * 8));
+  }
+  const bytes = new Uint8Array(await withTimeout(output.save(), 120000, "Browser PDF export took too long while saving the file. Try Local agent or Server for this file."));
   const previewImages = [];
+  let previewError = null;
   if (pdfLibrary) {
-    const documentProxy = await pdfLibrary.getDocument({ data: bytes, disableWorker: true }).promise;
-    for (let pageNumber = 1; pageNumber <= documentProxy.numPages; pageNumber += 1) {
-      const pdfPage = await documentProxy.getPage(pageNumber);
-      const viewport = pdfPage.getViewport({ scale: Math.min(1.1, 720 / pdfPage.getViewport({ scale: 1 }).width) });
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.ceil(viewport.width));
-      canvas.height = Math.max(1, Math.ceil(viewport.height));
-      await pdfPage.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-      previewImages.push(canvas.toDataURL("image/jpeg", 0.84));
-      onProgress?.(70 + Math.round((pageNumber / documentProxy.numPages) * 30));
+    try {
+      await withTimeout((async () => {
+        const documentProxy = await pdfLibrary.getDocument({ data: bytes }).promise;
+        for (let pageNumber = 1; pageNumber <= documentProxy.numPages; pageNumber += 1) {
+          const pdfPage = await documentProxy.getPage(pageNumber);
+          const viewport = pdfPage.getViewport({ scale: Math.min(1.1, 720 / pdfPage.getViewport({ scale: 1 }).width) });
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.ceil(viewport.width));
+          canvas.height = Math.max(1, Math.ceil(viewport.height));
+          await pdfPage.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+          previewImages.push(canvas.toDataURL("image/jpeg", 0.84));
+          onProgress?.(70 + Math.round((pageNumber / documentProxy.numPages) * 30));
+        }
+      })(), 120000, "The browser preview took too long to render.");
+    } catch (error) {
+      previewError = error instanceof Error ? error.message : "The output preview could not be rendered.";
     }
   }
+  onProgress?.(100);
   const blob = new Blob([bytes], { type: "application/pdf" });
   const downloadUrl = URL.createObjectURL(blob);
-  return { filename: pdfFiles.length === 1 ? `${pdfFiles[0].name.replace(/\.pdf$/i, "")}_edited.pdf` : "merged_edited.pdf", bytes: bytes.byteLength, pageCount: pages.length, method: "Browser PDF editor", downloadUrl, previewUrl: downloadUrl, previewImages };
+  return { filename: pdfFiles.length === 1 ? `${pdfFiles[0].name.replace(/\.pdf$/i, "")}_edited.pdf` : "merged_edited.pdf", bytes: bytes.byteLength, pageCount: pages.length, method: "Browser PDF editor", downloadUrl, previewUrl: downloadUrl, previewImages, previewError };
 }
 
 export function PdfEditor() {
@@ -186,8 +267,8 @@ export function PdfEditor() {
   const [pdfDragActive, setPdfDragActive] = useState(false);
   const [continuingFile, setContinuingFile] = useState(null);
   const [locations, setLocations] = useState(null);
-  const [processingMode, setProcessingMode] = useState("browser");
-  const [jobMode, setJobMode] = useState("browser");
+  const [processingMode, setProcessingMode] = useState("local");
+  const [jobMode, setJobMode] = useState("local");
   const [keepResult, setKeepResult] = useState(false);
   const pdfInputRef = useRef(null);
   const imageInputRef = useRef(null);
@@ -203,10 +284,21 @@ export function PdfEditor() {
   const documentsRef = useRef([]);
   const imageUrlsRef = useRef(new Set());
   const browserResultUrlRef = useRef("");
+  const pdfLibraryPromiseRef = useRef(null);
+
+  const ensurePdfLibrary = () => {
+    if (!pdfLibraryPromiseRef.current) {
+      pdfLibraryPromiseRef.current = loadPdfLibrary().catch((error) => {
+        pdfLibraryPromiseRef.current = null;
+        throw error;
+      });
+    }
+    return pdfLibraryPromiseRef.current;
+  };
 
   useEffect(() => {
     let active = true;
-    loadPdfLibrary().then((library) => { if (active) setPdfLibrary(library); }).catch(() => { if (active) setError("PDF preview support could not be loaded. Refresh and try again."); });
+    ensurePdfLibrary().then((library) => { if (active) setPdfLibrary(library); }).catch(() => { if (active) setError("PDF preview support could not be loaded. Refresh and try again."); });
     return () => { active = false; };
   }, []);
 
@@ -234,27 +326,41 @@ export function PdfEditor() {
 
     setLoadingFiles(true);
     try {
+      // File selection can happen before the initial PDF.js import finishes.
+      // Wait for the same cached promise here so a valid PDF is not permanently
+      // downgraded to the non-rendering pdf-lib fallback.
+      let activePdfLibrary = pdfLibrary;
+      if (!activePdfLibrary) {
+        try {
+          activePdfLibrary = await ensurePdfLibrary();
+          setPdfLibrary(activePdfLibrary);
+        } catch (libraryError) {
+          if (processingMode === "browser") throw libraryError;
+        }
+      }
       let pdfIndex = pdfFiles.length;
       const newFiles = [];
       const newPages = [];
       let thumbnailFailures = 0;
       let browserFallbacks = 0;
       let serverFallbacks = 0;
-      for (const file of selectedFiles) {
-        const loaded = await loadPdfFile(file, pdfLibrary, { allowServerFallback: processingMode === "server" });
-        const pdfDocument = loaded.documentProxy;
+    for (const file of selectedFiles) {
+      const loaded = await loadPdfFile(file, activePdfLibrary, { allowServerFallback: processingMode === "server" });
+      const pdfDocument = loaded.documentProxy;
         documentsRef.current[pdfIndex] = pdfDocument;
         if (loaded.fallbackDocument) browserFallbacks += 1;
         if (loaded.serverFallback) serverFallbacks += 1;
-        const fileRecord = { id: makeId(), file, name: file.name, pageCount: loaded.pageCount };
+        const fileRecord = { id: makeId(), file, name: file.name, pageCount: loaded.pageCount, sourceBytes: loaded.data };
         newFiles.push(fileRecord);
         for (let pageNumber = 1; pageNumber <= loaded.pageCount; pageNumber += 1) {
           let thumbnail;
+          let sourcePdfPage = null;
           if (loaded.fallbackDocument || loaded.serverFallback) {
             const size = loaded.fallbackDocument?.getPages()[pageNumber - 1]?.getSize() || loaded.pageSizes?.[pageNumber - 1] || A4;
             thumbnail = { thumbnail: loaded.previewToken ? `/api/pdf/preview?token=${encodeURIComponent(loaded.previewToken)}&page=${pageNumber}&thumbnail=1` : fallbackThumbnail(`Page ${pageNumber}`), width: size.width, height: size.height, rotation: size.rotation || 0, previewFallback: true };
           } else try {
             const pdfPage = await pdfDocument.getPage(pageNumber);
+            sourcePdfPage = pdfPage;
             const dimensions = pageDimensions(pdfPage);
             thumbnail = { thumbnail: null, ...dimensions };
           } catch (thumbnailError) {
@@ -262,7 +368,7 @@ export function PdfEditor() {
             const dimensions = thumbnailError?.pageDimensions || A4;
             thumbnail = { thumbnail: fallbackThumbnail(`Page ${pageNumber}`), width: dimensions.width, height: dimensions.height, rotation: dimensions.rotation || 0, previewFallback: true };
           }
-          newPages.push({ id: makeId(), kind: "source", pdfIndex, pageIndex: pageNumber - 1, sourceName: file.name, pageNumber, previewToken: loaded.previewToken || null, ...thumbnail });
+          newPages.push({ id: makeId(), kind: "source", pdfIndex, pageIndex: pageNumber - 1, sourceName: file.name, pageNumber, previewToken: loaded.previewToken || null, pdfPage: sourcePdfPage, ...thumbnail });
         }
         pdfIndex += 1;
       }
@@ -274,7 +380,7 @@ export function PdfEditor() {
       });
       if (browserFallbacks || serverFallbacks || thumbnailFailures) {
         const messages = [];
-        if (browserFallbacks) messages.push("Browser preview was unavailable, so a safe PDF parser was used");
+        if (browserFallbacks) messages.push("PDF preview was unavailable, so a safe PDF parser was used");
         if (serverFallbacks) messages.push("The browser used the server PDF reader to validate the document");
         if (thumbnailFailures) messages.push(`${thumbnailFailures} page preview${thumbnailFailures === 1 ? "" : "s"} could not be rendered`);
         setPreviewError(`${messages.join("; ")}. The PDF can still be edited and exported.`);
@@ -619,7 +725,7 @@ export function PdfEditor() {
         const y = Math.max(0, Math.min(selectedPage.height - height, (selectedPage.height - height) / 2 + offset));
         const url = URL.createObjectURL(file);
         imageUrlsRef.current.add(url);
-        addedImages.push({ id: makeId(), file, url, x, y, width, height, lockAspectRatio: true });
+        addedImages.push({ id: makeId(), file, sourceBytes: await file.arrayBuffer(), url, x, y, width, height, lockAspectRatio: true });
       }
       updatePage(selectedPage.id, { images: [...existingImages, ...addedImages] });
       setError("");
@@ -682,17 +788,24 @@ export function PdfEditor() {
 
   const submit = async () => {
     if (!pages.length) { setError("Add at least one page before exporting."); return; }
+    if (processingMode === "browser") {
+      setProcessingMode("local");
+      setError("Browser mode is temporarily unavailable. Choose Local agent or Server.");
+      return;
+    }
     if (processingMode !== "browser" && !pdfFiles.length) { setError("Add at least one PDF before exporting with Local agent or Server."); return; }
     if (processingMode !== "browser" && !isProcessingLocationReady(locations, processingMode)) { setError(processingMode === "local" ? "Start and pair the Local agent before exporting." : "Server processing is unavailable."); return; }
     setError("");
     setJobMode(processingMode);
     if (processingMode === "browser") {
       try {
+        const activePdfLibrary = pdfLibrary || await ensurePdfLibrary();
+        if (!pdfLibrary) setPdfLibrary(activePdfLibrary);
         const browserId = `browser-${makeId()}`;
         setJob({ id: browserId, status: "processing", progress: 0, stage: "Creating PDF in this browser", message: "The source PDFs are staying in this browser.", logs: [{ time: new Date().toISOString(), level: "info", message: "Browser PDF export started." }], warnings: [], error: null, result: null });
-        const result = await exportPdfInBrowser(pdfFiles, pages, pdfLibrary, (progress) => setJob((current) => current ? { ...current, progress, stage: progress < 70 ? "Copying and arranging pages" : "Rendering output preview", logs: [...(current.logs || []), { time: new Date().toISOString(), level: "info", message: `Browser export progress: ${progress}%.` }] } : current));
+        const result = await exportPdfInBrowser(pdfFiles, pages, documentsRef.current, activePdfLibrary, (progress) => setJob((current) => current ? { ...current, progress, stage: progress < 15 ? "Loading source PDFs" : progress < 70 ? "Copying and arranging pages" : progress < 75 ? "Creating final PDF" : "Rendering output preview", logs: [...(current.logs || []), { time: new Date().toISOString(), level: "info", message: `Browser export progress: ${progress}%.` }] } : current));
         browserResultUrlRef.current = result.downloadUrl;
-        setJob((current) => current ? { ...current, status: "completed", progress: 100, stage: "Complete", message: "The PDF was created in this browser.", logs: [...(current.logs || []), { time: new Date().toISOString(), level: "info", message: "Browser PDF export completed." }], result } : current);
+        setJob((current) => current ? { ...current, status: "completed", progress: 100, stage: "Complete", message: result.previewError ? "The PDF was created in this browser. Its download is ready; the on-page preview could not be rendered." : "The PDF was created in this browser.", logs: [...(current.logs || []), ...(result.previewError ? [{ time: new Date().toISOString(), level: "warn", message: "The PDF was created successfully, but the browser preview could not be rendered." }] : []), { time: new Date().toISOString(), level: "info", message: "Browser PDF export completed." }], result } : current);
       } catch (browserError) {
         setJob((current) => current ? { ...current, status: "failed", error: browserError instanceof Error ? browserError.message : "The PDF could not be created in the browser." } : current);
       }
@@ -729,7 +842,7 @@ export function PdfEditor() {
 
   return <AppShell>
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools · Beta <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · 50 MB each</span></div><h1>PDF editor</h1><p>Merge documents, reorder pages, remove pages, and add images to PDF pages or new blank pages.</p></div></div>
-    {!job && <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} allowBrowser />}
+    {!job && <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />}
     {job ? <PdfJobCard job={job} mode={jobMode} onReset={reset} onContinue={continueEditing} /> : <section className={`pdf-editor-shell ${pdfDragActive ? "pdf-drop-active" : ""}`} onDragOver={handlePdfDragOver} onDragLeave={handlePdfDragLeave} onDrop={handlePdfDrop}>
       <div className="pdf-editor-toolbar"><div><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDFS} PDFs · {pages.length} pages</span></div><div className="pdf-editor-actions"><button className="secondary-button" type="button" onClick={() => pdfInputRef.current?.click()} disabled={loadingFiles || pdfFiles.length >= MAX_PDFS}><Plus size={17} /> Add PDF</button><button className="secondary-button" type="button" onClick={addBlankPage}><FilePlus2 size={17} /> Blank page</button>{selectedPage && <button className="secondary-button" type="button" onClick={() => imageInputRef.current?.click()}><ImagePlus size={17} /> Add images</button>}{selectedPageImages.length > 0 && <button className="secondary-button" type="button" onClick={() => removeAllImages(selectedPage.id)}><Trash2 size={16} /> Remove images</button>}{selectedPage && <button className="icon-button delete-page-button" type="button" aria-label="Delete selected page" title="Delete selected page" onClick={() => deletePage(selectedPage.id)}><Trash2 size={17} /></button>}<button className="primary-button" type="button" onClick={submit} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles}><WandSparkles size={17} /> {uploadProgress ? `Uploading ${uploadProgress}%` : "Export PDF"}</button></div></div>
       <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { addPdfFiles(event.target.files); event.target.value = ""; }} />
@@ -957,5 +1070,7 @@ function PdfJobCard({ job: initialJob, mode = "server", onReset, onContinue }) {
   const done = job.status === "completed";
   const failed = job.status === "failed";
   const progress = Math.max(0, Math.min(100, job.progress || 0));
-  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : job.status === "queued" ? "Queued" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be created" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<div className="pdf-job-log"><div className="job-log-heading"><span>{mode === "browser" ? "Browser log" : "Worker log"}</span><span>{(job.logs || []).length} events</span></div><div className="job-log-list">{job.logs?.length ? job.logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for progress…</div>}</div></div>{done && job.result && <><div className="pdf-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>All {job.result.pageCount} pages</small></div><div className="pdf-result-preview-scroll" aria-label={`Preview of all ${job.result.pageCount} output pages`}>{Array.from({ length: job.result.pageCount }, (_, index) => { const pageNumber = index + 1; const src = job.result.previewImages?.[index] || (mode === "local" ? `${job.result.previewUrl}&page=${pageNumber}` : `/api/jobs/${job.id}/preview?page=${pageNumber}`); return <figure className="pdf-result-page" key={pageNumber}><img loading={pageNumber === 1 ? "eager" : "lazy"} src={src} alt={`Preview of page ${pageNumber} of ${job.result.filename}`} /><figcaption>Page {pageNumber}</figcaption></figure>; })}</div></div><div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Pages</span><strong>{job.result.pageCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div></>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={job.result.downloadUrl} download={job.result.filename}><Download size={18} /> Download PDF</a><button className="secondary-button" type="button" onClick={() => onContinue?.(job.result)}><FilePlus2 size={17} /> Continue editing</button></>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
+  const previewImages = job.result?.previewImages || [];
+  const previewLabel = previewImages.length && previewImages.length < (job.result?.pageCount || 0) ? `${previewImages.length} of ${job.result.pageCount} pages` : `All ${job.result?.pageCount || 0} pages`;
+  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : job.status === "queued" ? "Queued" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be created" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<div className="pdf-job-log"><div className="job-log-heading"><span>{mode === "browser" ? "Browser log" : "Worker log"}</span><span>{(job.logs || []).length} events</span></div><div className="job-log-list">{job.logs?.length ? job.logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for progress…</div>}</div></div>{done && job.result && <><div className="pdf-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>{previewLabel}</small></div>{previewImages.length ? <div className="pdf-result-preview-scroll" aria-label={`Preview of ${previewImages.length} output pages`}>{previewImages.map((src, index) => { const pageNumber = index + 1; return <figure className="pdf-result-page" key={pageNumber}><img loading={pageNumber === 1 ? "eager" : "lazy"} src={src} alt={`Preview of page ${pageNumber} of ${job.result.filename}`} /><figcaption>Page {pageNumber}</figcaption></figure>; })}</div> : mode === "browser" ? <div className="preview-unavailable"><AlertTriangle size={18} /><span>The PDF was created successfully, but this browser could not render the preview. Download the PDF to view it.</span></div> : <div className="pdf-result-preview-scroll" aria-label={`Preview of all ${job.result.pageCount} output pages`}>{Array.from({ length: job.result.pageCount }, (_, index) => { const pageNumber = index + 1; const src = mode === "local" ? `${job.result.previewUrl}&page=${pageNumber}` : `/api/jobs/${job.id}/preview?page=${pageNumber}`; return <figure className="pdf-result-page" key={pageNumber}><img loading={pageNumber === 1 ? "eager" : "lazy"} src={src} alt={`Preview of page ${pageNumber} of ${job.result.filename}`} /><figcaption>Page {pageNumber}</figcaption></figure>; })}</div>}{job.result.previewError && previewImages.length > 0 && <div className="pdf-preview-error"><AlertTriangle size={16} /><span>Preview rendering stopped after {previewImages.length} of {job.result.pageCount} pages. The complete PDF is ready to download.</span></div>}</div><div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Pages</span><strong>{job.result.pageCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div></>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={job.result.downloadUrl} download={job.result.filename}><Download size={18} /> Download PDF</a><button className="secondary-button" type="button" onClick={() => onContinue?.(job.result)}><FilePlus2 size={17} /> Continue editing</button></>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
 }

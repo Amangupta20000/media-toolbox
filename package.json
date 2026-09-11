@@ -30,6 +30,8 @@
     "electron-builder": "^26.0.12"
   },
   "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@ffprobe-installer/ffprobe": "^2.1.2",
     "better-sqlite3": "^11.10.0",
     "busboy": "^1.6.0",
     "lucide-react": "^0.468.0",
@@ -37,6 +39,7 @@
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.3.289",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "sharp": "^0.35.4"
   }
 }

@@ -1,17 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { Globe2, Laptop, Server, Settings2 } from "lucide-react";
+import { Laptop, Server, Settings2 } from "lucide-react";
 
 const labels = {
-  browser: ["Browser", "Private in this browser", Globe2],
   local: ["Local agent", "Files stay on this device", Laptop],
   server: ["Server", "Runs on the connected worker", Server],
 };
 
-export function ProcessingMode({ value, onChange, locations, allowBrowser = false, compact = false }) {
-  const modes = (allowBrowser ? ["browser", "local", "server"] : ["local", "server"]).filter((mode) => mode !== "server" || locations?.server?.available);
-  const ready = (mode) => mode === "browser" || Boolean(locations?.[mode]?.connected);
+export function ProcessingMode({ value, onChange, locations, compact = false }) {
+  const modes = ["local", "server"].filter((mode) => mode !== "server" || locations?.server?.available);
+  const ready = (mode) => Boolean(locations?.[mode]?.connected);
   return <div className={`processing-mode ${compact ? "compact" : ""}`}>
     <div className="processing-mode-heading"><span><Settings2 size={16} /> Processing location</span><small>Choose where this job runs</small></div>
     <div className="processing-mode-options">

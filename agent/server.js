@@ -277,7 +277,9 @@ async function handle(request, response) {
     return;
   }
   if (url.pathname === "/v1/health" && request.method === "GET") {
-    return json(response, 200, { ok: true, service: "media-toolbox-agent", agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, platform: process.platform, arch: process.arch, paired: state.allowedOrigins.size > 0 }, request, origin || request.headers.origin || null);
+    const requestOrigin = String(request.headers.origin || "").trim();
+    const paired = requestOrigin ? state.allowedOrigins.has(requestOrigin) : state.allowedOrigins.size > 0;
+    return json(response, 200, { ok: true, service: "media-toolbox-agent", agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, platform: process.platform, arch: process.arch, paired }, request, origin || request.headers.origin || null);
   }
   if (url.pathname === "/v1/pair" && request.method === "POST") {
     try {
@@ -302,7 +304,9 @@ async function handle(request, response) {
 
   const auth = authorize(request, url);
   if (!auth) return json(response, 401, { error: "Pair the website with the local agent first." }, request, origin);
-  if (origin !== auth.session.origin) return json(response, 403, { error: "This website origin is not paired with the local agent." }, request, origin);
+  // Native clients may not send an Origin header. If one is present, authorize()
+  // has already verified that it matches the origin used during pairing.
+  if (origin && origin !== auth.session.origin) return json(response, 403, { error: "This website origin is not paired with the local agent." }, request, origin);
 
   if (url.pathname === "/v1/capabilities" && request.method === "GET") {
     try {

@@ -1,6 +1,6 @@
 # Media Toolbox
 
-Private image conversion, video repair, and PDF editing tools. The website runs on any modern browser. Processing can run in the connected server, in the browser for PDF editing, or in the optional cross-platform Local agent. The frontend uses the Next.js Pages Router and plain JSX/JavaScript.
+Private image conversion, video repair, and PDF editing tools. The website runs on any modern browser. Processing can run in the connected server or in the optional cross-platform Local agent. The frontend uses the Next.js Pages Router and plain JSX/JavaScript.
 
 ## Features
 
@@ -11,13 +11,13 @@ Private image conversion, video repair, and PDF editing tools. The website runs 
 - Video recovery with lossless remux, MKV/WebM repair, optional Untrunc reference recovery, tolerant transcode, and video-only fallback.
 - Recovered video is validated with strict FFmpeg decoding; when Untrunc exposes decodable but damaged frames, the worker re-encodes them into a fresh H.264/AAC MP4 and reports the best-effort limitation.
 - PDF editor beta: load 1-5 PDFs (50 MB each), merge them, reorder or delete pages, add blank pages, and place/move/resize PNG, JPG, JPEG, or HEIC images on blank pages.
-- PDF Browser mode merges and exports without uploading the PDFs. Local and Server modes use the worker for files Browser mode cannot parse. All modes retain source page sizes and rotations and never modify the original PDFs. Inserted HEIC/TIFF/GIF/BMP images use the ImageMagick/libheif normalization path when needed. PDF page previews and thumbnails are rendered by the application; no browser PDF viewer is used.
+- PDF editor merges and exports through the Local agent or Server while retaining source page sizes and rotations and never modifying the original PDFs. Inserted HEIC/TIFF/GIF/BMP images use the ImageMagick/libheif normalization path when needed. PDF page previews and thumbnails are rendered by the application; no browser PDF viewer is used.
 - Responsive two-column workspace with a collapsible tool sidebar.
 - Drag-and-drop or browse upload controls.
 - Local in-browser image preview before upload, including transparency checkerboard support.
 - Background jobs with progress, live worker logs, and downloadable results.
 - Basic Auth protection and automatic temporary-file cleanup.
-- Processing location can be selected per job: Browser (PDF only), Local agent, or Server.
+- Processing location can be selected per job: Local agent or Server.
 
 ## Local processing agent
 
@@ -50,7 +50,7 @@ To enable signed releases:
 
 After the signed release is published, set `NEXT_PUBLIC_MACOS_AGENT_SIGNED=true` in the website environment so the setup page stops showing the unsigned-build workaround.
 
-The agent detects FFmpeg, ImageMagick/libheif, MKVToolNix, Poppler, and optional Untrunc on the host. Missing optional capabilities are shown instead of silently switching processing locations. Local jobs can either delete their final result after download or keep only the final result in the agent's Results folder.
+The packaged local agent includes platform-specific FFmpeg, ffprobe, Sharp image-processing binaries, and Untrunc for reference-based MP4 recovery. It prefers bundled binaries before checking the host. macOS uses built-in `sips` for HEIC when available; other platforms use the bundled HEIF-capable image engine when supported. Readable MKV/WebM files use FFmpeg without requiring MKVToolNix; MKVToolNix remains an optional enhanced damaged-container path. Optional capabilities are shown instead of silently switching processing locations. Local jobs can either delete their final result after download or keep only the final result in the agent's Results folder.
 
 ## Video repair reference rules
 
@@ -134,9 +134,9 @@ npm run build
 npm run start
 ```
 
-The local worker requires ImageMagick, libheif, FFmpeg, ffprobe, Poppler (`pdftoppm`), and optionally mkvmerge to be installed on the host. Docker is the recommended way to get a consistent Linux runtime.
+The packaged local agent supplies FFmpeg, ffprobe, Sharp, and Untrunc. ImageMagick, Poppler (`pdftoppm`), and MKVToolNix are optional host capabilities; macOS `sips` provides the HEIC fallback. Docker is the recommended way to get a consistent Linux runtime for the server worker.
 
-To enable truncated-MP4 recovery during local macOS development, run `npm run setup:untrunc`, then upload a healthy reference video recorded with the same device/app settings. The macOS helper is ignored by Docker builds; Linux Docker builds compile the pinned Untrunc helper inside the worker image. The web project has no implicit Record Go reference: a job's uploaded healthy reference is used for that job, or a deployment can explicitly set `UNTRUNC_REFERENCE_PATH` to a reference mounted on the server. The standalone `/Users/<your-user>/Desktop/RUN_SCRIPTS/recover_recording.command` remains a separate local macOS helper and can still use its local reference fallback.
+For local agent development, `npm run setup:untrunc` stages or builds the platform-specific Untrunc helper under `vendor/untrunc`. Release builds prepare Untrunc automatically for macOS, Windows, and Linux before packaging, so users do not install it separately. Upload a healthy reference video recorded with the same device/app settings when repairing missing MP4 metadata. The macOS helper is ignored by Docker builds; Linux Docker builds compile the pinned Untrunc helper inside the worker image. The web project has no implicit Record Go reference: a job's uploaded healthy reference is used for that job, or a deployment can explicitly set `UNTRUNC_REFERENCE_PATH` to a reference mounted on the server. The standalone `/Users/<your-user>/Desktop/RUN_SCRIPTS/recover_recording.command` remains a separate local macOS helper and can still use its local reference fallback.
 
 ## Operational notes
 

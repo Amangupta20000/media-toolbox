@@ -35,7 +35,11 @@ async function fetchJson(url, options = {}) {
     const response = await fetch(url, { cache: "no-store", ...options, signal: controller.signal });
     let payload = {};
     try { payload = await response.json(); } catch { /* non-JSON response */ }
-    if (!response.ok) throw new Error(payload.error || `Request failed (${response.status}).`);
+    if (!response.ok) {
+      const error = new Error(payload.error || `Request failed (${response.status}).`);
+      error.status = response.status;
+      throw error;
+    }
     return payload;
   } catch (error) {
     if (error?.name === "AbortError") throw new Error("The request timed out. Check that the local agent is running.");
@@ -53,9 +57,12 @@ export async function probeLocalAgent() {
   try {
     const capabilities = await fetchJson(`${base}/v1/capabilities`, { headers: { Authorization: `Bearer ${token}` } });
     return { available: true, connected: true, health, capabilities, baseUrl: base };
-  } catch {
-    clearAgentPairing();
-    return { available: true, connected: false, health, capabilities: null, baseUrl: base };
+  } catch (error) {
+    // Keep the token during network/startup failures. Only discard it when the
+    // agent explicitly says this session is no longer authorized.
+    const pairingRejected = error?.status === 401 || (error?.status === 403 && /origin is not paired|pair the website/i.test(error.message || ""));
+    if (pairingRejected) clearAgentPairing();
+    return { available: true, connected: false, health, capabilities: null, baseUrl: base, error: error?.message || "The local agent capabilities could not be read.", pairingRejected };
   }
 }
 

@@ -31,11 +31,21 @@ export function AppShell({ children }) {
 
   useEffect(() => {
     let active = true;
+    const handleAgentStatus = (event) => {
+      if (active) setLocalAgentConnected(Boolean(event.detail?.connected));
+    };
+    window.addEventListener("media-toolbox-agent-status", handleAgentStatus);
+
     const check = () => probeLocalAgent().then((value) => { if (active) setLocalAgentConnected(Boolean(value.connected)); }).catch(() => { if (active) setLocalAgentConnected(false); });
     check();
-    const timer = window.setInterval(check, 10000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, []);
+
+    // The local-agent page owns its pairing checks. This shell only does one
+    // status probe when a page is opened; repeated health polling is unnecessary.
+    return () => {
+      active = false;
+      window.removeEventListener("media-toolbox-agent-status", handleAgentStatus);
+    };
+  }, [pathname]);
 
   const toggleTheme = () => {
     setTheme((currentTheme) => {

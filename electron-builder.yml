@@ -6,6 +6,7 @@ files:
   - agent/**/*
   - lib/**/*
   - worker/**/*
+  - vendor/untrunc/**/*
   - components/processing-client.js
   - node_modules/**/*
   - package.json
@@ -14,6 +15,11 @@ extraMetadata:
   main: agent/electron-main.cjs
 asarUnpack:
   - node_modules/better-sqlite3/**
+  - node_modules/@ffmpeg-installer/**
+  - node_modules/@ffprobe-installer/**
+  - node_modules/sharp/**
+  - node_modules/@img/**
+  - vendor/untrunc/**
 npmRebuild: true
 mac:
   target:
