@@ -51,7 +51,17 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run agent:package -- --mac --publish never
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${CSC_LINK:-}" ] && [ -n "${CSC_KEY_PASSWORD:-}" ] && \
+             [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ] && \
+             [ -n "${APPLE_TEAM_ID:-}" ]; then
+            npm run agent:package -- --mac --publish never
+          else
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+            npm run agent:package -- --mac --publish never
+          fi
       - name: Package non-macOS installer
         if: matrix.platform != 'mac'
         run: npm run agent:package -- --${{ matrix.platform }} --publish never
