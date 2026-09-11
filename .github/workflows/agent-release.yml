@@ -25,7 +25,35 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --legacy-peer-deps
-      - run: npm run agent:package -- --${{ matrix.platform }} --publish never
+      - name: Check macOS signing credentials
+        if: matrix.platform == 'mac'
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for variable in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!variable:-}" ]; then
+              echo "Missing required GitHub Secret for macOS release signing: $variable"
+              exit 1
+            fi
+          done
+      - name: Package macOS installer
+        if: matrix.platform == 'mac'
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run agent:package -- --mac --publish never
+      - name: Package non-macOS installer
+        if: matrix.platform != 'mac'
+        run: npm run agent:package -- --${{ matrix.platform }} --publish never
       - name: Stage installer files
         shell: bash
         run: |

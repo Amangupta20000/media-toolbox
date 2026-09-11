@@ -37,6 +37,19 @@ npm run agent
 
 Build an installer for the current operating system with `npm run agent:package`. GitHub Actions builds macOS, Windows, and Linux installers on an `agent-v*` tag. Set `NEXT_PUBLIC_AGENT_RELEASES_URL` in the website environment to the repository's latest Releases page. The setup page links users to those installers.
 
+### macOS release signing and notarization
+
+The public macOS build must be signed with an Apple Developer ID Application certificate and notarized before users download it. Without those Apple credentials, Gatekeeper can report the app as damaged. The GitHub workflow intentionally stops the macOS release instead of publishing an unsigned DMG.
+
+To enable signed releases:
+
+1. Enroll in the Apple Developer Program and create a **Developer ID Application** certificate. Export the certificate and its private key from Keychain Access as a password-protected `.p12` file.
+2. Base64-encode that `.p12` file and add these GitHub repository Secrets: `MACOS_CSC_LINK`, `MACOS_CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`. Never commit the `.p12` file or put these values in source code.
+3. Create the app-specific password at Apple for the Apple ID used by `APPLE_ID`. The workflow uses it only for Apple's notarization service.
+4. Push a new `agent-v*` tag. GitHub Actions will sign the app, submit it to Apple, wait for notarization, and publish the signed installers.
+
+After the signed release is published, set `NEXT_PUBLIC_MACOS_AGENT_SIGNED=true` in the website environment so the setup page stops showing the unsigned-build workaround.
+
 The agent detects FFmpeg, ImageMagick/libheif, MKVToolNix, Poppler, and optional Untrunc on the host. Missing optional capabilities are shown instead of silently switching processing locations. Local jobs can either delete their final result after download or keep only the final result in the agent's Results folder.
 
 ## Video repair reference rules
