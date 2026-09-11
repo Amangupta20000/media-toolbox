@@ -622,6 +622,10 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .agent-capability-row .capability-dot { width: 8px; height: 8px; }
 .agent-download-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 17px 0; }
 .agent-download-grid .secondary-button { justify-content: center; text-decoration: none; }
+.agent-macos-note { display: flex; gap: 9px; align-items: flex-start; margin: 12px 0; padding: 12px; color: #765b22; background: #fff8e7; border: 1px solid #f1d58a; border-radius: 10px; font-size: 10px; line-height: 1.55; }
+.agent-macos-note svg { flex: 0 0 auto; color: #bd8616; }
+.agent-macos-note strong { color: #694d14; }
+.agent-macos-note code { display: inline-block; margin-top: 4px; padding: 2px 5px; color: #5b461a; background: #ffefc4; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; overflow-wrap: anywhere; }
 .agent-security-note { display: flex; gap: 9px; align-items: flex-start; padding: 12px; color: #6f8796; background: #f4f9fa; border-radius: 10px; font-size: 10px; line-height: 1.5; }
 .agent-security-note svg { flex: 0 0 auto; color: #178d8f; }
 [data-theme="dark"] .processing-mode, [data-theme="dark"] .agent-status-card, [data-theme="dark"] .agent-pair-card, [data-theme="dark"] .agent-capabilities-card, [data-theme="dark"] .agent-install-card { background: #132b3a; border-color: var(--line); }
@@ -629,6 +633,9 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .processing-mode-heading, [data-theme="dark"] .processing-mode-option strong, [data-theme="dark"] .agent-status-copy strong, [data-theme="dark"] .agent-pair-form label, [data-theme="dark"] .agent-capability-row strong { color: #dcebf2; }
 [data-theme="dark"] .agent-status-card.connected { background: #14363d; }
 [data-theme="dark"] .agent-security-note { background: #102b38; color: #9db0c0; }
+[data-theme="dark"] .agent-macos-note { color: #f3d792; background: #3a301b; border-color: #80652b; }
+[data-theme="dark"] .agent-macos-note strong, [data-theme="dark"] .agent-macos-note code { color: #ffe7a6; }
+[data-theme="dark"] .agent-macos-note code { background: #55441f; }
 @media (max-width: 760px) {
   .processing-mode-options, .agent-download-grid { grid-template-columns: 1fr; }
   .agent-status-card { align-items: flex-start; flex-wrap: wrap; }
