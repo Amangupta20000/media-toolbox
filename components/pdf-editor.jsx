@@ -1,0 +1,898 @@
+"use client";
+
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, Download, FilePlus2, FileText, GripVertical, ImagePlus, LoaderCircle, Lock, Plus, RotateCcw, Trash2, Unlock, UploadCloud, WandSparkles, X } from "lucide-react";
+import { AppShell } from "./app-shell.jsx";
+import { formatBytes } from "./file-dropzone.jsx";
+
+const MAX_PDFS = 5;
+const MAX_PDF_BYTES = 50 * 1024 * 1024;
+const ACCEPTED_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".heic", ".heif", ".tif", ".tiff", ".gif", ".bmp"]);
+const A4 = { width: 595.28, height: 841.89, rotation: 0 };
+
+function getPageImages(page) {
+  if (Array.isArray(page?.images)) return page.images;
+  return page?.image ? [{ ...page.image, id: page.image.id || "legacy-image" }] : [];
+}
+
+function makeId() {
+  return globalThis.crypto?.randomUUID?.() || `page-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function fileExtension(name) {
+  const value = String(name || "").toLowerCase();
+  return value.slice(value.lastIndexOf("."));
+}
+
+function isPdf(file) {
+  return file && (file.type === "application/pdf" || fileExtension(file.name) === ".pdf");
+}
+
+function isImage(file) {
+  return file && ((file.type || "").startsWith("image/") || ACCEPTED_IMAGE_EXTENSIONS.has(fileExtension(file.name)));
+}
+
+function uploadWithProgress(form, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/jobs");
+    xhr.upload.onprogress = (event) => { if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100)); };
+    xhr.onerror = () => reject(new Error("The PDF project could not reach the server."));
+    xhr.onload = () => {
+      let payload = {};
+      try { payload = JSON.parse(xhr.responseText); } catch { /* no-op */ }
+      if (xhr.status >= 200 && xhr.status < 300 && payload.jobId) resolve(payload);
+      else reject(new Error(payload.error || "The PDF upload failed."));
+    };
+    xhr.send(form);
+  });
+}
+
+async function loadPdfLibrary() {
+  return import("pdfjs-dist/legacy/build/pdf.mjs");
+}
+
+async function inspectPdfOnServer(file) {
+  const form = new FormData();
+  form.append("pdf", file, file.name);
+  const response = await fetch("/api/pdf/inspect", { method: "POST", body: form, cache: "no-store" });
+  let payload = {};
+  try { payload = await response.json(); } catch { /* no-op */ }
+  if (!response.ok) throw new Error(payload.error || "The server could not read this PDF.");
+  return payload;
+}
+
+async function loadPdfFile(file, pdfLibrary) {
+  const data = new Uint8Array(await file.arrayBuffer());
+  let browserError = null;
+  if (pdfLibrary) {
+    try {
+      const task = pdfLibrary.getDocument({ data, disableWorker: true });
+      const documentProxy = await task.promise;
+      return { data, documentProxy, pageCount: documentProxy.numPages, fallbackDocument: null, pageSizes: null, serverFallback: false };
+    } catch (error) {
+      browserError = error;
+    }
+  }
+  try {
+    const { PDFDocument } = await import("pdf-lib");
+    const fallbackDocument = await PDFDocument.load(data);
+    let inspection = null;
+    try { inspection = await inspectPdfOnServer(file); } catch { /* the local fallback can still provide page metadata */ }
+    return { data, documentProxy: null, pageCount: fallbackDocument.getPageCount(), fallbackDocument, pageSizes: inspection?.pages || null, previewToken: inspection?.previewToken || null, serverFallback: false };
+  } catch (fallbackError) {
+    try {
+      const inspection = await inspectPdfOnServer(file);
+      return { data, documentProxy: null, pageCount: inspection.pageCount, fallbackDocument: null, pageSizes: inspection.pages, previewToken: inspection.previewToken, serverFallback: true };
+    } catch (serverError) {
+      const detail = serverError instanceof Error ? serverError.message : fallbackError instanceof Error ? fallbackError.message : browserError?.message;
+      throw new Error(detail || "The browser and server PDF readers could not open this file.");
+    }
+  }
+}
+
+async function readImageSize(file) {
+  if ((file.type || "") === "image/svg+xml") throw new Error("SVG images are not supported on PDF pages.");
+  const url = URL.createObjectURL(file);
+  try {
+    const size = await new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+      image.onerror = () => reject(new Error("The selected image could not be read in this browser."));
+      image.src = url;
+    });
+    return size;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function pageDimensions(pdfPage) {
+  const viewport = pdfPage.getViewport({ scale: 1, rotation: 0 });
+  return { width: viewport.width, height: viewport.height, rotation: pdfPage.rotate || 0 };
+}
+
+async function renderThumbnail(pdfDocument, pageNumber) {
+  const pdfPage = await pdfDocument.getPage(pageNumber);
+  const dimensions = pageDimensions(pdfPage);
+  const scale = Math.min(0.25, 124 / dimensions.height, 180 / dimensions.width);
+  const viewport = pdfPage.getViewport({ scale, rotation: 0 });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.ceil(viewport.width));
+  canvas.height = Math.max(1, Math.ceil(viewport.height));
+  try {
+    await pdfPage.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+  } catch (error) {
+    if (error && typeof error === "object") error.pageDimensions = dimensions;
+    throw error;
+  }
+  return { thumbnail: canvas.toDataURL("image/jpeg", 0.76), ...dimensions };
+}
+
+function fallbackThumbnail(label) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="220" viewBox="0 0 160 220"><rect width="160" height="220" fill="white"/><rect x="1" y="1" width="158" height="218" fill="none" stroke="#d8e3e8"/><text x="80" y="104" text-anchor="middle" font-family="system-ui,sans-serif" font-size="12" fill="#8da0ad">Preview unavailable</text><text x="80" y="125" text-anchor="middle" font-family="system-ui,sans-serif" font-size="12" fill="#8da0ad">${label}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+export function PdfEditor() {
+  const [pdfLibrary, setPdfLibrary] = useState(null);
+  const [pdfFiles, setPdfFiles] = useState([]);
+  const [pages, setPages] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [draggedId, setDraggedId] = useState(null);
+  const [dropTargetId, setDropTargetId] = useState(null);
+  const [dropPosition, setDropPosition] = useState(null);
+  const [recentlyDroppedId, setRecentlyDroppedId] = useState(null);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [job, setJob] = useState(null);
+  const [error, setError] = useState("");
+  const [previewError, setPreviewError] = useState("");
+  const [pdfDragActive, setPdfDragActive] = useState(false);
+  const [continuingFile, setContinuingFile] = useState(null);
+  const pdfInputRef = useRef(null);
+  const imageInputRef = useRef(null);
+  const pageListRef = useRef(null);
+  const pageElementRefs = useRef(new Map());
+  const previewScrollRef = useRef(null);
+  const previewElementRefs = useRef(new Map());
+  const dropAnimationTimerRef = useRef(null);
+  const dragScrollFrameRef = useRef(null);
+  const dragPointerRef = useRef({ x: 0, y: 0, forceBottom: false, forceRight: false });
+  const draggedIdRef = useRef(null);
+  const dropIntentRef = useRef({ targetId: null, position: null });
+  const documentsRef = useRef([]);
+  const imageUrlsRef = useRef(new Set());
+
+  useEffect(() => {
+    let active = true;
+    loadPdfLibrary().then((library) => { if (active) setPdfLibrary(library); }).catch(() => { if (active) setError("PDF preview support could not be loaded. Refresh and try again."); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => () => {
+    for (const url of imageUrlsRef.current) URL.revokeObjectURL(url);
+    if (dropAnimationTimerRef.current) window.clearTimeout(dropAnimationTimerRef.current);
+    if (dragScrollFrameRef.current) window.cancelAnimationFrame(dragScrollFrameRef.current);
+  }, []);
+
+  const selectedPage = useMemo(() => pages.find((page) => page.id === selectedId) || pages[0] || null, [pages, selectedId]);
+  const selectedPageImages = useMemo(() => getPageImages(selectedPage), [selectedPage]);
+
+  const addPdfFiles = async (candidates) => {
+    const selectedFiles = Array.from(candidates || []);
+    if (!selectedFiles.length) return;
+    setError("");
+    setPreviewError("");
+    if (pdfFiles.length + selectedFiles.length > MAX_PDFS) { setError(`You can add up to ${MAX_PDFS} PDFs.`); return; }
+    for (const file of selectedFiles) {
+      if (!isPdf(file)) { setError(`${file.name} is not a PDF.`); return; }
+      if (file.size > MAX_PDF_BYTES) { setError(`${file.name} is larger than the 50 MB limit.`); return; }
+    }
+
+    setLoadingFiles(true);
+    try {
+      let pdfIndex = pdfFiles.length;
+      const newFiles = [];
+      const newPages = [];
+      let thumbnailFailures = 0;
+      let browserFallbacks = 0;
+      let serverFallbacks = 0;
+      for (const file of selectedFiles) {
+        const loaded = await loadPdfFile(file, pdfLibrary);
+        const pdfDocument = loaded.documentProxy;
+        documentsRef.current[pdfIndex] = pdfDocument;
+        if (loaded.fallbackDocument) browserFallbacks += 1;
+        if (loaded.serverFallback) serverFallbacks += 1;
+        const fileRecord = { id: makeId(), file, name: file.name, pageCount: loaded.pageCount };
+        newFiles.push(fileRecord);
+        for (let pageNumber = 1; pageNumber <= loaded.pageCount; pageNumber += 1) {
+          let thumbnail;
+          if (loaded.fallbackDocument || loaded.serverFallback) {
+            const size = loaded.fallbackDocument?.getPages()[pageNumber - 1]?.getSize() || loaded.pageSizes?.[pageNumber - 1] || A4;
+            thumbnail = { thumbnail: loaded.previewToken ? `/api/pdf/preview?token=${encodeURIComponent(loaded.previewToken)}&page=${pageNumber}&thumbnail=1` : fallbackThumbnail(`Page ${pageNumber}`), width: size.width, height: size.height, rotation: size.rotation || 0, previewFallback: true };
+          } else try {
+            const pdfPage = await pdfDocument.getPage(pageNumber);
+            const dimensions = pageDimensions(pdfPage);
+            thumbnail = { thumbnail: null, ...dimensions };
+          } catch (thumbnailError) {
+            thumbnailFailures += 1;
+            const dimensions = thumbnailError?.pageDimensions || A4;
+            thumbnail = { thumbnail: fallbackThumbnail(`Page ${pageNumber}`), width: dimensions.width, height: dimensions.height, rotation: dimensions.rotation || 0, previewFallback: true };
+          }
+          newPages.push({ id: makeId(), kind: "source", pdfIndex, pageIndex: pageNumber - 1, sourceName: file.name, pageNumber, previewToken: loaded.previewToken || null, ...thumbnail });
+        }
+        pdfIndex += 1;
+      }
+      setPdfFiles((current) => [...current, ...newFiles]);
+      setPages((current) => {
+        const next = [...current, ...newPages];
+        if (!selectedId && next[0]) setSelectedId(next[0].id);
+        return next;
+      });
+      if (browserFallbacks || serverFallbacks || thumbnailFailures) {
+        const messages = [];
+        if (browserFallbacks) messages.push("Browser preview was unavailable, so a safe PDF parser was used");
+        if (serverFallbacks) messages.push("The browser used the server PDF reader to validate the document");
+        if (thumbnailFailures) messages.push(`${thumbnailFailures} page preview${thumbnailFailures === 1 ? "" : "s"} could not be rendered`);
+        setPreviewError(`${messages.join("; ")}. The PDF can still be edited and exported.`);
+      }
+    } catch (loadError) {
+      const detail = loadError instanceof Error ? loadError.message : "";
+      console.error("PDF editor import failed", loadError);
+      setError(/password|encrypt/i.test(detail) ? "A password-protected PDF cannot be edited. Remove its password and try again." : detail ? `PDF import failed: ${detail.slice(0, 240)}` : "The browser and server PDF readers could not open this file.");
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!continuingFile || loadingFiles || pdfFiles.length || pages.length || job) return;
+    const file = continuingFile;
+    setContinuingFile(null);
+    addPdfFiles([file]);
+  }, [continuingFile, loadingFiles, pdfFiles.length, pages.length, job, pdfLibrary]);
+
+  const handlePdfDragOver = (event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setPdfDragActive(true);
+  };
+
+  const handlePdfDragLeave = (event) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) setPdfDragActive(false);
+  };
+
+  const handlePdfDrop = (event) => {
+    event.preventDefault();
+    setPdfDragActive(false);
+    addPdfFiles(event.dataTransfer.files);
+  };
+
+  const updatePage = (pageId, changes) => setPages((current) => current.map((page) => page.id === pageId ? { ...page, ...changes } : page));
+
+  const addBlankPage = () => {
+    const dimensions = selectedPage ? { width: selectedPage.width, height: selectedPage.height, rotation: selectedPage.rotation || 0 } : A4;
+    const page = { id: makeId(), kind: "blank", ...dimensions, images: [] };
+    setPages((current) => {
+      const selectedIndex = selectedPage ? current.findIndex((item) => item.id === selectedPage.id) : -1;
+      const next = [...current];
+      next.splice(selectedIndex >= 0 ? selectedIndex + 1 : next.length, 0, page);
+      return next;
+    });
+    setSelectedId(page.id);
+    setError("");
+  };
+
+  const addBlankPageAfter = (previousPageId) => {
+    const previousPage = pages.find((item) => item.id === previousPageId);
+    const dimensions = previousPage ? { width: previousPage.width, height: previousPage.height, rotation: previousPage.rotation || 0 } : A4;
+    const page = { id: makeId(), kind: "blank", ...dimensions, images: [] };
+    setPages((current) => {
+      const previousIndex = current.findIndex((item) => item.id === previousPageId);
+      const next = [...current];
+      next.splice(previousIndex >= 0 ? previousIndex + 1 : next.length, 0, page);
+      return next;
+    });
+    setSelectedId(page.id);
+    setError("");
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      scrollPreviewIntoView(page.id);
+      scrollThumbnailIntoView(page.id);
+    }));
+  };
+
+  const deletePage = (pageId) => {
+    setPages((current) => {
+      const index = current.findIndex((page) => page.id === pageId);
+      const next = current.filter((page) => page.id !== pageId);
+      for (const image of getPageImages(current[index])) {
+        if (image.url) { URL.revokeObjectURL(image.url); imageUrlsRef.current.delete(image.url); }
+      }
+      if (pageId === selectedId) setSelectedId(next[Math.min(index, next.length - 1)]?.id || null);
+      return next;
+    });
+  };
+
+  const reorderPages = (sourceId, targetId, position = "before") => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const beforeRects = new Map();
+    for (const [pageId, element] of pageElementRefs.current.entries()) beforeRects.set(pageId, element.getBoundingClientRect());
+    setPages((current) => {
+      const sourceIndex = current.findIndex((page) => page.id === sourceId);
+      const targetIndex = current.findIndex((page) => page.id === targetId);
+      if (sourceIndex === -1 || targetIndex === -1) return current;
+      const next = [...current];
+      const [moved] = next.splice(sourceIndex, 1);
+      let insertionIndex = targetIndex + (position === "after" ? 1 : 0);
+      if (sourceIndex < insertionIndex) insertionIndex -= 1;
+      next.splice(insertionIndex, 0, moved);
+      return next;
+    });
+    setDropTargetId(null);
+    setDropPosition(null);
+    setRecentlyDroppedId(sourceId);
+    if (dropAnimationTimerRef.current) window.clearTimeout(dropAnimationTimerRef.current);
+    dropAnimationTimerRef.current = window.setTimeout(() => setRecentlyDroppedId(null), 1100);
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      for (const [pageId, element] of pageElementRefs.current.entries()) {
+        const before = beforeRects.get(pageId);
+        if (!before || !element.isConnected) continue;
+        const after = element.getBoundingClientRect();
+        const dx = before.left - after.left;
+        const dy = before.top - after.top;
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+        element.animate([
+          { transform: `translate(${dx}px, ${dy}px)` },
+          { transform: "translate(0, 0)" },
+        ], { duration: 1050, easing: "cubic-bezier(.2, .8, .2, 1)" });
+      }
+    }));
+  };
+
+  const clearDropIntent = () => {
+    dropIntentRef.current = { targetId: null, position: null };
+    setDropTargetId(null);
+    setDropPosition(null);
+  };
+
+  const stopPageListAutoScroll = () => {
+    if (dragScrollFrameRef.current) window.cancelAnimationFrame(dragScrollFrameRef.current);
+    dragScrollFrameRef.current = null;
+  };
+
+  const startPageListAutoScroll = () => {
+    if (dragScrollFrameRef.current || !draggedIdRef.current) return;
+    const tick = () => {
+      dragScrollFrameRef.current = null;
+      const list = pageListRef.current;
+      if (!list || !draggedIdRef.current) return;
+      const bounds = list.getBoundingClientRect();
+      const { x, y, forceBottom, forceRight } = dragPointerRef.current;
+      const edge = 116;
+      let moved = false;
+      if (list.scrollHeight > list.clientHeight) {
+        if (y < bounds.top + edge) {
+          const intensity = Math.min(1, (bounds.top + edge - y) / edge);
+          const previousScrollTop = list.scrollTop;
+          list.scrollTop -= Math.max(7, Math.round(8 + intensity * 24));
+          moved = moved || list.scrollTop !== previousScrollTop;
+        } else if (forceBottom || y > bounds.bottom - edge) {
+          const intensity = forceBottom ? 1 : Math.min(1, (y - (bounds.bottom - edge)) / edge);
+          const previousScrollTop = list.scrollTop;
+          list.scrollTop += Math.max(7, Math.round(8 + intensity * 24));
+          moved = moved || list.scrollTop !== previousScrollTop;
+        }
+      }
+      if (list.scrollWidth > list.clientWidth) {
+        if (x < bounds.left + edge) {
+          const intensity = Math.min(1, (bounds.left + edge - x) / edge);
+          const previousScrollLeft = list.scrollLeft;
+          list.scrollLeft -= Math.max(7, Math.round(8 + intensity * 24));
+          moved = moved || list.scrollLeft !== previousScrollLeft;
+        } else if (forceRight || x > bounds.right - edge) {
+          const intensity = forceRight ? 1 : Math.min(1, (x - (bounds.right - edge)) / edge);
+          const previousScrollLeft = list.scrollLeft;
+          list.scrollLeft += Math.max(7, Math.round(8 + intensity * 24));
+          moved = moved || list.scrollLeft !== previousScrollLeft;
+        }
+      }
+      if (moved && draggedIdRef.current) dragScrollFrameRef.current = window.requestAnimationFrame(tick);
+    };
+    dragScrollFrameRef.current = window.requestAnimationFrame(tick);
+  };
+
+  const handlePageListDragOver = (event) => {
+    event.preventDefault();
+    if (!draggedIdRef.current) return;
+    dragPointerRef.current = { ...dragPointerRef.current, x: event.clientX, y: event.clientY };
+    startPageListAutoScroll();
+  };
+
+  const handlePageDragOver = (event, pageId) => {
+    event.preventDefault();
+    const activeDraggedId = draggedIdRef.current || draggedId;
+    if (!activeDraggedId) return;
+    const list = pageListRef.current;
+    const targetBounds = event.currentTarget.getBoundingClientRect();
+    let forceBottom = false;
+    let forceRight = false;
+    if (list) {
+      const bounds = list.getBoundingClientRect();
+      const visiblePages = [...pageElementRefs.current.entries()].filter(([, element]) => {
+        const pageBounds = element.getBoundingClientRect();
+        return pageBounds.bottom > bounds.top && pageBounds.top < bounds.bottom && pageBounds.right > bounds.left && pageBounds.left < bounds.right;
+      });
+      const lastVisible = visiblePages.sort((left, right) => right[1].getBoundingClientRect().bottom - left[1].getBoundingClientRect().bottom)[0];
+      const rightmostVisible = visiblePages.sort((left, right) => right[1].getBoundingClientRect().right - left[1].getBoundingClientRect().right)[0];
+      forceBottom = Boolean(lastVisible && lastVisible[0] === pageId && targetBounds.bottom >= bounds.bottom - 48 && event.clientY >= targetBounds.top + targetBounds.height * 0.3);
+      forceRight = Boolean(rightmostVisible && rightmostVisible[0] === pageId && targetBounds.right >= bounds.right - 48 && event.clientX >= targetBounds.left + targetBounds.width * 0.3);
+    }
+    dragPointerRef.current = { x: event.clientX, y: event.clientY, forceBottom, forceRight };
+    startPageListAutoScroll();
+    if (activeDraggedId === pageId) {
+      clearDropIntent();
+      return;
+    }
+    const position = event.clientY < targetBounds.top + targetBounds.height / 2 ? "before" : "after";
+    const sourceIndex = pages.findIndex((page) => page.id === activeDraggedId);
+    const targetIndex = pages.findIndex((page) => page.id === pageId);
+    const noChange = sourceIndex === targetIndex || (position === "before" && sourceIndex + 1 === targetIndex) || (position === "after" && sourceIndex - 1 === targetIndex);
+    if (sourceIndex === -1 || targetIndex === -1 || noChange) {
+      clearDropIntent();
+      return;
+    }
+    dropIntentRef.current = { targetId: pageId, position };
+    setDropTargetId(pageId);
+    setDropPosition(position);
+  };
+
+  const handlePageDrop = (event, pageId) => {
+    event.preventDefault();
+    stopPageListAutoScroll();
+    const activeDraggedId = draggedIdRef.current || draggedId;
+    const pointerPosition = event.currentTarget?.getBoundingClientRect ? (event.clientY < event.currentTarget.getBoundingClientRect().top + event.currentTarget.getBoundingClientRect().height / 2 ? "before" : "after") : null;
+    const position = pointerPosition || dropIntentRef.current.position;
+    if (!activeDraggedId || !pageId || !position) {
+      clearDropIntent();
+      return;
+    }
+    const sourceIndex = pages.findIndex((page) => page.id === activeDraggedId);
+    const targetIndex = pages.findIndex((page) => page.id === pageId);
+    const noChange = sourceIndex === targetIndex || (position === "before" && sourceIndex + 1 === targetIndex) || (position === "after" && sourceIndex - 1 === targetIndex);
+    if (sourceIndex === -1 || targetIndex === -1 || noChange) {
+      clearDropIntent();
+      return;
+    }
+    reorderPages(activeDraggedId, pageId, position);
+  };
+
+  const handlePageListDrop = (event) => {
+    event.preventDefault();
+    stopPageListAutoScroll();
+    const { targetId, position } = dropIntentRef.current;
+    const activeDraggedId = draggedIdRef.current || draggedId;
+    if (!activeDraggedId || !targetId || !position) {
+      clearDropIntent();
+      return;
+    }
+    reorderPages(activeDraggedId, targetId, position);
+  };
+
+  const startDraggingPage = (pageId) => {
+    draggedIdRef.current = pageId;
+    dragPointerRef.current = { x: 0, y: 0, forceBottom: false, forceRight: false };
+    dropIntentRef.current = { targetId: null, position: null };
+    setDraggedId(pageId);
+    setDropTargetId(null);
+    setDropPosition(null);
+  };
+
+  const resetDragState = () => {
+    stopPageListAutoScroll();
+    draggedIdRef.current = null;
+    clearDropIntent();
+    setDraggedId(null);
+  };
+
+  const renderPageList = () => {
+    return pages.map((page, index) => <PdfPageThumbnail key={page.id} page={page} index={index} elementRef={(element) => { if (element) pageElementRefs.current.set(page.id, element); else pageElementRefs.current.delete(page.id); }} thumbnailRootRef={pageListRef} pdfDocument={page.kind === "source" ? documentsRef.current[page.pdfIndex] : null} onThumbnailError={() => setPreviewError("Some thumbnails could not be rendered, but the pages remain available in the full preview.")} selected={page.id === selectedPage?.id} draggedId={draggedId} dropTargetId={dropTargetId} dropPosition={dropPosition} recentlyDroppedId={recentlyDroppedId} onSelect={() => selectPage(page.id)} onDelete={() => deletePage(page.id)} onDragStart={() => startDraggingPage(page.id)} onDragEnd={resetDragState} onDragOver={(event) => handlePageDragOver(event, page.id)} onDrop={(event) => handlePageDrop(event, page.id)} />);
+  };
+
+  const scrollThumbnailIntoView = (pageId) => {
+    const list = pageListRef.current;
+    const element = pageElementRefs.current.get(pageId);
+    if (!list || !element) return;
+    if (list.scrollHeight > list.clientHeight) {
+      const top = element.offsetTop - list.clientHeight * 0.35;
+      list.scrollTop = Math.max(0, Math.min(list.scrollHeight - list.clientHeight, top));
+    }
+    if (list.scrollWidth > list.clientWidth) {
+      const left = element.offsetLeft - list.clientWidth * 0.35;
+      list.scrollLeft = Math.max(0, Math.min(list.scrollWidth - list.clientWidth, left));
+    }
+  };
+
+  const scrollPreviewIntoView = (pageId) => {
+    const container = previewScrollRef.current;
+    const element = previewElementRefs.current.get(pageId);
+    if (!container || !element) return;
+    const containerBounds = container.getBoundingClientRect();
+    const elementBounds = element.getBoundingClientRect();
+    const targetTop = container.scrollTop + elementBounds.top - containerBounds.top - Math.max(0, (container.clientHeight - elementBounds.height) / 2);
+    container.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+  };
+
+  const selectPage = (pageId) => {
+    setSelectedId(pageId);
+    scrollThumbnailIntoView(pageId);
+    window.requestAnimationFrame(() => scrollPreviewIntoView(pageId));
+  };
+
+  const handlePreviewScroll = () => {
+    const container = previewScrollRef.current;
+    if (!container || !pages.length) return;
+    const containerBounds = container.getBoundingClientRect();
+    const center = containerBounds.top + container.clientHeight / 2;
+    let bestPage = null;
+    let bestDistance = Infinity;
+    for (const page of pages) {
+      const element = previewElementRefs.current.get(page.id);
+      if (!element) continue;
+      const bounds = element.getBoundingClientRect();
+      const visible = Math.min(containerBounds.bottom, bounds.bottom) - Math.max(containerBounds.top, bounds.top);
+      if (visible <= 0) continue;
+      const distance = Math.abs((bounds.top + bounds.bottom) / 2 - center);
+      if (distance < bestDistance) {
+        bestPage = page;
+        bestDistance = distance;
+      }
+    }
+    if (bestPage && bestPage.id !== selectedId) {
+      setSelectedId(bestPage.id);
+      window.requestAnimationFrame(() => scrollThumbnailIntoView(bestPage.id));
+    }
+  };
+
+  const addImages = async (fileList) => {
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (!files.length) return;
+    if (!selectedPage) { setError("Select a PDF page before adding images."); return; }
+    for (const file of files) {
+      if (!isImage(file)) { setError(`${file.name} is not a supported image. Choose PNG, JPG, JPEG, HEIC, TIFF, GIF, or BMP.`); return; }
+      if (file.size > 25 * 1024 * 1024) { setError(`${file.name} is larger than the 25 MB image limit.`); return; }
+    }
+    const addedImages = [];
+    try {
+      const existingImages = getPageImages(selectedPage);
+      for (const [index, file] of files.entries()) {
+        const dimensions = await readImageSize(file);
+        const maxWidth = selectedPage.width * 0.86;
+        const maxHeight = selectedPage.height * 0.86;
+        const scale = Math.min(maxWidth / dimensions.width, maxHeight / dimensions.height, 1);
+        const width = dimensions.width * scale;
+        const height = dimensions.height * scale;
+        const offset = Math.min(72, (existingImages.length + index) * 18);
+        const x = Math.max(0, Math.min(selectedPage.width - width, (selectedPage.width - width) / 2 + offset));
+        const y = Math.max(0, Math.min(selectedPage.height - height, (selectedPage.height - height) / 2 + offset));
+        const url = URL.createObjectURL(file);
+        imageUrlsRef.current.add(url);
+        addedImages.push({ id: makeId(), file, url, x, y, width, height, lockAspectRatio: true });
+      }
+      updatePage(selectedPage.id, { images: [...existingImages, ...addedImages] });
+      setError("");
+    } catch (imageError) {
+      for (const image of addedImages) {
+        URL.revokeObjectURL(image.url);
+        imageUrlsRef.current.delete(image.url);
+      }
+      setError(imageError instanceof Error ? imageError.message : "The image could not be added.");
+    }
+  };
+
+  const removeImage = (pageId, imageId) => {
+    const page = pages.find((item) => item.id === pageId);
+    const images = getPageImages(page);
+    const image = images.find((item) => item.id === imageId);
+    if (image?.url) {
+      URL.revokeObjectURL(image.url);
+      imageUrlsRef.current.delete(image.url);
+    }
+    updatePage(pageId, { images: images.filter((item) => item.id !== imageId) });
+  };
+
+  const removeAllImages = (pageId) => {
+    const page = pages.find((item) => item.id === pageId);
+    for (const image of getPageImages(page)) {
+      if (image.url) {
+        URL.revokeObjectURL(image.url);
+        imageUrlsRef.current.delete(image.url);
+      }
+    }
+    updatePage(pageId, { images: [] });
+  };
+
+  const reset = () => {
+    for (const page of pages) for (const image of getPageImages(page)) if (image.url) { URL.revokeObjectURL(image.url); imageUrlsRef.current.delete(image.url); }
+    documentsRef.current = [];
+    setPdfFiles([]); setPages([]); setSelectedId(null); setJob(null); setContinuingFile(null); setError(""); setPreviewError(""); setUploadProgress(0);
+  };
+
+  const continueEditing = async (result) => {
+    if (!result?.downloadUrl) { setError("The generated PDF is no longer available for editing."); return; }
+    try {
+      const response = await fetch(result.downloadUrl, { cache: "no-store" });
+      if (!response.ok) throw new Error("The generated PDF could not be reopened.");
+      const file = new File([await response.blob()], result.filename || "edited.pdf", { type: "application/pdf" });
+      for (const page of pages) for (const image of getPageImages(page)) if (image.url) { URL.revokeObjectURL(image.url); imageUrlsRef.current.delete(image.url); }
+      documentsRef.current = [];
+      setPdfFiles([]); setPages([]); setSelectedId(null); setJob(null); setError(""); setPreviewError(""); setUploadProgress(0);
+      setContinuingFile(file);
+    } catch (continueError) {
+      setError(continueError instanceof Error ? continueError.message : "The generated PDF could not be reopened.");
+    }
+  };
+
+  const submit = async () => {
+    if (!pages.length) { setError("Add at least one page before exporting."); return; }
+    if (!pdfFiles.length) { setError("Add at least one PDF before exporting."); return; }
+    setError("");
+    const form = new FormData();
+    form.append("tool", "pdf-editor");
+    pdfFiles.forEach((record) => form.append("pdf", record.file, record.name));
+    const operations = pages.map((page) => {
+      const operation = page.kind === "source" ? { kind: "source", pdfIndex: page.pdfIndex, pageIndex: page.pageIndex } : { kind: "blank", width: page.width, height: page.height, rotation: page.rotation || 0 };
+      const images = getPageImages(page);
+      if (images.length) {
+        if (page.kind === "source") Object.assign(operation, { width: page.width, height: page.height, rotation: page.rotation || 0 });
+        operation.images = images.map((image, imageIndex) => {
+          const imageField = `page-image-${page.id}-${image.id || imageIndex}`;
+          form.append(imageField, image.file, image.file.name);
+          return { imageField, image: { x: image.x, y: image.y, width: image.width, height: image.height } };
+        });
+      }
+      return operation;
+    });
+    form.append("operations", JSON.stringify(operations));
+    try {
+      setUploadProgress(1);
+      const response = await uploadWithProgress(form, setUploadProgress);
+      setUploadProgress(0);
+      setJob({ id: response.jobId, status: "queued", progress: 0, stage: "Queued", message: "Waiting for the worker.", logs: [], warnings: [], error: null, result: null });
+    } catch (submitError) {
+      setUploadProgress(0);
+      setError(submitError instanceof Error ? submitError.message : "The PDF project could not be uploaded.");
+    }
+  };
+
+  return <AppShell>
+    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools · Beta <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · 50 MB each</span></div><h1>PDF editor</h1><p>Merge documents, reorder pages, remove pages, and add images to PDF pages or new blank pages.</p></div></div>
+    {job ? <PdfJobCard job={job} onReset={reset} onContinue={continueEditing} /> : <section className={`pdf-editor-shell ${pdfDragActive ? "pdf-drop-active" : ""}`} onDragOver={handlePdfDragOver} onDragLeave={handlePdfDragLeave} onDrop={handlePdfDrop}>
+      <div className="pdf-editor-toolbar"><div><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDFS} PDFs · {pages.length} pages</span></div><div className="pdf-editor-actions"><button className="secondary-button" type="button" onClick={() => pdfInputRef.current?.click()} disabled={loadingFiles || pdfFiles.length >= MAX_PDFS}><Plus size={17} /> Add PDF</button><button className="secondary-button" type="button" onClick={addBlankPage}><FilePlus2 size={17} /> Blank page</button>{selectedPage && <button className="secondary-button" type="button" onClick={() => imageInputRef.current?.click()}><ImagePlus size={17} /> Add images</button>}{selectedPageImages.length > 0 && <button className="secondary-button" type="button" onClick={() => removeAllImages(selectedPage.id)}><Trash2 size={16} /> Remove images</button>}{selectedPage && <button className="icon-button delete-page-button" type="button" aria-label="Delete selected page" title="Delete selected page" onClick={() => deletePage(selectedPage.id)}><Trash2 size={17} /></button>}<button className="primary-button" type="button" onClick={submit} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles}><WandSparkles size={17} /> {uploadProgress ? `Uploading ${uploadProgress}%` : "Export PDF"}</button></div></div>
+      <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { addPdfFiles(event.target.files); event.target.value = ""; }} />
+      <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/heic,image/heif,image/tiff,image/gif,image/bmp,.png,.jpg,.jpeg,.heic,.heif,.tif,.tiff,.gif,.bmp" multiple hidden onChange={(event) => { addImages(event.target.files); event.target.value = ""; }} />
+      {!pdfFiles.length && !pages.length ? <PdfEmptyState onBrowse={() => pdfInputRef.current?.click()} loading={loadingFiles} dragActive={pdfDragActive} /> : !pages.length ? <PdfNoPagesState onBrowse={() => pdfInputRef.current?.click()} onBlank={addBlankPage} /> : <div className="pdf-editor-layout">
+        <aside className="pdf-page-rail"><div className="pdf-rail-heading"><span>Pages</span><small>Pages load as you scroll</small></div><div ref={pageListRef} className="pdf-page-list" onDragOver={handlePageListDragOver} onDrop={handlePageListDrop}>{renderPageList()}</div></aside>
+        <section className="pdf-selected-panel"><div className="pdf-selected-heading"><div><span>Selected page {selectedPage ? pages.findIndex((page) => page.id === selectedPage.id) + 1 : "—"}</span><small>{selectedPage?.kind === "blank" ? "Blank page" : selectedPage?.sourceName || "Choose a page"}{selectedPage?.kind === "source" ? ` · Original page ${selectedPage.pageNumber}` : ""}</small></div></div><div ref={previewScrollRef} className="pdf-document-preview" onScroll={handlePreviewScroll}>{pages.map((page, index) => <Fragment key={page.id}><PdfPreviewPage page={page} index={index} selected={page.id === selectedPage?.id} pdfDocument={documentsRef.current[page.pdfIndex]} previewRootRef={previewScrollRef} elementRef={(element) => { if (element) previewElementRefs.current.set(page.id, element); else previewElementRefs.current.delete(page.id); }} onChange={(images) => updatePage(page.id, { images })} onRemove={(imageId) => removeImage(page.id, imageId)} onError={setPreviewError} /><PdfInsertPageButton pageNumber={index + 1} onClick={() => addBlankPageAfter(page.id)} /></Fragment>)}</div>{previewError && <div className="pdf-preview-error"><AlertTriangle size={16} /><span>{previewError}</span></div>}<p className="pdf-editor-tip"><GripVertical size={15} /> Scroll the preview to select a page. Click + Add page between previews to insert a blank page.</p></section>
+      </div>}
+      {error && <div className="error-banner"><AlertTriangle size={18} /><span>{error}</span></div>}
+    </section>}
+  </AppShell>;
+}
+
+function PdfEmptyState({ onBrowse, loading, dragActive }) {
+  return <div className="pdf-empty-state"><div className="pdf-empty-icon"><UploadCloud size={28} /></div><h2>{loading ? "Reading PDF pages…" : dragActive ? "Drop your PDF files" : "Add your first PDF"}</h2><p>{loading ? "Creating page previews for the editor." : dragActive ? "Release to add the PDFs to your project." : "Upload one PDF to edit it, or add up to five PDFs to merge them."}</p><button className="primary-button" type="button" onClick={onBrowse} disabled={loading}><FilePlus2 size={18} /> Browse PDF files</button><small>PDF only · 50 MB maximum per file</small></div>;
+}
+
+function PdfNoPagesState({ onBrowse, onBlank }) {
+  return <div className="pdf-empty-state pdf-no-pages-state"><div className="pdf-empty-icon"><FileText size={28} /></div><h2>No pages left</h2><p>Add another PDF or add a blank page to continue building your document.</p><div className="pdf-empty-actions"><button className="primary-button" type="button" onClick={onBrowse}><Plus size={18} /> Add PDF</button><button className="secondary-button" type="button" onClick={onBlank}><FilePlus2 size={18} /> Add blank page</button></div></div>;
+}
+
+function PdfPreviewPage({ page, index, selected, pdfDocument, previewRootRef, elementRef, onChange, onRemove, onError }) {
+  const nodeRef = useRef(null);
+  const [shouldRender, setShouldRender] = useState(index < 2);
+
+  useEffect(() => {
+    const node = nodeRef.current;
+    const root = previewRootRef.current;
+    if (!node) return undefined;
+    if (!root || typeof IntersectionObserver !== "function") {
+      setShouldRender(true);
+      return undefined;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setShouldRender(true);
+    }, { root, rootMargin: "900px 0px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [previewRootRef, index]);
+
+  const setNode = (element) => {
+    nodeRef.current = element;
+    elementRef?.(element);
+  };
+  const pageLabel = page.kind === "source" ? `Original page ${page.pageNumber}` : "New blank page";
+  return <article ref={setNode} className={`pdf-preview-page ${selected ? "selected" : ""}`} aria-label={`Final page ${index + 1}, ${pageLabel}`}>
+    <div className="pdf-preview-page-heading"><strong>Final page {index + 1}</strong><span>{pageLabel}{page.kind === "source" ? ` · ${page.sourceName}` : ""}</span></div>
+    {shouldRender ? page.kind === "blank" ? <BlankPageCanvas page={page} onChange={onChange} onRemove={onRemove} /> : page.previewFallback ? <PdfFallbackPreview page={page} compact onChange={onChange} onRemove={onRemove} /> : <PdfPageCanvas page={page} pdfDocument={pdfDocument} pageNumber={page.pageNumber} onError={onError} onChange={onChange} onRemove={onRemove} /> : <div className="pdf-preview-page-placeholder" style={{ "--page-ratio": page.width / page.height }}><FileText size={24} /><span>Loading page {index + 1}</span></div>}
+  </article>;
+}
+
+function PdfInsertPageButton({ pageNumber, onClick }) {
+  return <div className="pdf-insert-page"><span className="pdf-insert-page-line" /><button className="pdf-insert-page-button" type="button" onClick={onClick} aria-label={`Add a blank page after page ${pageNumber}`} title={`Add a blank page after page ${pageNumber}`}><Plus size={17} /><span>Add page</span></button><span className="pdf-insert-page-line" /></div>;
+}
+
+function PdfPageThumbnail({ page, index, elementRef, thumbnailRootRef, pdfDocument, onThumbnailError, selected, draggedId, dropTargetId, dropPosition, recentlyDroppedId, onSelect, onDelete, onDragStart, onDragEnd, onDragOver, onDrop }) {
+  return <>{dropTargetId === page.id && dropPosition === "before" && <div className="pdf-drop-gap" aria-hidden="true">Drop here</div>}<div ref={elementRef} className={`pdf-page-thumbnail ${selected ? "selected" : ""} ${draggedId === page.id ? "dragging" : ""} ${dropTargetId === page.id ? "drop-target" : ""} ${recentlyDroppedId === page.id && draggedId !== page.id ? "just-dropped" : ""}`} draggable onClick={onSelect} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop}>
+    <div className="thumbnail-frame">{page.kind === "source" ? <div className="thumbnail-page-surface" style={{ "--page-ratio": page.width / page.height }}><PdfThumbnailImage page={page} index={index} pdfDocument={pdfDocument} rootRef={thumbnailRootRef} onError={onThumbnailError} /><ThumbnailImageOverlayLayer page={page} /></div> : <BlankPageMiniature page={page} />}</div>
+    <div className="thumbnail-meta"><GripVertical className="thumbnail-grip" size={14} /><span><strong>Final {index + 1}</strong>{page.kind === "source" ? <> · <span className="thumbnail-original-page">Original {page.pageNumber}</span> · {page.sourceName}</> : " · New blank page"}</span><button type="button" aria-label={`Delete page ${index + 1}`} title="Delete page" onClick={(event) => { event.stopPropagation(); onDelete(); }}><X size={14} /></button></div>
+  </div>{dropTargetId === page.id && dropPosition === "after" && <div className="pdf-drop-gap" aria-hidden="true">Drop here</div>}</>;
+}
+
+function PdfThumbnailImage({ page, index, pdfDocument, rootRef, onError }) {
+  const frameRef = useRef(null);
+  const [active, setActive] = useState(index < 4);
+  const [thumbnail, setThumbnail] = useState(page.thumbnail || null);
+
+  useEffect(() => {
+    if (index < 4) setActive(true);
+  }, [index]);
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    const root = rootRef?.current;
+    if (!frame || active) return undefined;
+    if (!root || typeof IntersectionObserver !== "function") {
+      setActive(true);
+      return undefined;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setActive(true);
+    }, { root, rootMargin: "160px 0px" });
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [active, rootRef]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!active || thumbnail || !pdfDocument) return undefined;
+    renderThumbnail(pdfDocument, page.pageNumber).then((result) => {
+      if (mounted) setThumbnail(result.thumbnail);
+    }).catch(() => {
+      if (mounted) {
+        setThumbnail(fallbackThumbnail(`Page ${page.pageNumber}`));
+        onError?.();
+      }
+    });
+    return () => { mounted = false; };
+  }, [active, page.pageNumber, pdfDocument, thumbnail, onError]);
+
+  if (!active) return <div ref={frameRef} className="thumbnail-loading" aria-label={`Page ${index + 1} thumbnail will load when visible`}>Scroll to load</div>;
+  if (!thumbnail) return <div ref={frameRef} className="thumbnail-loading" aria-label={`Loading page ${index + 1} thumbnail`}>Loading…</div>;
+  return <img ref={frameRef} className="thumbnail-page-image" src={thumbnail} alt={`Page ${index + 1}`} loading={index < 4 ? "eager" : "lazy"} decoding="async" />;
+}
+
+function ThumbnailImageOverlayLayer({ page }) {
+  return <div className="thumbnail-image-overlay-layer">{getPageImages(page).map((image, index) => <img key={image.id || index} src={image.url} alt="" aria-hidden="true" style={{ left: `${image.x / page.width * 100}%`, top: `${image.y / page.height * 100}%`, width: `${image.width / page.width * 100}%`, height: `${image.height / page.height * 100}%` }} />)}</div>;
+}
+
+function BlankPageMiniature({ page }) {
+  const images = getPageImages(page);
+  return <div className="blank-page-mini" style={{ aspectRatio: `${page.width} / ${page.height}` }}>{images.map((image, index) => <img key={image.id || index} src={image.url} alt={`Image ${index + 1} on blank page`} style={{ left: `${image.x / page.width * 100}%`, top: `${image.y / page.height * 100}%`, width: `${image.width / page.width * 100}%`, height: `${image.height / page.height * 100}%` }} />)}</div>;
+}
+
+function PdfPageCanvas({ page, pdfDocument, pageNumber, onError, onChange, onRemove }) {
+  const canvasRef = useRef(null);
+  const surfaceRef = useRef(null);
+  const [pageInfo, setPageInfo] = useState(null);
+  useEffect(() => {
+    let active = true;
+    if (!pdfDocument) return undefined;
+    pdfDocument.getPage(pageNumber).then((pdfPage) => {
+      if (!active) return;
+      const baseViewport = pdfPage.getViewport({ scale: 1, rotation: 0 });
+      setPageInfo({ pdfPage, width: baseViewport.width, height: baseViewport.height });
+    }).catch(() => { if (active) onError("This PDF page could not be rendered in the browser."); });
+    return () => { active = false; };
+  }, [pdfDocument, pageNumber, onError]);
+
+  useEffect(() => {
+    let active = true;
+    if (!pageInfo || !surfaceRef.current || !canvasRef.current) return undefined;
+    let drawing = false;
+    const draw = async () => {
+      if (!active || drawing || !surfaceRef.current || !canvasRef.current) return;
+      drawing = true;
+      const surface = surfaceRef.current;
+      const scale = Math.min(1.35, Math.max(0.45, Math.min(surface.clientWidth / pageInfo.width, surface.clientHeight / pageInfo.height)));
+      const viewport = pageInfo.pdfPage.getViewport({ scale, rotation: 0 });
+      const canvas = canvasRef.current;
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      try {
+        await pageInfo.pdfPage.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+      } finally {
+        drawing = false;
+      }
+    };
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(() => { draw().catch(() => { if (active) onError("This PDF page could not be rendered in the browser."); }); }) : null;
+    observer?.observe(surfaceRef.current);
+    draw().catch(() => { if (active) onError("This PDF page could not be rendered in the browser."); });
+    return () => { active = false; observer?.disconnect(); };
+  }, [pageInfo, onError]);
+
+  const ratio = pageInfo ? pageInfo.width / pageInfo.height : 1;
+  return <div className="pdf-page-canvas-wrap"><div ref={surfaceRef} className="pdf-page-canvas-surface" style={{ "--page-ratio": ratio }}><canvas ref={canvasRef} aria-label={`PDF page ${pageNumber}`} /><ImageOverlayLayer page={page} onChange={onChange} onRemove={onRemove} /></div></div>;
+}
+
+function PdfFallbackPreview({ page, compact = false, onChange, onRemove }) {
+  const previewUrl = page.previewToken ? `/api/pdf/preview?token=${encodeURIComponent(page.previewToken)}&page=${page.pageNumber}` : "";
+  return <div className="pdf-page-fallback"><div className="pdf-page-fallback-stage" style={{ "--page-ratio": page.width / page.height }}>{previewUrl ? <img src={previewUrl} alt={`Preview of PDF page ${page.pageNumber}`} /> : <div className="pdf-page-fallback-empty"><FileText size={28} /><strong>Preview is unavailable</strong></div>}<ImageOverlayLayer page={page} onChange={onChange} onRemove={onRemove} /></div>{!compact && <div className="pdf-page-fallback-note"><FileText size={22} /><strong>Server-rendered PDF preview</strong><span>Page {page.pageNumber} is ready to include in the exported PDF.</span></div>}</div>;
+}
+
+function BlankPageCanvas({ page, onChange, onRemove }) {
+  const images = getPageImages(page);
+  return <div className="blank-page-preview-area"><div className="blank-page-canvas" style={{ "--page-ratio": page.width / page.height }}>{images.length ? <ImageOverlayLayer page={page} onChange={onChange} onRemove={onRemove} /> : <div className="blank-page-message"><ImagePlus size={25} /><span>Add images to this blank page</span></div>}</div><p className="blank-page-help">{images.length ? "Drag an image to move it. Use the corner handle to resize it. Use the lock to allow free resizing. Use × to remove it." : "Use Add images above to place one or more PNG, JPG, or other supported images."}</p></div>;
+}
+
+function ImageOverlayLayer({ page, onChange, onRemove }) {
+  const layerRef = useRef(null);
+  const interactionRef = useRef(null);
+  const images = getPageImages(page);
+
+  const onPointerDown = (event, mode, image) => {
+    if (!image || !layerRef.current) return;
+    const bounds = layerRef.current.getBoundingClientRect();
+    interactionRef.current = { mode, imageId: image.id, startX: event.clientX, startY: event.clientY, bounds, image: { ...image } };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  };
+  const onPointerMove = (event) => {
+    const interaction = interactionRef.current;
+    if (!interaction) return;
+    const image = images.find((item) => item.id === interaction.imageId);
+    if (!image) return;
+    const dx = (event.clientX - interaction.startX) * page.width / interaction.bounds.width;
+    const dy = (event.clientY - interaction.startY) * page.height / interaction.bounds.height;
+    if (interaction.mode === "move") {
+      onChange(images.map((item) => item.id === interaction.imageId ? { ...item, x: Math.max(0, Math.min(page.width - item.width, interaction.image.x + dx)), y: Math.max(0, Math.min(page.height - item.height, interaction.image.y + dy)) } : item));
+    } else {
+      const width = Math.max(24, Math.min(page.width - interaction.image.x, interaction.image.width + dx));
+      const ratio = interaction.image.height / interaction.image.width;
+      const height = interaction.image.lockAspectRatio === false
+        ? Math.max(24, Math.min(page.height - interaction.image.y, interaction.image.height + dy))
+        : Math.max(24, Math.min(page.height - interaction.image.y, width * ratio));
+      onChange(images.map((item) => item.id === interaction.imageId ? { ...item, width, height } : item));
+    }
+  };
+  const onPointerUp = () => { interactionRef.current = null; };
+  const toggleAspectRatio = (imageId) => onChange(images.map((item) => item.id === imageId ? { ...item, lockAspectRatio: item.lockAspectRatio === false } : item));
+
+  return <div ref={layerRef} className="pdf-image-overlay-layer" onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>{images.map((image, index) => <div className="pdf-image-overlay" key={image.id || index} style={{ left: `${image.x / page.width * 100}%`, top: `${image.y / page.height * 100}%`, width: `${image.width / page.width * 100}%`, height: `${image.height / page.height * 100}%`, zIndex: index + 1 }} onPointerDown={(event) => onPointerDown(event, "move", image)}><img src={image.url} alt={`Placed image ${index + 1}`} draggable="false" /><button type="button" className="image-remove-handle" aria-label={`Remove image ${index + 1}`} title="Remove image" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove?.(image.id); }}><X size={11} /></button><button type="button" className="image-ratio-handle" aria-label={image.lockAspectRatio === false ? `Keep image ${index + 1} aspect ratio` : `Allow image ${index + 1} free resizing`} title={image.lockAspectRatio === false ? "Keep aspect ratio" : "Allow free resizing"} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); toggleAspectRatio(image.id); }}>{image.lockAspectRatio === false ? <Unlock size={10} /> : <Lock size={10} />}</button><button type="button" className="image-resize-handle" aria-label={`Resize image ${index + 1}`} onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, "resize", image); }} /></div>)}</div>;
+}
+
+function PdfJobCard({ job: initialJob, onReset, onContinue }) {
+  const [job, setJob] = useState(initialJob);
+  useEffect(() => {
+    let active = true;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/jobs/${initialJob.id}`, { cache: "no-store" });
+        if (!response.ok) throw new Error("Unable to read PDF job status.");
+        const current = await response.json();
+        if (!active) return;
+        setJob(current);
+        if (current.status === "queued" || current.status === "processing") window.setTimeout(poll, 1000);
+      } catch (error) {
+        if (active) setJob((current) => ({ ...current, status: "failed", error: error instanceof Error ? error.message : "Unable to read PDF job status." }));
+      }
+    };
+    poll();
+    return () => { active = false; };
+  }, [initialJob.id]);
+
+  const done = job.status === "completed";
+  const failed = job.status === "failed";
+  const progress = Math.max(0, Math.min(100, job.progress || 0));
+  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : job.status === "queued" ? "Queued" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be created" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<div className="pdf-job-log"><div className="job-log-heading"><span>Worker log</span><span>{(job.logs || []).length} events</span></div><div className="job-log-list">{job.logs?.length ? job.logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for the worker to report progress…</div>}</div></div>{done && job.result && <><div className="pdf-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>All {job.result.pageCount} pages</small></div><div className="pdf-result-preview-scroll" aria-label={`Preview of all ${job.result.pageCount} output pages`}>{Array.from({ length: job.result.pageCount }, (_, index) => { const pageNumber = index + 1; return <figure className="pdf-result-page" key={pageNumber}><img loading={pageNumber === 1 ? "eager" : "lazy"} src={`/api/jobs/${job.id}/preview?page=${pageNumber}`} alt={`Preview of page ${pageNumber} of ${job.result.filename}`} /><figcaption>Page {pageNumber}</figcaption></figure>; })}</div></div><div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Pages</span><strong>{job.result.pageCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div></>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={job.result.downloadUrl}><Download size={18} /> Download PDF</a><button className="secondary-button" type="button" onClick={() => onContinue?.(job.result)}><FilePlus2 size={17} /> Continue editing</button></>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
+}

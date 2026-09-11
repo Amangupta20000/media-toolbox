@@ -1,0 +1,44 @@
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    command: ["node", "server.js"]
+    env_file: .env
+    environment:
+      DATA_DIR: /app/data
+      NODE_ENV: production
+    volumes:
+      - media-data:/app/data
+    expose:
+      - "3000"
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["npm", "run", "worker"]
+    env_file: .env
+    environment:
+      DATA_DIR: /app/data
+      NODE_ENV: production
+    volumes:
+      - media-data:/app/data
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+
+volumes:
+  media-data:
+  caddy-data:
+  caddy-config:
