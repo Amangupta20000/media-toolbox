@@ -53,7 +53,15 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 
 git clone --depth 5 https://github.com/anthwlock/untrunc "$SOURCE_DIR"
 git -C "$SOURCE_DIR" checkout "${UNTRUNC_SOURCE_REF:-9d86ec9ef2ffed1bf8131abe80742c0574db52b6}"
-make -C "$SOURCE_DIR" FF_VER=3.3.9
+
+# FFmpeg 3.3.9's x86 assembly is rejected by the newer assembler shipped on
+# current Ubuntu runners. Untrunc still builds and works with FFmpeg's C
+# implementations, so disable the optional assembly only on Linux.
+FF_CONFIG_FLAGS="--disable-doc --disable-everything --enable-decoders --disable-vdpau --enable-demuxers --enable-protocol=file --disable-avdevice --disable-swresample --disable-swscale --disable-avfilter --disable-xlib --disable-vaapi --disable-zlib --disable-bzlib --disable-lzma --disable-audiotoolbox --disable-videotoolbox --disable-vda --disable-postproc"
+if [ "$PLATFORM_DIR" = "linux" ]; then
+  FF_CONFIG_FLAGS="$FF_CONFIG_FLAGS --disable-asm"
+fi
+make -C "$SOURCE_DIR" FF_VER=3.3.9 FF_CONFIG_FLAGS="$FF_CONFIG_FLAGS"
 cp "$SOURCE_DIR/untrunc" "$TARGET_PATH"
 chmod 755 "$TARGET_PATH"
 if [ -f "$SOURCE_DIR/COPYING" ]; then
