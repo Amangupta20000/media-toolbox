@@ -4,7 +4,7 @@ const nextConfig = {
     "*": ["./data/**/*"],
   },
   experimental: {
-    middlewareClientMaxBodySize: "3gb",
+    middlewareClientMaxBodySize: "2gb",
   },
 };
 

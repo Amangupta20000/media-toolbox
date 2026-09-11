@@ -1,7 +1,7 @@
 {$DOMAIN:localhost} {
     reverse_proxy web:3000
     request_body {
-        max_size 3GB
+        max_size 2GB
     }
     encode gzip zstd
 }

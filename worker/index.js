@@ -754,7 +754,7 @@ async function writeCapabilities() {
   const values = {
     status: "ready",
     checkedAt: new Date().toISOString(),
-    image: { imagemagick: Boolean(imageTool), sips: await commandExists("sips"), heic, formats: ["jpeg", "png", "heic", "tiff", "gif", "bmp"] },
+    image: { imagemagick: Boolean(imageTool), sips: await commandExists("sips"), heic, libheif: heic, formats: ["jpeg", "png", "heic", "tiff", "gif", "bmp"] },
     video: { ffmpeg: await commandExists("ffmpeg"), ffprobe: await commandExists("ffprobe"), mkvmerge: await commandExists("mkvmerge"), untrunc: Boolean(await firstAvailable(untruncCandidates)), defaultReference: fs.existsSync(config.untruncReferencePath) },
   };
   await fsp.mkdir(config.dataDir, { recursive: true });

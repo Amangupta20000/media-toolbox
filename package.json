@@ -2,6 +2,8 @@
   "name": "media-toolbox",
   "version": "1.0.0",
   "private": true,
+  "description": "Private media conversion, repair, and PDF editing tools with an optional local processing agent.",
+  "author": "Media Toolbox",
   "type": "module",
   "engines": {
     "node": ">=20.9.0",
@@ -14,8 +16,15 @@
     "test": "node --test --test-reporter=spec",
     "start": "node .next/standalone/server.js",
     "worker": "node worker/index.js",
+    "agent:dev": "node agent/index.js",
+    "agent": "electron agent/electron-main.cjs",
+    "agent:package": "electron-builder --config electron-builder.yml",
     "setup:untrunc": "bash scripts/setup-untrunc-macos.sh",
     "lint": "next lint"
+  },
+  "devDependencies": {
+    "electron": "^37.2.6",
+    "electron-builder": "^26.0.12"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

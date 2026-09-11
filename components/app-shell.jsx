@@ -3,12 +3,14 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { Film, FileText, Image as ImageIcon, Menu, Moon, PanelLeftClose, PanelLeftOpen, ShieldCheck, Sparkles, Sun } from "lucide-react";
+import { Bot, Film, FileText, Image as ImageIcon, Menu, Moon, PanelLeftClose, PanelLeftOpen, ShieldCheck, Sparkles, Sun } from "lucide-react";
+import { probeLocalAgent } from "./processing-client.js";
 
 const navigation = [
   { href: "/image-converter", label: "Image converter", detail: "Resize-free format conversion", icon: ImageIcon },
   { href: "/video-repair", label: "Video repair", detail: "Layered recovery workflow", icon: Film },
   { href: "/pdf-editor", label: "PDF editor", detail: "Merge and arrange pages", icon: FileText },
+  { href: "/local-agent", label: "Local agent", detail: "Process files on this device", icon: Bot },
 ];
 
 const comingSoonNavigation = { href: "/coming-soon", label: "Coming soon", detail: "More tools in progress", icon: Sparkles };
@@ -18,12 +20,21 @@ export function AppShell({ children }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [theme, setTheme] = useState("light");
+  const [localAgentConnected, setLocalAgentConnected] = useState(false);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("media-toolbox-theme");
     const nextTheme = savedTheme === "dark" ? "dark" : "light";
     setTheme(nextTheme);
     document.documentElement.dataset.theme = nextTheme;
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const check = () => probeLocalAgent().then((value) => { if (active) setLocalAgentConnected(Boolean(value.connected)); }).catch(() => { if (active) setLocalAgentConnected(false); });
+    check();
+    const timer = window.setInterval(check, 10000);
+    return () => { active = false; window.clearInterval(timer); };
   }, []);
 
   const toggleTheme = () => {
@@ -72,7 +83,7 @@ export function AppShell({ children }) {
       <header className="topbar">
         <button className="mobile-menu-button" aria-label="Open tools" onClick={() => setMobileOpen(true)}><Menu size={21} /></button>
         <div className="topbar-context"><span className="eyebrow">Workspace</span><span className="topbar-title">Secure media utilities</span></div>
-        <div className="topbar-actions"><button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}<span>{theme === "dark" ? "Light mode" : "Dark mode"}</span></button><div className="topbar-status"><span className="status-pulse" /> Worker connected</div></div>
+        <div className="topbar-actions"><button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}<span>{theme === "dark" ? "Light mode" : "Dark mode"}</span></button><Link href="/local-agent" className="topbar-status"><span className={`status-pulse ${localAgentConnected ? "connected" : ""}`} /> {localAgentConnected ? "Agent connected" : "Agent setup"}</Link></div>
       </header>
       <div className="content-wrap">{children}</div>
     </main>

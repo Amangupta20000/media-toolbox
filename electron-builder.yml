@@ -1,0 +1,28 @@
+appId: com.mediatoolbox.agent
+productName: Media Toolbox Agent
+directories:
+  output: release
+files:
+  - agent/**/*
+  - lib/**/*
+  - worker/**/*
+  - components/processing-client.js
+  - node_modules/**/*
+  - package.json
+asar: true
+extraMetadata:
+  main: agent/electron-main.cjs
+asarUnpack:
+  - node_modules/better-sqlite3/**
+npmRebuild: true
+mac:
+  target:
+    - dmg
+    - zip
+win:
+  target:
+    - nsis
+linux:
+  target:
+    - AppImage
+    - deb

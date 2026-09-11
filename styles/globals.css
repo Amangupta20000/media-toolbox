@@ -579,3 +579,62 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
   .result-summary { grid-template-columns: repeat(2, 1fr); }
   .job-actions { align-items: stretch; flex-direction: column; }
 }
+
+.topbar-status { text-decoration: none; }
+.topbar-status .status-pulse:not(.connected) { background: #a4b1bf; box-shadow: 0 0 0 4px rgba(164, 177, 191, .12); }
+.processing-mode { margin: 0 0 18px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: 0 8px 22px rgba(26, 52, 77, .04); }
+.processing-mode-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 11px; color: var(--navy); font-size: 12px; font-weight: 750; }
+.processing-mode-heading span { display: flex; align-items: center; gap: 7px; }
+.processing-mode-heading small { color: #8a9aaa; font-size: 10px; font-weight: 600; }
+.processing-mode-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 9px; }
+.processing-mode-option { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 11px 12px; text-align: left; color: #708394; background: #f8fbfc; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.processing-mode-option > svg { flex: 0 0 auto; color: #7894a5; }
+.processing-mode-option span { display: grid; gap: 2px; min-width: 0; }
+.processing-mode-option strong { color: var(--navy); font-size: 11px; }
+.processing-mode-option small { overflow: hidden; color: #8395a4; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.processing-mode-option em { margin-left: auto; color: #8a9aaa; font-size: 8px; font-style: normal; font-weight: 750; white-space: nowrap; }
+.processing-mode-option.selected { background: #e7f7f7; border-color: #3ea9aa; box-shadow: 0 0 0 2px rgba(62, 169, 170, .09); }
+.processing-mode-option.selected > svg, .processing-mode-option.selected strong, .processing-mode-option.selected em { color: #168b8e; }
+.processing-mode-option.unavailable { opacity: .55; cursor: not-allowed; }
+.processing-mode-help { margin-top: 10px; color: #8a9aaa; font-size: 10px; }
+.processing-mode-help a { color: var(--teal); font-weight: 750; }
+.keep-result-check { display: flex; align-items: center; gap: 8px; margin-top: 15px; color: #708394; font-size: 11px; font-weight: 650; }
+.keep-result-check input { accent-color: var(--teal); }
+.agent-status-card, .agent-pair-card, .agent-capabilities-card, .agent-install-card { display: flex; gap: 18px; margin-bottom: 16px; padding: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 10px 24px rgba(26, 52, 77, .04); }
+.agent-status-card { align-items: center; }
+.agent-status-card.connected { border-color: #55bfc0; background: #f2fbfa; }
+.agent-status-icon { display: grid; flex: 0 0 auto; width: 50px; height: 50px; place-items: center; color: #839aaa; background: #eef4f6; border-radius: 14px; }
+.agent-status-card.connected .agent-status-icon { color: #178d8f; background: #d9f4f1; }
+.agent-status-copy { display: grid; flex: 1; gap: 4px; min-width: 0; }
+.agent-status-label { color: #168b8e; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.agent-status-copy strong { color: var(--navy); font-size: 17px; }
+.agent-status-copy small { overflow-wrap: anywhere; color: #8093a2; font-size: 10px; }
+.agent-pair-card, .agent-capabilities-card, .agent-install-card { display: block; }
+.agent-pair-form { margin-top: 18px; }
+.agent-pair-form label { display: block; margin-bottom: 7px; color: var(--navy); font-size: 11px; font-weight: 750; }
+.agent-pair-form > div { display: flex; gap: 9px; }
+.agent-pair-form input { width: 180px; padding: 12px 14px; color: var(--navy); background: #f8fbfc; border: 1px solid var(--line); border-radius: 9px; font-size: 16px; letter-spacing: .13em; }
+.agent-open-actions { display: flex; align-items: center; gap: 10px; margin-top: 14px; color: #8193a2; font-size: 10px; }
+.agent-capabilities-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 9px; margin: 16px 0; }
+.agent-capability-row { display: grid; gap: 6px; padding: 13px; background: #f8fbfc; border: 1px solid var(--line); border-radius: 10px; }
+.agent-capability-row strong { color: var(--navy); font-size: 11px; }
+.agent-capability-row > span:last-child { color: #899aa8; font-size: 9px; }
+.agent-capability-row .capability-dot { width: 8px; height: 8px; }
+.agent-download-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 17px 0; }
+.agent-download-grid .secondary-button { justify-content: center; text-decoration: none; }
+.agent-security-note { display: flex; gap: 9px; align-items: flex-start; padding: 12px; color: #6f8796; background: #f4f9fa; border-radius: 10px; font-size: 10px; line-height: 1.5; }
+.agent-security-note svg { flex: 0 0 auto; color: #178d8f; }
+[data-theme="dark"] .processing-mode, [data-theme="dark"] .agent-status-card, [data-theme="dark"] .agent-pair-card, [data-theme="dark"] .agent-capabilities-card, [data-theme="dark"] .agent-install-card { background: #132b3a; border-color: var(--line); }
+[data-theme="dark"] .processing-mode-option, [data-theme="dark"] .agent-capability-row, [data-theme="dark"] .agent-pair-form input { color: #9db0c0; background: #102230; border-color: #2f4859; }
+[data-theme="dark"] .processing-mode-heading, [data-theme="dark"] .processing-mode-option strong, [data-theme="dark"] .agent-status-copy strong, [data-theme="dark"] .agent-pair-form label, [data-theme="dark"] .agent-capability-row strong { color: #dcebf2; }
+[data-theme="dark"] .agent-status-card.connected { background: #14363d; }
+[data-theme="dark"] .agent-security-note { background: #102b38; color: #9db0c0; }
+@media (max-width: 760px) {
+  .processing-mode-options, .agent-download-grid { grid-template-columns: 1fr; }
+  .agent-status-card { align-items: flex-start; flex-wrap: wrap; }
+  .agent-status-card .secondary-button { width: 100%; }
+  .agent-capabilities-grid { grid-template-columns: repeat(2, 1fr); }
+  .agent-pair-form > div { align-items: stretch; flex-direction: column; }
+  .agent-pair-form input { width: 100%; }
+  .agent-open-actions { align-items: flex-start; flex-direction: column; }
+}

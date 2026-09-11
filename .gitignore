@@ -6,5 +6,6 @@ data/*
 .env
 .env.local
 vendor/untrunc-macos/
+release/
 npm-debug.log*
 *.tsbuildinfo

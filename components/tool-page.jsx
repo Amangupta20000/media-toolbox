@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock3, Download, FileCheck2, Info, LoaderCircle, RotateCcw, ShieldCheck, Sparkles, Zap } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { FileDropzone, formatBytes } from "./file-dropzone.jsx";
+import { ProcessingMode } from "./processing-mode.jsx";
+import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 
 const imageFormats = [
   ["original", "Original", "Keep encoded format"],
@@ -23,22 +25,6 @@ const imageMethods = [
   ["sips", "macOS sips", "Local Mac fallback", "macOS"],
 ];
 
-function uploadWithProgress(form, onProgress) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/jobs");
-    xhr.upload.onprogress = (event) => { if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100)); };
-    xhr.onerror = () => reject(new Error("The upload could not reach the server."));
-    xhr.onload = () => {
-      let payload = {};
-      try { payload = JSON.parse(xhr.responseText); } catch { /* no-op */ }
-      if (xhr.status >= 200 && xhr.status < 300 && payload.jobId) resolve({ jobId: payload.jobId });
-      else reject(new Error(payload.error || "The upload failed."));
-    };
-    xhr.send(form);
-  });
-}
-
 export function ToolPage({ tool }) {
   const isImage = tool === "image-converter";
   const [source, setSource] = useState(null);
@@ -49,15 +35,29 @@ export function ToolPage({ tool }) {
   const [jpegConfirmed, setJpegConfirmed] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [jobId, setJobId] = useState(null);
+  const [jobMode, setJobMode] = useState("server");
   const [job, setJob] = useState(null);
   const [error, setError] = useState("");
   const [capabilities, setCapabilities] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewError, setPreviewError] = useState(false);
+  const [locations, setLocations] = useState(null);
+  const [processingMode, setProcessingMode] = useState("server");
+  const [keepResult, setKeepResult] = useState(false);
 
   useEffect(() => {
-    fetch("/api/capabilities").then((response) => response.json()).then(setCapabilities).catch(() => undefined);
+    let active = true;
+    probeProcessingLocations().then((value) => {
+      if (!active) return;
+      setLocations(value);
+      const preferred = value.server.connected ? "server" : value.local.connected ? "local" : "server";
+      setProcessingMode(preferred);
+      setCapabilities(processingCapabilities(value, preferred));
+    }).catch(() => undefined);
+    return () => { active = false; };
   }, []);
+
+  useEffect(() => setCapabilities(processingCapabilities(locations, processingMode)), [locations, processingMode]);
 
   useEffect(() => {
     setPreviewError(false);
@@ -75,9 +75,7 @@ export function ToolPage({ tool }) {
     let active = true;
     const poll = async () => {
       try {
-        const response = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" });
-        if (!response.ok) throw new Error("Unable to read job status.");
-        const current = await response.json();
+        const current = await getProcessingJob(jobMode, jobId);
         if (!active) return;
         setJob(current);
         if (current.status === "queued" || current.status === "processing") window.setTimeout(poll, 1000);
@@ -87,7 +85,7 @@ export function ToolPage({ tool }) {
     };
     poll();
     return () => { active = false; };
-  }, [jobId]);
+  }, [jobId, jobMode]);
 
   const busy = Boolean(jobId && job && (job.status === "queued" || job.status === "processing"));
   const canSubmit = Boolean(source) && !busy && !uploadProgress;
@@ -100,7 +98,8 @@ export function ToolPage({ tool }) {
   const serverReferenceReady = capabilities?.video?.defaultReference === true;
 
   const reset = () => {
-    setSource(null); setReference(null); setFormat("original"); setMethod("auto"); setMaxSizeKb(""); setJpegConfirmed(false); setUploadProgress(0); setJobId(null); setJob(null); setError(""); setPreviewUrl(""); setPreviewError(false);
+    if (jobId && job && (job.status === "queued" || job.status === "processing")) deleteProcessingJob(jobMode, jobId).catch(() => undefined);
+    setSource(null); setReference(null); setFormat("original"); setMethod("auto"); setMaxSizeKb(""); setJpegConfirmed(false); setUploadProgress(0); setJobId(null); setJob(null); setError(""); setPreviewUrl(""); setPreviewError(false); setKeepResult(false);
   };
 
   const handleSourceFile = (file) => {
@@ -116,6 +115,7 @@ export function ToolPage({ tool }) {
   const submit = async () => {
     setError("");
     if (!source) { setError(`Choose a ${isImage ? "source image" : "video"} first.`); return; }
+    if (!isProcessingLocationReady(locations, processingMode)) { setError(processingMode === "local" ? "Start and pair the Local agent before processing." : "Server processing is unavailable. Choose Local agent after pairing it."); return; }
     if (isImage && maxSizeKb && (!/^\d+$/.test(maxSizeKb) || Number(maxSizeKb) <= 0)) { setError("Enter a positive whole number of KB."); return; }
     if (isImage && format === "jpeg" && !jpegConfirmed) { setError("Confirm the JPEG transparency warning before continuing."); return; }
     const form = new FormData();
@@ -127,10 +127,12 @@ export function ToolPage({ tool }) {
       if (maxSizeKb) form.append("maxSizeKb", maxSizeKb);
       form.append("jpegConfirmed", String(jpegConfirmed));
     } else if (reference) form.append("reference", reference, reference.name);
+    if (processingMode === "local") form.append("retention", keepResult ? "keep" : "delete");
     try {
       setUploadProgress(1);
-      const response = await uploadWithProgress(form, setUploadProgress);
+      const response = await uploadWithProgress(form, processingMode, setUploadProgress);
       setUploadProgress(0);
+      setJobMode(processingMode);
       setJobId(response.jobId);
       setJob({ id: response.jobId, status: "queued", progress: 0, stage: "Queued", message: "Waiting for the worker.", logs: [], warnings: [], error: null, result: null });
     } catch (submitError) {
@@ -141,9 +143,10 @@ export function ToolPage({ tool }) {
 
   return <AppShell>
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> {eyebrow}</div><h1>{title}</h1><p>{description}</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Original files stay untouched</span></div></div>
-    <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${capabilities?.status === "ready" ? "ready" : ""}`} /><span>{capabilities?.status === "ready" ? "Processing worker online" : "Connecting to processing worker"}</span></div>{isImage ? <span>{heicReady ? (capabilities?.image?.heic ? "HEIC enabled" : "HEIC enabled via local fallback") : capabilities?.status === "ready" ? "HEIC unavailable" : "HEIC capability checking"}</span> : <span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery + server fallback" : "Reference recovery · upload a reference") : capabilities?.status === "ready" ? "FFmpeg recovery enabled · reference recovery unavailable" : "Video capabilities checking"}</span>}</div>
+    <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />
+    <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${capabilities?.status === "ready" ? "ready" : ""}`} /><span>{capabilities?.status === "ready" ? `${processingMode === "local" ? "Local agent" : "Server"} worker online` : "Connecting to processing worker"}</span></div>{isImage ? <span>{heicReady ? (capabilities?.image?.heic ? "HEIC enabled" : "HEIC enabled via local fallback") : capabilities?.status === "ready" ? "HEIC unavailable" : "HEIC capability checking"}</span> : <span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery + fallback" : "Reference recovery · upload a reference") : capabilities?.status === "ready" ? "FFmpeg recovery enabled · reference recovery unavailable" : "Video capabilities checking"}</span>}</div>
     {job ? <JobStatusCard job={job} isImage={isImage} onReset={reset} /> : <div className="workspace-grid">
-      <section className="tool-card primary-card"><div className="card-heading"><div><span className="card-index">01</span><h2>{isImage ? "Add an image" : "Add a damaged video"}</h2></div><span className="required-label">Required</span></div><FileDropzone file={source} onFile={isImage ? handleSourceFile : (file) => { setSource(file); setError(""); }} onClear={() => { setSource(null); setPreviewUrl(""); setPreviewError(false); }} variant={isImage ? "image" : "video"} accept={isImage ? imageAccept : "video/*,.mkv,.webm,.avi,.3gp"} label={isImage ? "Drop an image here" : "Drop a video here"} hint="or click to browse from your device" disabled={Boolean(uploadProgress)} />{isImage && source && previewUrl && <div className="image-preview-card"><div className="preview-heading"><span>Browser preview</span><small>Local only · not uploaded</small></div><div className="image-preview-frame">{previewError ? <div className="preview-unavailable"><AlertTriangle size={18} /><span>This browser cannot preview this image format, but the file can still be processed.</span></div> : <img src={previewUrl} alt={`Preview of ${source.name}`} onError={() => setPreviewError(true)} />}</div></div>}<div className="limit-row"><span>Maximum file size</span><strong>{isImage ? "25 MB" : "3 GB"}</strong></div></section>
+      <section className="tool-card primary-card"><div className="card-heading"><div><span className="card-index">01</span><h2>{isImage ? "Add an image" : "Add a damaged video"}</h2></div><span className="required-label">Required</span></div><FileDropzone file={source} onFile={isImage ? handleSourceFile : (file) => { setSource(file); setError(""); }} onClear={() => { setSource(null); setPreviewUrl(""); setPreviewError(false); }} variant={isImage ? "image" : "video"} accept={isImage ? imageAccept : "video/*,.mkv,.webm,.avi,.3gp"} label={isImage ? "Drop an image here" : "Drop a video here"} hint="or click to browse from your device" disabled={Boolean(uploadProgress)} />{isImage && source && previewUrl && <div className="image-preview-card"><div className="preview-heading"><span>Browser preview</span><small>Local only · not uploaded</small></div><div className="image-preview-frame">{previewError ? <div className="preview-unavailable"><AlertTriangle size={18} /><span>This browser cannot preview this image format, but the file can still be processed.</span></div> : <img src={previewUrl} alt={`Preview of ${source.name}`} onError={() => setPreviewError(true)} />}</div></div>}<div className="limit-row"><span>Maximum file size</span><strong>{isImage ? "25 MB" : "2 GB"}</strong></div>{processingMode === "local" && <label className="keep-result-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label>}</section>
     {isImage ? <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Choose output</h2></div><span className="optional-label">Optional target</span></div><p className="card-description">Original keeps the selected file type, so a PNG remains a PNG. A size target aims for the requested KB without changing pixel dimensions.</p><div className="format-grid">{imageFormats.map(([value, label, detail]) => <button type="button" key={value} className={`format-option ${format === value ? "selected" : ""}`} onClick={() => { setFormat(value); if (value !== "jpeg") setJpegConfirmed(false); }}><span className="format-radio" /><strong>{label}</strong><small>{detail}</small></button>)}</div><label className="field-label">Processing method <span>Worker engine</span></label><div className="method-list">{imageMethods.map(([value, label, detail, tag]) => { const unavailable = (value === "imagemagick" && capabilities?.status === "ready" && !imageMagickReady) || (value === "sips" && capabilities?.status === "ready" && !sipsReady); return <button type="button" key={value} className={`method-option ${method === value ? "selected" : ""} ${unavailable ? "unavailable" : ""}`} disabled={unavailable} onClick={() => setMethod(value)}><span className="method-copy"><strong>{label}</strong><small>{detail}</small></span><span className="method-tag">{unavailable ? "Unavailable" : tag}</span></button>; })}</div><label className="field-label" htmlFor="max-size">Target size <span>KB</span></label><div className="input-with-suffix"><input id="max-size" type="text" inputMode="numeric" value={maxSizeKb} onChange={(event) => setMaxSizeKb(event.target.value.replace(/[^0-9]/g, ""))} placeholder="Leave blank for normal quality" /><span>KB target</span></div>{format === "jpeg" && <label className="warning-check"><input type="checkbox" checked={jpegConfirmed} onChange={(event) => setJpegConfirmed(event.target.checked)} /><span><AlertTriangle size={16} /><span>JPEG flattens transparent pixels. I understand.</span></span></label>}</section> : <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Reference video</h2></div><span className={serverReferenceReady ? "optional-label" : "required-label"}>{serverReferenceReady ? "Optional server fallback" : "Upload for damaged MP4"}</span></div><p className="card-description">A healthy recording from the same device or app can rebuild missing MP4 metadata when it was recorded with the same settings.</p><FileDropzone file={reference} onFile={setReference} onClear={() => setReference(null)} variant="video" accept="video/*,.mkv,.webm,.avi,.3gp" label="Drop a reference video" hint={serverReferenceReady ? "or continue without one" : "required when MP4 metadata is missing"} disabled={Boolean(uploadProgress)} /><div className="info-note"><Info size={16} /><span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery is available. If you do not upload one, the configured server reference will be tried." : "No server-side reference is configured. Upload a healthy recording from the same device or app for missing MP4 metadata; readable containers can still be repaired without one.") : "FFmpeg can repair readable containers. Missing MP4 metadata requires Untrunc and a matching healthy reference."}</span></div></section>}
       <section className="tool-card action-card"><div className="action-copy"><div className="action-icon"><Zap size={19} /></div><div><h2>Ready when you are</h2><p>{isImage ? "Your output will be created as a new file." : "The worker will try the safest recovery method first."}</p></div></div><button className="primary-button" onClick={submit} disabled={!canSubmit}>{uploadProgress ? <><LoaderCircle className="spin" size={18} /> Uploading {uploadProgress}%</> : <><Sparkles size={18} /> {isImage ? "Convert image" : "Repair video"}</>}</button></section>
     </div>}

@@ -1,6 +1,6 @@
 # Media Toolbox
 
-Private, browser-based image conversion and video repair tools. The web interface runs on any modern browser; processing runs in a Linux Docker worker with ImageMagick, libheif, FFmpeg, and MKVToolNix. The frontend uses the Next.js Pages Router and plain JSX/JavaScript.
+Private image conversion, video repair, and PDF editing tools. The website runs on any modern browser. Processing can run in the connected server, in the browser for PDF editing, or in the optional cross-platform Local agent. The frontend uses the Next.js Pages Router and plain JSX/JavaScript.
 
 ## Features
 
@@ -11,12 +11,33 @@ Private, browser-based image conversion and video repair tools. The web interfac
 - Video recovery with lossless remux, MKV/WebM repair, optional Untrunc reference recovery, tolerant transcode, and video-only fallback.
 - Recovered video is validated with strict FFmpeg decoding; when Untrunc exposes decodable but damaged frames, the worker re-encodes them into a fresh H.264/AAC MP4 and reports the best-effort limitation.
 - PDF editor beta: load 1-5 PDFs (50 MB each), merge them, reorder or delete pages, add blank pages, and place/move/resize PNG, JPG, JPEG, or HEIC images on blank pages.
-- PDF exports are created server-side with `pdf-lib`, retain source page sizes and rotations, are validated before download, and never modify the original PDFs. Inserted HEIC/TIFF/GIF/BMP images use the ImageMagick/libheif normalization path when needed. PDF page previews and thumbnails are rendered by the application with Poppler; no browser PDF viewer is used.
+- PDF Browser mode merges and exports without uploading the PDFs. Local and Server modes use the worker for files Browser mode cannot parse. All modes retain source page sizes and rotations and never modify the original PDFs. Inserted HEIC/TIFF/GIF/BMP images use the ImageMagick/libheif normalization path when needed. PDF page previews and thumbnails are rendered by the application; no browser PDF viewer is used.
 - Responsive two-column workspace with a collapsible tool sidebar.
 - Drag-and-drop or browse upload controls.
 - Local in-browser image preview before upload, including transparency checkerboard support.
 - Background jobs with progress, live worker logs, and downloadable results.
 - Basic Auth protection and automatic temporary-file cleanup.
+- Processing location can be selected per job: Browser (PDF only), Local agent, or Server.
+
+## Local processing agent
+
+The Local agent is an optional desktop application for macOS, Windows, and Linux. It runs the same worker functions as the server, listens only on `127.0.0.1:4789`, starts at login after installation, and processes one job at a time. A paired browser can upload to it without sending the source files to the server. The agent never accepts shell commands or arbitrary filesystem paths from the website.
+
+Start the development agent in a second terminal:
+
+```bash
+npm run agent:dev
+```
+
+Open `/local-agent`, click **Check connection**, then enter the 6-digit code printed in the agent terminal. For the tray application, use:
+
+```bash
+npm run agent
+```
+
+Build an installer for the current operating system with `npm run agent:package`. GitHub Actions builds macOS, Windows, and Linux installers on an `agent-v*` tag. Set `NEXT_PUBLIC_AGENT_RELEASES_URL` in the website environment to the repository's latest Releases page. The setup page links users to those installers.
+
+The agent detects FFmpeg, ImageMagick/libheif, MKVToolNix, Poppler, and optional Untrunc on the host. Missing optional capabilities are shown instead of silently switching processing locations. Local jobs can either delete their final result after download or keep only the final result in the agent's Results folder.
 
 ## Video repair reference rules
 
@@ -81,10 +102,16 @@ cp .env.example .env.local
 npm run dev
 ```
 
-`npm run dev` now starts the Next.js web server and the local processing worker together. The worker logs will appear in the same terminal. For troubleshooting, you can still run the worker separately:
+`npm run dev` starts the Next.js web server and the existing server-side development worker together. The local agent remains a separate process so the website can show whether it is connected:
 
 ```bash
 npm run worker
+```
+
+In another terminal, when testing Local mode:
+
+```bash
+npm run agent:dev
 ```
 
 After a production build, start the standalone Pages Router server with:
@@ -100,7 +127,7 @@ To enable truncated-MP4 recovery during local macOS development, run `npm run se
 
 ## Operational notes
 
-- Images are limited to 25 MB and videos to 3 GB.
+- Images are limited to 25 MB and videos to 2 GB.
 - Uploaded files and generated results are kept only until the retention period expires.
-- Use a Linux VM with enough free disk space for the original, temporary candidates, and output. For a 3 GB video, plan for substantially more than 3 GB of free space.
+- Use a Linux VM or desktop agent with enough free disk space for the original, temporary candidates, and output. For a 2 GB video, plan for substantially more than 2 GB of free space.
 - SQLite and local persistent storage are intended for one worker. Move job state to Postgres/Redis and files to object storage before adding multiple workers.
