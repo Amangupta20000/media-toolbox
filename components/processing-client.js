@@ -1,9 +1,30 @@
 const DEFAULT_AGENT_URL = "http://127.0.0.1:4789";
 const TOKEN_KEY = "media-toolbox-agent-token";
 const TOKEN_EXPIRY_KEY = "media-toolbox-agent-token-expires";
+const AGENT_BASE_KEY = "media-toolbox-agent-base";
 
 export function agentBaseUrl() {
+  if (typeof window !== "undefined") {
+    const remembered = window.localStorage.getItem(AGENT_BASE_KEY);
+    if (remembered) return remembered;
+  }
+  return configuredAgentBaseUrl();
+}
+
+function configuredAgentBaseUrl() {
   return String(process.env.NEXT_PUBLIC_AGENT_URL || DEFAULT_AGENT_URL).replace(/\/$/, "");
+}
+
+function agentBaseCandidates() {
+  const configured = configuredAgentBaseUrl();
+  const candidates = [agentBaseUrl(), configured];
+  if (configured.includes("127.0.0.1")) candidates.push(configured.replace("127.0.0.1", "localhost"));
+  if (configured.includes("localhost")) candidates.push(configured.replace("localhost", "127.0.0.1"));
+  return candidates.filter((value, index) => value && candidates.indexOf(value) === index);
+}
+
+function rememberAgentBase(base) {
+  if (typeof window !== "undefined" && base) window.localStorage.setItem(AGENT_BASE_KEY, base);
 }
 
 function storedAgentToken() {
@@ -49,13 +70,36 @@ async function fetchJson(url, options = {}) {
   }
 }
 
+async function fetchLocalJson(path, options = {}) {
+  let lastError;
+  for (const base of agentBaseCandidates()) {
+    try {
+      const payload = await fetchJson(`${base}${path}`, options);
+      rememberAgentBase(base);
+      return { payload, base };
+    } catch (error) {
+      // HTTP responses are authoritative. Only try the alternate loopback
+      // hostname for network-level failures such as Safari's "Load failed".
+      if (error?.status) throw error;
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("The local agent could not be reached.");
+}
+
 export async function probeLocalAgent() {
-  const base = agentBaseUrl();
-  const health = await fetchJson(`${base}/v1/health`);
+  const { payload: health, base } = await fetchLocalJson("/v1/health");
   const token = storedAgentToken();
+  if (!health?.paired) {
+    // A desktop-agent restart invalidates in-memory sessions. Do not let an
+    // old token turn a normal pairing state into a generic Safari "Load
+    // failed" error while probing capabilities.
+    if (token) clearAgentPairing();
+    return { available: true, connected: false, health, capabilities: null, baseUrl: base };
+  }
   if (!token) return { available: true, connected: false, health, capabilities: null, baseUrl: base };
   try {
-    const capabilities = await fetchJson(`${base}/v1/capabilities`, { headers: { Authorization: `Bearer ${token}` } });
+    const { payload: capabilities } = await fetchLocalJson("/v1/capabilities", { headers: { Authorization: `Bearer ${token}` } });
     return { available: true, connected: true, health, capabilities, baseUrl: base };
   } catch (error) {
     // Keep the token during network/startup failures. Only discard it when the
@@ -81,7 +125,7 @@ export async function probeProcessingLocations() {
 }
 
 export async function pairLocalAgent(code) {
-  const value = await fetchJson(`${agentBaseUrl()}/v1/pair`, {
+  const { payload: value } = await fetchLocalJson("/v1/pair", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code: String(code || "").trim(), origin: window.location.origin }),
