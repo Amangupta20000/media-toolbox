@@ -12,7 +12,7 @@ import { acceptMultipartJob } from "../lib/job-intake.js";
 import { firstAvailable, runCommand } from "../lib/command.js";
 import { processJob, writeCapabilities } from "../worker/index.js";
 
-const AGENT_VERSION = process.env.AGENT_VERSION || "0.2.0";
+const AGENT_VERSION = process.env.AGENT_VERSION || "0.2.1";
 const PROTOCOL_VERSION = 1;
 const DEFAULT_PORT = 4789;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
