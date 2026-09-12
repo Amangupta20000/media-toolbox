@@ -221,6 +221,11 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .result-summary span, .result-summary strong { display: block; }
 .result-summary span { margin-bottom: 5px; color: #9ba9b6; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
 .result-summary strong { overflow: hidden; color: #3b5870; font-size: 10px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.result-download-note { display: flex; align-items: center; justify-content: space-between; gap: 13px; margin: 16px 0 2px; padding: 12px 14px; text-align: left; background: #eef8f8; border: 1px solid #c9e7e5; border-radius: 10px; }
+.result-download-note-copy { display: flex; align-items: flex-start; min-width: 0; gap: 8px; color: #557384; font-size: 10px; line-height: 1.5; }
+.result-download-note-copy svg { flex: 0 0 auto; margin-top: 1px; color: #278f94; }
+.result-download-note-copy code { overflow-wrap: anywhere; color: var(--navy); font-size: 9px; }
+.result-download-note-link { flex: 0 0 auto; color: #167d84; font-size: 10px; font-weight: 800; white-space: nowrap; }
 .warning-list { display: grid; gap: 7px; margin: 15px 0; text-align: left; }
 .warning-list > div { display: flex; align-items: flex-start; gap: 7px; padding: 9px 11px; color: #97701e; background: var(--warning-bg); border: 1px solid #f8e7be; border-radius: 8px; font-size: 10px; line-height: 1.4; }
 .job-actions { display: flex; justify-content: center; gap: 9px; margin-top: 22px; }
@@ -479,6 +484,10 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .result-summary > div { background: #132b3a; border-color: #2b4656; }
 [data-theme="dark"] .result-summary span { color: #8ea5b4; }
 [data-theme="dark"] .result-summary strong { color: #c8dce5; }
+[data-theme="dark"] .result-download-note { background: #123842; border-color: #2c6970; }
+[data-theme="dark"] .result-download-note-copy { color: #a6bdc9; }
+[data-theme="dark"] .result-download-note-copy code { color: #dcebf2; }
+[data-theme="dark"] .result-download-note-link { color: #8fe0d8; }
 [data-theme="dark"] .progress-track, [data-theme="dark"] .conversion-progress-track { background: #2a4051; }
 [data-theme="dark"] .progress-meta, [data-theme="dark"] .conversion-progress-meta { color: #91a6b5; }
 [data-theme="dark"] .conversion-progress-heading { color: #dcebf2; }
@@ -579,6 +588,8 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
   .job-card { padding: 22px 17px 24px; }
   .result-summary { grid-template-columns: repeat(2, 1fr); }
   .job-actions { align-items: stretch; flex-direction: column; }
+  .result-download-note { align-items: flex-start; flex-direction: column; }
+  .result-download-note-link { white-space: normal; }
 }
 
 .topbar-status { text-decoration: none; }
