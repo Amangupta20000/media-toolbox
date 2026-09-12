@@ -75,6 +75,8 @@ The release workflow reads that public variable and embeds it in every packaged 
 
 The offline command remains available for development and disconnected use. For public user requests, use the SSD-backed licensing server below; it generates a code without requiring the user to send a Device ID, then binds it atomically to the first agent that redeems it. A code cannot be reused after redemption.
 
+Users can also request a code directly from the Local agent desktop dashboard. After accepting the legal documents, they enter the website origin and click **Request activation code**. The request appears in `/license-admin` for the owner to approve or decline. Once approved, the code appears in the desktop dashboard, where the user can copy it or click **Activate now**. The desktop request and the website request use the same one-time licensing-server workflow; the code is never exposed in the owner's request list.
+
 ### SSD-backed licensing server
 
 The licensing server is a separate, small Node service. It does not run media jobs and does not receive media files. It stores its own SQLite database and encrypted signing-key blob only in `/Volumes/Sandisk Exf/MediaToolboxLicensing`, after checking the configured exFAT volume UUID. The service fails closed if the expected SSD is not mounted.

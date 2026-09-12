@@ -47,6 +47,17 @@ if (!app.requestSingleInstanceLock()) {
       const value = agent.acceptLegal();
       return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
     });
+    ipcMain.handle("agent:start-trial", () => {
+      const value = agent.startTrial();
+      return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
+    });
+    ipcMain.handle("agent:get-license-request-config", () => agent.getLicenseRequestConfig());
+    ipcMain.handle("agent:request-activation-code", (_event, origin) => agent.requestActivationCode(String(origin || ""), `Local agent dashboard · ${process.platform}`));
+    ipcMain.handle("agent:get-activation-request-status", (_event, requestId, requestToken) => agent.getActivationRequestStatus(String(requestId || ""), String(requestToken || "")));
+    ipcMain.handle("agent:copy-text", (_event, value) => {
+      clipboard.writeText(String(value || ""));
+      return { ok: true };
+    });
     ipcMain.handle("agent:logout", () => {
       agent.logoutAdmin();
       return agent.getManagementState();

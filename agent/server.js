@@ -11,7 +11,7 @@ import { config, paths } from "../lib/config.js";
 import { acceptMultipartJob } from "../lib/job-intake.js";
 import { firstAvailable, runCommand } from "../lib/command.js";
 import { processJob, writeCapabilities } from "../worker/index.js";
-import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, activateOnline, authorizeProcessing, ensureAgentAuth, getAuthorizationState, getDeviceId as getDeviceIdFromAuth, hasOnlineLicenseServer, loginAdmin as loginAdminAgent, logoutAdmin as logoutAdminAgent } from "./auth.js";
+import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, activateOnline, authorizeProcessing, ensureAgentAuth, getActivationRequestStatus as getActivationRequestStatusAgent, getAuthorizationState, getDeviceId as getDeviceIdFromAuth, getLicenseRequestConfig as getLicenseRequestConfigAgent, hasOnlineLicenseServer, loginAdmin as loginAdminAgent, logoutAdmin as logoutAdminAgent, requestActivationCode as requestActivationCodeAgent, startTrial as startTrialAgent } from "./auth.js";
 
 const AGENT_VERSION = process.env.AGENT_VERSION || "0.2.1";
 const PROTOCOL_VERSION = 1;
@@ -645,6 +645,12 @@ export function acceptLegal() {
   return authorization;
 }
 
+export function startTrial() {
+  const authorization = startTrialAgent();
+  rebuildAllowedOrigins();
+  return authorization;
+}
+
 export function logoutAdmin() {
   const authorization = logoutAdminAgent();
   revokeAllSessions();
@@ -663,6 +669,18 @@ export function activateLicense(code) {
   rebuildAllowedOrigins();
   revokeAllSessions();
   return authorization;
+}
+
+export function getLicenseRequestConfig() {
+  return getLicenseRequestConfigAgent();
+}
+
+export function requestActivationCode(origin, requesterLabel) {
+  return requestActivationCodeAgent(origin, requesterLabel);
+}
+
+export function getActivationRequestStatus(requestId, requestToken) {
+  return getActivationRequestStatusAgent(requestId, requestToken);
 }
 
 export function getDeviceId() {

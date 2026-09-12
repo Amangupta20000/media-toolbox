@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
@@ -129,6 +130,67 @@ test("agent starts a persistent five-minute trial without login or activation", 
   const deniedAfterExpiry = (await import("../agent/auth.js")).authorizeProcessing("http://localhost:3000", startedAt + 5 * 60 * 1000 + 1);
   assert.equal(deniedAfterExpiry.ok, false);
   assert.equal(deniedAfterExpiry.code, "activation_required");
+});
+
+test("dashboard trial action starts the trial explicitly after legal consent", () => {
+  const explicitTrialRoot = path.join(testRoot, "explicit-trial");
+  const childScript = `import { acceptLegalConsent, startTrial, getAuthorizationState } from "./agent/auth.js";
+acceptLegalConsent();
+const state = startTrial();
+if (state.mode !== "trial" || !state.trialStartedAt || !state.trialExpiresAt) process.exit(1);
+if (getAuthorizationState().trialStartedAt !== state.trialStartedAt) process.exit(1);`;
+  const child = spawnSync(process.execPath, ["--input-type=module", "--eval", childScript], {
+    cwd: path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
+    env: {
+      ...process.env,
+      DATA_DIR: path.join(explicitTrialRoot, "data"),
+      MEDIA_TOOLBOX_DOWNLOADS_DIR: path.join(explicitTrialRoot, "Downloads"),
+    },
+    encoding: "utf8",
+  });
+  assert.equal(child.status, 0, `The explicit dashboard trial action failed: ${child.stdout}${child.stderr}`);
+});
+
+test("desktop dashboard can request and poll an online activation code", async () => {
+  const auth = await import("../agent/auth.js");
+  const previousServerUrl = process.env.AGENT_LICENSE_SERVER_URL;
+  const requests = [];
+  const server = http.createServer(async (request, response) => {
+    requests.push({ method: request.method, url: request.url, headers: request.headers });
+    if (request.method === "POST" && request.url === "/v1/license-requests") {
+      let body = "";
+      for await (const chunk of request) body += chunk;
+      assert.deepEqual(JSON.parse(body), { origin: "http://localhost:3000", requesterLabel: "Local agent dashboard" });
+      response.writeHead(201, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ requestId: "dashboard-request", requestToken: "request-secret", status: "pending", origin: "http://localhost:3000" }));
+      return;
+    }
+    if (request.method === "GET" && request.url === "/v1/license-requests/dashboard-request") {
+      assert.equal(request.headers["x-request-token"], "request-secret");
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ id: "dashboard-request", status: "approved", origin: "http://localhost:3000", code: "MT1-approved-dashboard-code" }));
+      return;
+    }
+    response.writeHead(404);
+    response.end();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    process.env.AGENT_LICENSE_SERVER_URL = `http://127.0.0.1:${server.address().port}`;
+    const config = auth.getLicenseRequestConfig();
+    assert.equal(config.available, true);
+    assert.ok(config.suggestedOrigins.includes("https://media-toolbox-woad.vercel.app"));
+    const created = await auth.requestActivationCode("http://localhost:3000", "Local agent dashboard");
+    assert.equal(created.status, "pending");
+    const approved = await auth.getActivationRequestStatus(created.requestId, created.requestToken);
+    assert.equal(approved.status, "approved");
+    assert.equal(approved.code, "MT1-approved-dashboard-code");
+    assert.equal(requests.length, 2);
+  } finally {
+    if (previousServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_URL;
+    else process.env.AGENT_LICENSE_SERVER_URL = previousServerUrl;
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test("agent persists Admin authorization across restarts and rejects bad credentials", async () => {

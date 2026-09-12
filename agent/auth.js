@@ -166,6 +166,19 @@ export function acceptLegalConsent(now = Date.now()) {
   return getAuthorizationState(now);
 }
 
+export function startTrial(now = Date.now()) {
+  const current = requireLegalConsent();
+  if (current.mode !== "locked") return current;
+  if (!current.trialAvailable) {
+    const error = new Error("The five-minute trial has already been used or expired. Admin login or activation is required.");
+    error.code = "activation_required";
+    error.authorization = current;
+    throw error;
+  }
+  updateAgentAuth({ trialStartedAt: now, trialConsumed: 1 });
+  return getAuthorizationState(now);
+}
+
 function requireLegalConsent() {
   const state = getAuthorizationState();
   if (state.legalAccepted) return state;
@@ -266,30 +279,83 @@ export function hasOnlineLicenseServer() {
   return Boolean(onlineLicenseServerUrl());
 }
 
-function onlineLicenseServerUrl() {
+export function onlineLicenseServerUrl() {
   return String(process.env.AGENT_LICENSE_SERVER_URL || process.env.NEXT_PUBLIC_LICENSE_SERVER_URL || packagedLicenseServerUrl()).trim().replace(/\/$/, "");
+}
+
+function onlineLicenseUrl(pathname) {
+  const serverUrl = onlineLicenseServerUrl();
+  if (!serverUrl) throw new Error("The online licensing server is not configured on this agent.");
+  let parsed;
+  try { parsed = new URL(serverUrl); } catch { throw new Error("The online licensing server URL is invalid."); }
+  if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("The online licensing server URL must use HTTP or HTTPS.");
+  return `${serverUrl}${pathname}`;
+}
+
+async function onlineLicenseFetch(pathname, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(onlineLicenseUrl(pathname), {
+      cache: "no-store",
+      ...options,
+      signal: controller.signal,
+    });
+    let body = {};
+    try { body = await response.json(); } catch { /* report the status below */ }
+    if (!response.ok) throw new Error(body.error || `The licensing server rejected the request (${response.status}).`);
+    return body;
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("The licensing server request timed out.");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function requestOrigin(value) {
+  const origin = normalizeOrigin(value);
+  if (!origin) throw new Error("Enter a valid website origin, such as https://media-toolbox-woad.vercel.app.");
+  return origin;
+}
+
+export function getLicenseRequestConfig() {
+  return {
+    available: hasOnlineLicenseServer(),
+    serverUrl: onlineLicenseServerUrl(),
+    suggestedOrigins: defaultTrustedOrigins(),
+  };
+}
+
+export async function requestActivationCode(origin, requesterLabel = "Local agent dashboard") {
+  requireLegalConsent();
+  const normalizedOrigin = requestOrigin(origin);
+  const label = String(requesterLabel || "Local agent dashboard").replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim().slice(0, 80) || "Local agent dashboard";
+  return onlineLicenseFetch("/v1/license-requests", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ origin: normalizedOrigin, requesterLabel: label }),
+  });
+}
+
+export async function getActivationRequestStatus(requestId, requestToken) {
+  const id = String(requestId || "").trim();
+  const token = String(requestToken || "").trim();
+  if (!id || !token) throw new Error("The activation request is incomplete.");
+  return onlineLicenseFetch(`/v1/license-requests/${encodeURIComponent(id)}`, {
+    headers: { "X-Request-Token": token },
+  });
 }
 
 export async function activateOnline(code, now = Date.now()) {
   requireLegalConsent();
   const record = ensureAgentAuth();
-  const serverUrl = onlineLicenseServerUrl();
-  if (!serverUrl) throw new Error("The online licensing server is not configured on this agent.");
-  let parsed;
-  try { parsed = new URL(serverUrl); } catch { throw new Error("The online licensing server URL is invalid."); }
-  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error("The online licensing server URL must use HTTP or HTTPS.");
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
-    const response = await fetch(`${serverUrl}/v1/licenses/redeem`, {
+    const body = await onlineLicenseFetch("/v1/licenses/redeem", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code: String(code || "").trim(), deviceId: record.device_id }),
-      signal: controller.signal,
     });
-    let body = {};
-    try { body = await response.json(); } catch { /* report the status below */ }
-    if (!response.ok) throw new Error(body.error || `The licensing server rejected the code (${response.status}).`);
     if (!body.token) throw new Error("The licensing server did not return a bound activation token.");
     const publicKey = readPublicKey();
     if (!publicKey) throw new Error("Activation is not configured on this agent. The owner must embed the license public key before packaging.");
@@ -298,10 +364,7 @@ export async function activateOnline(code, now = Date.now()) {
     if (payload.deviceId !== record.device_id) throw new Error("The licensing server returned a token for a different device.");
     return activateVerifiedPayload(payload, body.token, record, now);
   } catch (error) {
-    if (error?.name === "AbortError") throw new Error("The licensing server request timed out.");
     throw error;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
