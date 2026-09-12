@@ -8,8 +8,14 @@ function normalizedName(name) {
   if (name.startsWith("Media.Toolbox.Agent.Setup.")) {
     return `Media-Toolbox-Agent-Setup-${name.slice("Media.Toolbox.Agent.Setup.".length)}`;
   }
+  if (name.startsWith("Media Toolbox Agent Setup ")) {
+    return `Media-Toolbox-Agent-Setup-${name.slice("Media Toolbox Agent Setup ".length)}`;
+  }
   if (name.startsWith("Media.Toolbox.Agent-")) {
     return `Media-Toolbox-Agent-${name.slice("Media.Toolbox.Agent-".length)}`;
+  }
+  if (name.startsWith("Media Toolbox Agent-")) {
+    return `Media-Toolbox-Agent-${name.slice("Media Toolbox Agent-".length)}`;
   }
   return name;
 }

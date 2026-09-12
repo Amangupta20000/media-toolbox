@@ -116,7 +116,10 @@ jobs:
             npx --no-install electron-builder --config electron-builder.yml --mac --publish never
           else
             unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
-            npx --no-install electron-builder --config electron-builder.yml --mac --publish never
+            # Keep unsigned development releases updateable on macOS by creating a
+            # complete ad-hoc app signature. Developer ID signing is still used
+            # automatically whenever the production secrets above are present.
+            npx --no-install electron-builder --config electron-builder.yml --config.mac.identity=- --publish never
           fi
       - name: Package Linux installer target
         if: matrix.platform == 'linux'
