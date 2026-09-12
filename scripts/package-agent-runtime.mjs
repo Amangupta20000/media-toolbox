@@ -46,10 +46,18 @@ await fs.writeFile(path.join(runtimeDirectory, "package.json"), `${JSON.stringif
 // electron-builder out of the runtime update while preserving native modules
 // needed by the local worker on the target platform.
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-const npmTree = spawnSync(npmCommand, ["ls", "--omit=dev", "--all", "--parseable"], { cwd: sourceDirectory, encoding: "utf8" });
+const npmTree = spawnSync(npmCommand, ["ls", "--omit=dev", "--all", "--parseable"], {
+  cwd: sourceDirectory,
+  encoding: "utf8",
+  // Windows exposes npm as a .cmd shim. Node must invoke that shim through
+  // the platform shell when this script is run from GitHub Actions.
+  shell: process.platform === "win32",
+});
+if (npmTree.error) throw new Error(`Could not inspect production dependencies with ${npmCommand}: ${npmTree.error.message}`);
 const nodeModulesRoot = path.join(sourceDirectory, "node_modules");
-const modulePaths = npmTree.stdout.split(/\r?\n/).map((value) => value.trim()).filter((value) => value && value !== sourceDirectory && value.startsWith(`${nodeModulesRoot}${path.sep}`));
-if (!modulePaths.length) throw new Error(`Could not determine production dependencies for the runtime package. ${npmTree.stderr || ""}`.trim());
+const npmTreeOutput = String(npmTree.stdout || "");
+const modulePaths = npmTreeOutput.split(/\r?\n/).map((value) => value.trim()).filter((value) => value && value !== sourceDirectory && value.startsWith(`${nodeModulesRoot}${path.sep}`));
+if (!modulePaths.length) throw new Error(`Could not determine production dependencies for the runtime package. ${String(npmTree.stderr || "")}`.trim());
 for (const modulePath of modulePaths) {
   const relative = path.relative(nodeModulesRoot, modulePath);
   await fs.cp(modulePath, path.join(runtimeDirectory, "node_modules", relative), { recursive: true, force: true });

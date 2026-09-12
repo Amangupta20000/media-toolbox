@@ -181,3 +181,10 @@ test("runtime updater version comparison and missing-key behavior are determinis
   const updater = createRuntimeUpdater({ userDataPath: await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-runtime-update-no-key-")), latestReleaseUrl: "https://updates.example.test/releases/latest", env: {}, getCurrentVersion: () => "1.0.26" });
   assert.equal((await updater.check()).status, "unavailable");
 });
+
+test("runtime package dependency discovery supports Windows npm shims", async () => {
+  const source = await fs.readFile(new URL("../scripts/package-agent-runtime.mjs", import.meta.url), "utf8");
+  assert.match(source, /const npmCommand = process\.platform === "win32" \? "npm\.cmd" : "npm"/);
+  assert.match(source, /shell: process\.platform === "win32"/);
+  assert.match(source, /String\(npmTree\.stdout \|\| ""\)/);
+});
