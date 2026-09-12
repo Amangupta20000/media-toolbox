@@ -151,15 +151,20 @@
     if (!badge || !message || !startButton || !stopButton) return;
     setLicenseServerNotice(licenseServerNotice, licenseServerNoticeKind);
     const healthy = Boolean(value.healthy);
+    const publicConfigured = Boolean(value.publicUrl);
+    const publicHealthy = value.publicHealthy === null || value.publicHealthy === undefined ? null : Boolean(value.publicHealthy);
     const mounted = Boolean(value.ssdMounted);
-    badge.textContent = healthy ? "Running" : mounted ? "Stopped" : "SSD not mounted";
-    badge.className = `badge ${healthy ? "ready" : "error"}`;
+    const fullyReachable = healthy && (!publicConfigured || publicHealthy !== false);
+    badge.textContent = !mounted ? "SSD not mounted" : !healthy ? "Stopped" : fullyReachable ? "Running" : "Public endpoint unavailable";
+    badge.className = `badge ${!mounted || !healthy ? "error" : fullyReachable ? "ready" : "warning"}`;
     message.textContent = healthy
       ? `The licensing service is reachable at ${value.url || "http://127.0.0.1:4900"}. Tailscale Funnel can forward to it using its saved configuration.`
       : value.error || (mounted ? "The licensing service is not running. Click Start licensing server after the SSD is mounted." : "Connect the Sandisk Exf licensing SSD, then click Start licensing server.");
     el("license-server-url").textContent = value.url || "http://127.0.0.1:4900";
+    el("license-server-local-status").textContent = healthy ? "Connected" : "Unavailable";
     el("license-server-storage").textContent = value.dataDir || "/Volumes/Sandisk Exf/MediaToolboxLicensing";
     el("license-server-public-url").textContent = value.publicUrl || "Configured by Tailscale Funnel";
+    el("license-server-public-status").textContent = !publicConfigured ? "Not configured" : publicHealthy === true ? "Connected" : publicHealthy === false ? "Unavailable" : "Checking";
     startButton.disabled = healthy || !mounted || value.available === false;
     startButton.textContent = healthy ? "Licensing server running" : "Start licensing server";
     stopButton.classList.toggle("hidden", !value.managed);

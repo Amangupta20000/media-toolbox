@@ -56,6 +56,19 @@ test("licensing server handles approval, online agent redemption, replay, and wr
     assert.equal(health.status, 200);
     assert.equal((await health.json()).service, "media-toolbox-license-server");
 
+    const preflight = await fetch(`${base}/v1/admin/login`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:3000",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type",
+      },
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get("access-control-allow-origin"), "http://localhost:3000");
+    assert.match(preflight.headers.get("access-control-allow-methods") || "", /POST/);
+    assert.match(preflight.headers.get("access-control-allow-headers") || "", /Content-Type/i);
+
     const invalidOrigin = await jsonRequest("/v1/license-requests", { method: "POST", headers: { Origin: "https://evil.example" }, body: JSON.stringify({ origin: "https://evil.example" }) });
     assert.equal(invalidOrigin.status, 403);
 
@@ -71,8 +84,9 @@ test("licensing server handles approval, online agent redemption, replay, and wr
     const missingToken = await fetch(`${base}/v1/license-requests/${created.requestId}`, { headers: { Origin: "http://localhost:3000" } });
     assert.equal(missingToken.status, 400);
 
-    const badLogin = await jsonRequest("/v1/admin/login", { method: "POST", body: JSON.stringify({ username: "Admin", password: "wrong" }) });
+    const badLogin = await jsonRequest("/v1/admin/login", { method: "POST", headers: { Origin: "http://localhost:3000" }, body: JSON.stringify({ username: "Admin", password: "wrong" }) });
     assert.equal(badLogin.status, 401);
+    assert.equal(badLogin.headers.get("access-control-allow-origin"), "http://localhost:3000");
     const login = await jsonRequest("/v1/admin/login", { method: "POST", body: JSON.stringify({ username: "Admin", password: "12345" }) });
     assert.equal(login.status, 200);
     const admin = await login.json();

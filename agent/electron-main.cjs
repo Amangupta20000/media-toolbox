@@ -256,10 +256,14 @@ if (!app.requestSingleInstanceLock()) {
       electronExecutable: process.execPath,
       useElectronRuntime: !process.defaultApp,
     });
-    // The owner dashboard may run on the same Mac as the SSD licensing
-    // service. Prefer loopback there and fall back to the packaged public URL
-    // for agents installed on other computers.
-    process.env.AGENT_LICENSE_SERVER_LOCAL_URL = process.env.AGENT_LICENSE_SERVER_LOCAL_URL || "http://127.0.0.1:4900";
+    // Prefer loopback only when this is the owner Mac. A released client agent
+    // must not spend its first licensing request trying to contact a server on
+    // its own computer; the licensing server normally lives on the owner's
+    // machine and is reached through the packaged public HTTPS URL. Developers
+    // can still opt in explicitly through AGENT_LICENSE_SERVER_LOCAL_URL.
+    if (!process.env.AGENT_LICENSE_SERVER_LOCAL_URL && process.platform === "darwin" && fs.existsSync("/Volumes/Sandisk Exf")) {
+      process.env.AGENT_LICENSE_SERVER_LOCAL_URL = "http://127.0.0.1:4900";
+    }
     process.env.DATA_DIR = path.join(app.getPath("userData"), "data");
     process.env.AGENT_SETUP_URL = process.env.AGENT_SETUP_URL || "http://localhost:3000/local-agent";
     if (process.platform === "darwin") app.dock?.hide();

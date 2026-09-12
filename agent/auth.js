@@ -10,6 +10,11 @@ import { activationDurationOptions, isAllowedActivationDuration, verifyLicenseTo
 export const ADMIN_USERNAME = "Admin";
 export const TRIAL_DURATION_MS = 5 * 60 * 1000;
 export const ACTIVATION_DURATION_MS = 10 * 60 * 1000;
+// Offline tester access intentionally bypasses the online licensing server.
+// Keep this code limited to controlled testing builds; every redemption starts
+// a fresh ten-minute activation and is not recorded as a one-use license.
+export const TESTER_ACTIVATION_CODE = "iamatester";
+export const TESTER_ACTIVATION_DURATION_MS = 10 * 60 * 1000;
 export const ACTIVATION_FREE_SESSION_LIMIT = 2;
 export const ACTIVATION_SESSION_TIME_FACTOR = 2 / 3;
 export const LEGAL_VERSION = "1.0.0";
@@ -318,6 +323,23 @@ export function activate(code, now = Date.now()) {
   return activateVerifiedPayload(payload, code, record, now);
 }
 
+export function activateTester(code, now = Date.now()) {
+  requireLegalConsent();
+  if (String(code || "").trim() !== TESTER_ACTIVATION_CODE) {
+    throw new Error("The offline tester activation code is invalid.");
+  }
+  const record = ensureAgentAuth();
+  updateAgentAuth({
+    activationId: `tester-${randomUUID()}`,
+    activationStartedAt: now,
+    activationExpiresAt: now + TESTER_ACTIVATION_DURATION_MS,
+    activationOriginsJson: JSON.stringify(defaultTrustedOrigins()),
+    activationCodeHash: createHash("sha256").update(TESTER_ACTIVATION_CODE).digest("hex"),
+    activationSessionActive: 1,
+  });
+  return getAuthorizationState(now);
+}
+
 function activateVerifiedPayload(payload, code, record, now) {
   if (payload.v !== 1 || typeof payload.licenseId !== "string") throw new Error("The activation code format is invalid.");
   // The local used-license table prevents replay on this installation. The
@@ -367,6 +389,7 @@ function onlineLicenseUrls(pathname) {
 
 async function onlineLicenseFetch(pathname, options = {}) {
   let lastError;
+  const attempts = [];
   for (const requestUrl of onlineLicenseUrls(pathname)) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15_000);
@@ -378,13 +401,25 @@ async function onlineLicenseFetch(pathname, options = {}) {
       });
       let body = {};
       try { body = await response.json(); } catch { /* report the status below */ }
-      if (!response.ok) throw new Error(body.error || `The licensing server rejected the request (${response.status}).`);
+      if (!response.ok) {
+        const error = new Error(body.error || `The licensing server rejected the request (${response.status}).`);
+        error.status = response.status;
+        throw error;
+      }
       return body;
     } catch (error) {
       lastError = error?.name === "AbortError" ? new Error("The licensing server request timed out.") : error;
+      attempts.push({ url: requestUrl, message: lastError?.message || "The request failed.", status: lastError?.status || null });
     } finally {
       clearTimeout(timeout);
     }
+  }
+  if (attempts.length > 1 || lastError?.name === "TypeError") {
+    const details = attempts.map(({ url, message }) => `${url}: ${message}`).join(" | ");
+    const error = new Error(`The licensing server could not be reached. ${details} Check that the owner's licensing server and public HTTPS endpoint are running.`);
+    error.cause = lastError;
+    error.attempts = attempts;
+    throw error;
   }
   throw lastError || new Error("The licensing server request failed.");
 }

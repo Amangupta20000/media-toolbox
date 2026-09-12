@@ -12,7 +12,7 @@ import { config, paths } from "../lib/config.js";
 import { acceptMultipartJob } from "../lib/job-intake.js";
 import { firstAvailable, runCommand } from "../lib/command.js";
 import { processJob, writeCapabilities } from "../worker/index.js";
-import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, activateOnline, authorizeProcessing, ensureAgentAuth, getActivationRequestStatus as getActivationRequestStatusAgent, getAuthorizationState as getAuthorizationStateAgent, getDeviceId as getDeviceIdFromAuth, getLicenseAdminAudit as getLicenseAdminAuditAgent, getLicenseAdminRequests as getLicenseAdminRequestsAgent, getLicenseAdminState as getLicenseAdminStateAgent, getLicenseRequestConfig as getLicenseRequestConfigAgent, hasOnlineLicenseServer, loginActivation as loginActivationAgent, loginAdmin as loginAdminAgent, loginLicenseAdmin as loginLicenseAdminAgent, logoutActivation as logoutActivationAgent, logoutAdmin as logoutAdminAgent, logoutLicenseAdmin as logoutLicenseAdminAgent, requestActivationCode as requestActivationCodeAgent, approveLicenseRequest as approveLicenseRequestAgent, declineLicenseRequest as declineLicenseRequestAgent, startTrial as startTrialAgent } from "./auth.js";
+import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, activateOnline, activateTester, authorizeProcessing, ensureAgentAuth, getActivationRequestStatus as getActivationRequestStatusAgent, getAuthorizationState as getAuthorizationStateAgent, getDeviceId as getDeviceIdFromAuth, getLicenseAdminAudit as getLicenseAdminAuditAgent, getLicenseAdminRequests as getLicenseAdminRequestsAgent, getLicenseAdminState as getLicenseAdminStateAgent, getLicenseRequestConfig as getLicenseRequestConfigAgent, hasOnlineLicenseServer, loginActivation as loginActivationAgent, loginAdmin as loginAdminAgent, loginLicenseAdmin as loginLicenseAdminAgent, logoutActivation as logoutActivationAgent, logoutAdmin as logoutAdminAgent, logoutLicenseAdmin as logoutLicenseAdminAgent, requestActivationCode as requestActivationCodeAgent, approveLicenseRequest as approveLicenseRequestAgent, declineLicenseRequest as declineLicenseRequestAgent, startTrial as startTrialAgent, TESTER_ACTIVATION_CODE } from "./auth.js";
 
 const AGENT_VERSION = process.env.AGENT_VERSION || "0.2.1";
 const PROTOCOL_VERSION = 1;
@@ -749,6 +749,13 @@ export function loginActivation() {
 }
 
 export function activateLicense(code) {
+  const normalizedCode = String(code || "").trim();
+  if (normalizedCode === TESTER_ACTIVATION_CODE) {
+    const authorization = activateTester(normalizedCode);
+    rebuildAllowedOrigins();
+    revokeAllSessions();
+    return authorization;
+  }
   if (hasOnlineLicenseServer()) {
     return activateOnline(code).then((authorization) => {
       rebuildAllowedOrigins();

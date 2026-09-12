@@ -317,6 +317,40 @@ test("dashboard licensing server manager starts and stops the loopback service",
   assert.equal(stopped.managed, false);
 });
 
+test("dashboard licensing server manager reports local and public health separately", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const temporaryMount = path.join(testRoot, "license-server-public-health");
+  const dataDirectory = path.join(temporaryMount, "MediaToolboxLicensing");
+  const previousPublicUrl = process.env.LICENSE_SERVER_PUBLIC_URL;
+  process.env.LICENSE_SERVER_PUBLIC_URL = "https://license.example.test";
+  const checkedUrls = [];
+  try {
+    const manager = createLicenseServerManager({
+      moduleDirectory: path.join(root, "agent"),
+      dataDirectory,
+      mountPath: temporaryMount,
+      existsSync: (value) => value === temporaryMount || value === dataDirectory || value.endsWith(path.join("license-server", "index.js")),
+      healthCheck: async (value) => {
+        checkedUrls.push(value);
+        return value === "http://127.0.0.1:4900/v1/health";
+      },
+      publicHealthCheck: async (value) => {
+        checkedUrls.push(value);
+        return false;
+      },
+    });
+    const state = await manager.getState();
+    assert.equal(state.healthy, true);
+    assert.equal(state.publicHealthy, false);
+    assert.match(state.error, /public HTTPS endpoint could not be reached/i);
+    assert.deepEqual(checkedUrls.sort(), ["http://127.0.0.1:4900/v1/health", "https://license.example.test/v1/health"]);
+  } finally {
+    if (previousPublicUrl === undefined) delete process.env.LICENSE_SERVER_PUBLIC_URL;
+    else process.env.LICENSE_SERVER_PUBLIC_URL = previousPublicUrl;
+  }
+});
+
 test("client installations do not advertise the owner-only SSD licensing server", async () => {
   const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -437,6 +471,25 @@ test("online licensing configuration supports a local-first fallback", async () 
   }
 });
 
+test("dashboard reports a useful error when the public licensing server cannot be reached", async () => {
+  const auth = await import("../agent/auth.js");
+  const previousServerUrl = process.env.AGENT_LICENSE_SERVER_URL;
+  const previousLocalServerUrl = process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
+  try {
+    process.env.AGENT_LICENSE_SERVER_URL = "http://127.0.0.1:1";
+    delete process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
+    await assert.rejects(
+      () => auth.requestActivationCode("http://localhost:3000", "Local agent dashboard", 600000),
+      /licensing server could not be reached.*127\.0\.0\.1:1/i,
+    );
+  } finally {
+    if (previousServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_URL;
+    else process.env.AGENT_LICENSE_SERVER_URL = previousServerUrl;
+    if (previousLocalServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
+    else process.env.AGENT_LICENSE_SERVER_LOCAL_URL = previousLocalServerUrl;
+  }
+});
+
 test("agent persists Admin authorization across restarts and rejects bad credentials", async () => {
   assert.throws(() => agent.loginAdmin("Admin", "wrong"), /incorrect/i);
   agent.loginAdmin("Admin", "12345");
@@ -502,6 +555,31 @@ catch (error) { console.error(error.message); process.exit(1); }`;
   agent.activateLicense(code);
   assert.equal(agent.getAgentState().authorization.mode, "activation");
   assert.throws(() => agent.activateLicense(code), /already been used/i);
+});
+
+test("offline tester activation is reusable for ten minutes without a licensing server", () => {
+  const childRoot = path.join(testRoot, "offline-tester-installation");
+  const childScript = `import { acceptLegalConsent, getAuthorizationState } from "./agent/auth.js";
+import { activateLicense } from "./agent/server.js";
+acceptLegalConsent();
+const first = activateLicense("iamatester");
+const second = activateLicense("iamatester");
+if (first.mode !== "activation" || second.mode !== "activation") throw new Error("Tester activation did not authorize processing.");
+if (first.activationExpiresAt - first.activationStartedAt !== 10 * 60 * 1000) throw new Error("Tester activation did not last ten minutes.");
+if (first.activationId === second.activationId) throw new Error("Tester activation was not reusable.");
+if (getAuthorizationState().activationExpiresAt - getAuthorizationState().activationStartedAt !== 10 * 60 * 1000) throw new Error("Tester activation duration changed.");`;
+  const child = spawnSync(process.execPath, ["--input-type=module", "--eval", childScript], {
+    cwd: path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
+    env: {
+      ...process.env,
+      DATA_DIR: path.join(childRoot, "data"),
+      MEDIA_TOOLBOX_DOWNLOADS_DIR: path.join(childRoot, "Downloads"),
+      AGENT_LICENSE_SERVER_URL: "http://127.0.0.1:1",
+      AGENT_LICENSE_SERVER_LOCAL_URL: "",
+    },
+    encoding: "utf8",
+  });
+  assert.equal(child.status, 0, `Reusable offline tester activation failed: ${child.stdout}\n${child.stderr}`);
 });
 
 test("agent reports health, rejects unauthenticated jobs, and pairs with a one-time code", async () => {

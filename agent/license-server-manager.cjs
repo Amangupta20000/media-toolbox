@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const http = require("node:http");
+const https = require("node:https");
 const path = require("node:path");
 const { spawn: defaultSpawn } = require("node:child_process");
 
@@ -52,6 +53,16 @@ function probeHealth(url, { httpModule = http, timeoutMs = HEALTH_TIMEOUT_MS } =
   });
 }
 
+function probeEndpoint(url, { timeoutMs = HEALTH_TIMEOUT_MS } = {}) {
+  try {
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol)) return Promise.resolve(false);
+    return probeHealth(url, { httpModule: parsed.protocol === "https:" ? https : http, timeoutMs });
+  } catch {
+    return Promise.resolve(false);
+  }
+}
+
 function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -69,6 +80,7 @@ function createLicenseServerManager({
   spawnImpl = defaultSpawn,
   existsSync = fs.existsSync,
   healthCheck = (url) => probeHealth(url),
+  publicHealthCheck = (url) => probeEndpoint(url),
   logger = console,
 } = {}) {
   let child = null;
@@ -103,18 +115,26 @@ function createLicenseServerManager({
   }
 
   async function getState() {
-    const healthy = await healthCheck(`${url}/v1/health`);
+    const publicEndpoint = publicUrl();
+    const [healthy, publicHealthy] = await Promise.all([
+      healthCheck(`${url}/v1/health`),
+      publicEndpoint ? publicHealthCheck(`${publicEndpoint}/v1/health`) : Promise.resolve(null),
+    ]);
     const storage = storageState();
     const state = {
       available: Boolean(existsSync(entryPath)),
       healthy,
       running: healthy,
+      publicHealthy,
       managed: isAlive(child),
       url,
-      publicUrl: publicUrl(),
+      publicUrl: publicEndpoint,
       ...storage,
       runtime: useElectronRuntime ? "packaged Electron runtime" : (nodeExecutable ? nodeExecutable : "Node 22 required"),
-      error: lastError || (storage.ownerConfigured && !storage.ssdMounted ? "Connect the licensing SSD before starting the server." : ""),
+      error: lastError
+        || (storage.ownerConfigured && !storage.ssdMounted ? "Connect the licensing SSD before starting the server."
+          : healthy && publicEndpoint && publicHealthy === false ? "The local licensing server is running, but its public HTTPS endpoint could not be reached. Check Tailscale Funnel and the public URL."
+            : ""),
     };
     return state;
   }
