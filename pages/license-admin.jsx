@@ -1,5 +1,12 @@
-import { LicenseAdmin } from "../components/license-admin.jsx";
-
 export default function LicenseAdminPage() {
-  return <LicenseAdmin />;
+  return null;
+}
+
+export async function getServerSideProps() {
+  return {
+    redirect: {
+      destination: "/admin",
+      permanent: false,
+    },
+  };
 }

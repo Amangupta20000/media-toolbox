@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { Bot, Clock3, Film, FileText, Image as ImageIcon, KeyRound, Menu, Moon, PanelLeftClose, PanelLeftOpen, ShieldCheck, Sparkles, Sun } from "lucide-react";
+import { Bot, Clock3, Film, FileText, Image as ImageIcon, Menu, Moon, PanelLeftClose, PanelLeftOpen, ShieldCheck, Sparkles, Sun } from "lucide-react";
 import { probeLocalAgent } from "./processing-client.js";
 
 const navigation = [
@@ -14,7 +14,6 @@ const navigation = [
 ];
 
 const moreNavigation = [
-  { href: "/license-admin", label: "Licensing admin", detail: "Owner approval dashboard", icon: KeyRound },
   { href: "/coming-soon", label: "Coming soon", detail: "More tools in progress", icon: Sparkles },
 ];
 

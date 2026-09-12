@@ -21,7 +21,7 @@ SQLite uses full synchronous writes and rollback journaling on exFAT. License co
 ## License flow
 
 1. A user requests a license from the desktop Local Agent dashboard, choosing one of the five allowed durations, and receives a request ID and private request token.
-2. The owner signs into `/license-admin` or the desktop Local Agent dashboard as Admin and approves or declines the request.
+2. The owner signs into the hidden `/admin` route or the desktop Local Agent dashboard as Admin and approves or declines the request.
 3. Approval creates one signed `MT1-...` code scoped to the requested website origin and duration.
 4. The desktop dashboard displays the approved code and the user activates it there.
 5. The agent redeems the code online with its device ID. The server atomically consumes and binds it to the first device, then returns a short-lived device-bound token.

@@ -75,7 +75,7 @@ The release workflow reads that public variable and embeds it in every packaged 
 
 The offline command remains available for development and disconnected use. For public user requests, use the SSD-backed licensing server below; it generates a code without requiring the user to send a Device ID, then binds it atomically to the first agent that redeems it. A code cannot be reused after redemption.
 
-Users request a code only from the Local agent desktop dashboard. After accepting the legal documents, they enter the website origin, choose 10 minutes, 30 minutes, 2 hours, 6 hours, or 1 day, and click **Request activation code**. The owner can approve or decline the request in `/license-admin`, or in the desktop agent dashboard after logging in as Admin. Once approved, the code appears in the desktop dashboard, where the user can copy it or click **Activate now**. The website does not create or poll license requests.
+Users request a code only from the Local agent desktop dashboard. After accepting the legal documents, they enter the website origin, choose 10 minutes, 30 minutes, 2 hours, 6 hours, or 1 day, and click **Request activation code**. The owner can approve or decline the request in the hidden `/admin` route, or in the desktop agent dashboard after logging in as Admin. Once approved, the code appears in the desktop dashboard, where the user can copy it or click **Activate now**. The website does not create or poll license requests.
 
 ### SSD-backed licensing server
 
@@ -115,7 +115,7 @@ The command keeps the Node licensing service running on the SSD and runs `tailsc
 
 Set the owner-only GitHub token on the SSD server as `LICENSE_GITHUB_TOKEN`. It needs permission to manage Actions variables for `Amangupta20000/media-toolbox`; it is never included in the website bundle, desktop agent, or GitHub variable. The dashboard only sends the HTTPS URL to the authenticated licensing server.
 
-The owner opens `/license-admin`, signs in, and approves or declines pending requests, or logs in as Admin in the desktop agent dashboard and uses its **License requests** panel. A user requests a code from the desktop dashboard, waits for owner approval, then copies the displayed code into that dashboard. The service returns the code only to the requesting dashboard session. The agent redeems it with its device ID; the service stores the binding and removes the encrypted code payload.
+The owner opens the hidden `/admin` route, signs in, and approves or declines pending requests, or logs in as Admin in the desktop agent dashboard and uses its **License requests** panel. A user requests a code from the desktop dashboard, waits for owner approval, then copies the displayed code into that dashboard. The service returns the code only to the requesting dashboard session. The agent redeems it with its device ID; the service stores the binding and removes the encrypted code payload.
 
 The initial owner credential is intentionally fixed as `Admin / 12345` to match the product requirement. It is hashed for comparison, rate-limited, and should be replaced before using this service for valuable licenses. Never put the private signing key, master key, Tailscale auth key, GitHub token, or the SSD directory in Vercel or GitHub variables.
 

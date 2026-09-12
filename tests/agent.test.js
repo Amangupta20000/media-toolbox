@@ -170,6 +170,15 @@ test("website local-agent setup does not expose license-request controls", async
   assert.match(source, /request a code.*desktop dashboard|request a code.*desktop/i);
 });
 
+test("web admin panel uses the hidden /admin route and is not in navigation", async () => {
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const adminPage = await fs.readFile(path.join(root, "pages", "admin.jsx"), "utf8");
+  const shell = await fs.readFile(path.join(root, "components", "app-shell.jsx"), "utf8");
+  assert.match(adminPage, /LicenseAdmin/);
+  assert.doesNotMatch(shell, /href:\s*["']\/license-admin["']/);
+  assert.doesNotMatch(shell, /label:\s*["']Licensing admin["']/);
+});
+
 test("desktop dashboard can request and poll an online activation code", async () => {
   const auth = await import("../agent/auth.js");
   const previousServerUrl = process.env.AGENT_LICENSE_SERVER_URL;
