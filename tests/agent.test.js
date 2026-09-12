@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import http from "node:http";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import test, { after, before } from "node:test";
 import { firstAvailable, runCommand } from "../lib/command.js";
+
+const require = createRequire(import.meta.url);
 
 const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-agent-test-"));
 process.env.DATA_DIR = path.join(testRoot, "data");
@@ -154,14 +158,63 @@ if (getAuthorizationState().trialStartedAt !== state.trialStartedAt) process.exi
 test("dashboard exposes the trial action in the bottom-right tray with subdued admin access", async () => {
   const dashboardHtml = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard.html"), "utf8");
   const dashboardCss = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard.css"), "utf8");
+  const dashboardPreload = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "preload.cjs"), "utf8");
+  const builderConfig = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "electron-builder.yml"), "utf8");
   assert.match(dashboardHtml, /id="start-trial-button"/);
   assert.match(dashboardHtml, /id="admin-control-button"/);
+  assert.match(dashboardHtml, /id="start-license-server"/);
+  assert.match(dashboardHtml, /id="check-license-server"/);
   assert.doesNotMatch(dashboardHtml, /bottom-left/);
   assert.match(dashboardCss, /\.dashboard-actions\{position:fixed;left:0;right:0;bottom:0/);
   assert.match(dashboardCss, /\.admin-action\{background:#102c3d;border:1px solid/);
+  assert.match(dashboardPreload, /agent:start-license-server/);
+  assert.match(dashboardPreload, /agent:get-license-server-state/);
+  assert.match(builderConfig, /license-server\/\*\*\/\*/);
   assert.equal((dashboardHtml.match(/data-license-duration=/g) || []).length, 5);
   assert.match(dashboardHtml, /id="license-owner-panel"/);
   assert.doesNotMatch(dashboardHtml, /bottom-left/);
+});
+
+test("dashboard licensing server manager starts and stops the loopback service", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const temporaryMount = path.join(testRoot, "license-server-manager");
+  const dataDirectory = path.join(temporaryMount, "MediaToolboxLicensing");
+  let healthy = false;
+  let spawned = null;
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.killed = false;
+  child.kill = () => {
+    child.killed = true;
+    child.exitCode = 0;
+    healthy = false;
+    child.emit("exit", 0, "SIGTERM");
+  };
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(root, "agent"),
+    dataDirectory,
+    mountPath: temporaryMount,
+    nodeExecutable: "/node22/bin/node",
+    existsSync: (value) => value === temporaryMount || value === dataDirectory || value.endsWith(path.join("license-server", "index.js")),
+    healthCheck: async () => healthy,
+    spawnImpl: (command, args, options) => {
+      spawned = { command, args, options };
+      healthy = true;
+      return child;
+    },
+    logger: { log() {}, warn() {} },
+  });
+  const started = await manager.start();
+  assert.equal(started.healthy, true);
+  assert.equal(started.started, true);
+  assert.equal(spawned.command, "/node22/bin/node");
+  assert.match(spawned.args[0], /license-server[\\/]index\.js$/);
+  assert.equal(spawned.options.env.LICENSE_DATA_DIR, dataDirectory);
+  assert.equal(spawned.options.env.LICENSE_SERVER_PORT, "4900");
+  const stopped = await manager.stop();
+  assert.equal(stopped.healthy, false);
+  assert.equal(stopped.managed, false);
 });
 
 test("website local-agent setup does not expose license-request controls", async () => {

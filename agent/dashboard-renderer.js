@@ -8,6 +8,7 @@
   let licenseRequestPollTimer = null;
   let licenseRequestPollBusy = false;
   let selectedLicenseDurationMs = 600000;
+  let licenseServerState = {};
 
   function showNotice(message) {
     const notice = el("notice");
@@ -57,6 +58,39 @@
     renderLicenseOwnerPanel(state);
     renderSessions(state.sessions || []);
     renderCapabilities(state.capabilities || {});
+    renderLicenseServer(licenseServerState);
+  }
+
+  function renderLicenseServer(value = {}) {
+    licenseServerState = value || {};
+    const badge = el("license-server-badge");
+    const message = el("license-server-message");
+    const startButton = el("start-license-server");
+    const stopButton = el("stop-license-server");
+    if (!badge || !message || !startButton || !stopButton) return;
+    const healthy = Boolean(value.healthy);
+    const mounted = Boolean(value.ssdMounted);
+    badge.textContent = healthy ? "Running" : mounted ? "Stopped" : "SSD not mounted";
+    badge.className = `badge ${healthy ? "ready" : "error"}`;
+    message.textContent = healthy
+      ? `The licensing service is reachable at ${value.url || "http://127.0.0.1:4900"}. Tailscale Funnel can forward to it using its saved configuration.`
+      : value.error || (mounted ? "The licensing service is not running. Click Start licensing server after the SSD is mounted." : "Connect the Sandisk Exf licensing SSD, then click Start licensing server.");
+    el("license-server-url").textContent = value.url || "http://127.0.0.1:4900";
+    el("license-server-storage").textContent = value.dataDir || "/Volumes/Sandisk Exf/MediaToolboxLicensing";
+    el("license-server-public-url").textContent = value.publicUrl || "Configured by Tailscale Funnel";
+    startButton.disabled = healthy || !mounted || value.available === false;
+    startButton.textContent = healthy ? "Licensing server running" : "Start licensing server";
+    stopButton.classList.toggle("hidden", !value.managed);
+    stopButton.disabled = !value.managed;
+  }
+
+  async function refreshLicenseServer() {
+    if (!api.getLicenseServerState) return;
+    try {
+      renderLicenseServer(await api.getLicenseServerState());
+    } catch (error) {
+      renderLicenseServer({ healthy: false, ssdMounted: false, error: error.message || "The licensing server status could not be checked." });
+    }
   }
 
   function persistLicenseRequest() {
@@ -296,6 +330,38 @@
       button.disabled = false;
     }
   });
+  el("check-license-server").addEventListener("click", async () => {
+    const button = el("check-license-server");
+    button.disabled = true;
+    try {
+      await refreshLicenseServer();
+      showNotice(licenseServerState.healthy ? "The licensing server is reachable." : (licenseServerState.error || "The licensing server is not running."));
+    } finally { button.disabled = false; }
+  });
+  el("start-license-server").addEventListener("click", async () => {
+    const button = el("start-license-server");
+    button.disabled = true;
+    showNotice("");
+    try {
+      renderLicenseServer(await api.startLicenseServer());
+      showNotice("The SSD licensing server is running. The saved Tailscale Funnel can now reach it.");
+    } catch (error) {
+      showNotice(error.message || "The licensing server could not be started.");
+      await refreshLicenseServer();
+    }
+  });
+  el("stop-license-server").addEventListener("click", async () => {
+    const button = el("stop-license-server");
+    if (!confirm("Stop the local SSD licensing server? Public license requests will return 502 until it is started again.")) return;
+    button.disabled = true;
+    try {
+      renderLicenseServer(await api.stopLicenseServer());
+      showNotice("The licensing server was stopped.");
+    } catch (error) {
+      showNotice(error.message || "The licensing server could not be stopped.");
+      await refreshLicenseServer();
+    }
+  });
   document.querySelectorAll("[data-license-duration]").forEach((button) => button.addEventListener("click", () => {
     selectedLicenseDurationMs = Number(button.dataset.licenseDuration);
     el("license-duration").value = String(selectedLicenseDurationMs);
@@ -337,6 +403,8 @@
   if (api.getLicenseRequestConfig) {
     api.getLicenseRequestConfig().then((value) => { licenseRequestConfig = value || {}; renderLicenseRequest(); if (licenseRequest?.status === "pending") startLicenseRequestPolling(); }).catch((error) => showNotice(error.message || "The licensing server configuration could not be read."));
   }
+  refreshLicenseServer();
   refresh();
   setInterval(async () => { if (currentState?.authorization?.mode !== "admin") await refresh(); }, 1000);
+  setInterval(refreshLicenseServer, 5000);
 }());

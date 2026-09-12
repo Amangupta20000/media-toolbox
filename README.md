@@ -93,6 +93,8 @@ Run the service locally:
 LICENSE_DATA_DIR="/Volumes/Sandisk Exf/MediaToolboxLicensing" npm run license-server
 ```
 
+After a restart, the owner can open the installed Local Agent dashboard and click **Start licensing server**. The dashboard checks that the SSD is mounted, selects the packaged runtime (or Node 22 in development), starts the loopback service, and reports its health. No Terminal command is needed. The dashboard does not change or recreate the saved Tailscale Funnel configuration.
+
 Expose only `http://127.0.0.1:4900` through Tailscale Funnel. Set the resulting stable HTTPS `*.ts.net` URL as `NEXT_PUBLIC_LICENSE_SERVER_URL` in Vercel. Set the same URL as the GitHub Actions repository variable `AGENT_LICENSE_SERVER_URL` so released agents can redeem server-issued codes. The existing public key variable remains `AGENT_LICENSE_PUBLIC_KEY`.
 
 When developing on the same Mac that runs the licensing server, also set `AGENT_LICENSE_SERVER_LOCAL_URL=http://127.0.0.1:4900` in the ignored `.env.local` file. The local website and source Electron agent try this loopback address first, avoiding unreliable same-machine access through the public Funnel hostname; deployed Vercel pages continue to use `NEXT_PUBLIC_LICENSE_SERVER_URL`.

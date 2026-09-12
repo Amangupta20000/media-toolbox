@@ -4,6 +4,10 @@ directories:
   output: release
 files:
   - agent/**/*
+  # The owner dashboard can start the SSD licensing service without a
+  # separate Terminal or Node installation. It is only exposed through the
+  # fixed Electron IPC action and still binds to loopback.
+  - license-server/**/*
   - lib/**/*
   - worker/**/*
   - vendor/untrunc/**/*

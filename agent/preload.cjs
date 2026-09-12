@@ -2,6 +2,9 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("mediaToolboxAgent", {
   getState: () => ipcRenderer.invoke("agent:get-state"),
+  getLicenseServerState: () => ipcRenderer.invoke("agent:get-license-server-state"),
+  startLicenseServer: () => ipcRenderer.invoke("agent:start-license-server"),
+  stopLicenseServer: () => ipcRenderer.invoke("agent:stop-license-server"),
   login: (username, password) => ipcRenderer.invoke("agent:login", username, password),
   acceptLegal: () => ipcRenderer.invoke("agent:accept-legal"),
   startTrial: () => ipcRenderer.invoke("agent:start-trial"),

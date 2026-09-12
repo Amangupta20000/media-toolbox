@@ -2,6 +2,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 const { execFileSync } = require("node:child_process");
 const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, Tray } = require("electron");
+const { createLicenseServerManager, findNode22Executable } = require("./license-server-manager.cjs");
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -11,6 +12,7 @@ if (!app.requestSingleInstanceLock()) {
   let pairingWindow;
   let pairingWatch;
   let dashboardWindow;
+  let licenseServerManager;
 
   function openDashboard() {
     if (dashboardWindow && !dashboardWindow.isDestroyed()) {
@@ -40,6 +42,9 @@ if (!app.requestSingleInstanceLock()) {
 
   function registerDashboardIpc() {
     ipcMain.handle("agent:get-state", () => agent?.getManagementState?.() || {});
+    ipcMain.handle("agent:get-license-server-state", () => licenseServerManager?.getState?.() || { available: false, healthy: false, running: false, error: "The licensing server manager is not ready." });
+    ipcMain.handle("agent:start-license-server", () => licenseServerManager?.start?.() || Promise.reject(new Error("The licensing server manager is not ready.")));
+    ipcMain.handle("agent:stop-license-server", () => licenseServerManager?.stop?.() || Promise.reject(new Error("The licensing server manager is not ready.")));
     ipcMain.handle("agent:login", async (_event, username, password) => {
       const value = agent.loginAdmin(String(username || ""), String(password || ""));
       let licenseAdmin = agent.getLicenseAdminState();
@@ -158,6 +163,13 @@ if (!app.requestSingleInstanceLock()) {
 
   async function start() {
     loadLocalEnvironment();
+    licenseServerManager = createLicenseServerManager({
+      app,
+      moduleDirectory: __dirname,
+      nodeExecutable: process.defaultApp ? findNode22Executable(app.getPath("home")) : "",
+      electronExecutable: process.execPath,
+      useElectronRuntime: !process.defaultApp,
+    });
     // The owner dashboard may run on the same Mac as the SSD licensing
     // service. Prefer loopback there and fall back to the packaged public URL
     // for agents installed on other computers.
@@ -210,9 +222,10 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.whenReady().then(start).catch((error) => { dialog.showErrorBox("Media Toolbox agent could not start", error.message); app.quit(); });
   app.on("before-quit", async (event) => {
-    if (!agent?.stopAgentServer) return;
+    if (!agent?.stopAgentServer && !licenseServerManager?.stop) return;
     event.preventDefault();
-    await agent.stopAgentServer();
+    await agent?.stopAgentServer?.();
+    await licenseServerManager?.stop?.();
     app.exit(0);
   });
 }
