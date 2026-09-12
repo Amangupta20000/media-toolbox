@@ -1,6 +1,6 @@
 import http from "node:http";
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
-import { createSignedLicenseToken, licenseCodeHash, verifyLicenseToken, ACTIVATION_DURATION_MS } from "../lib/license-token.js";
+import { activationDurationOptions, createSignedLicenseToken, isAllowedActivationDuration, licenseCodeHash, verifyLicenseToken, ACTIVATION_DURATION_MS } from "../lib/license-token.js";
 import { licenseConfig } from "./config.js";
 import { createLicenseStore } from "./store.js";
 import { loadPrivateKey, publicKeyFor, encryptText, decryptText } from "./secrets.js";
@@ -31,6 +31,7 @@ function publicRequest(row, includeCode = false, code = null) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     expiresAt: row.expires_at,
+    durationMs: row.duration_ms,
     redeemedAt: row.redeemed_at,
     redeemedDeviceId: row.redeemed_device_id,
     ...(includeCode && code ? { code } : {}),
@@ -130,8 +131,10 @@ export class LicenseService {
     if (request.headers.origin && request.headers.origin !== origin) throw new Error("The request origin does not match the browser origin.");
     this.checkRate(`request:${clientIp(request)}`, 10);
     const requesterLabel = String(body.requesterLabel || "Website user").replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim().slice(0, 80) || "Website user";
+    const durationMs = body.durationMs === undefined ? ACTIVATION_DURATION_MS : Number(body.durationMs);
+    if (!isAllowedActivationDuration(durationMs)) throw new Error(`Choose one of the supported activation durations: ${activationDurationOptions().map(({ label }) => label).join(", ")}.`);
     const now = this.now();
-    const created = this.store.createRequest({ origin, requesterLabel, durationMs: ACTIVATION_DURATION_MS, now, expiresAt: now + this.config.requestTtlMs });
+    const created = this.store.createRequest({ origin, requesterLabel, durationMs, now, expiresAt: now + this.config.requestTtlMs });
     return { requestId: created.id, requestToken: created.requestToken, status: "pending", createdAt: now, expiresAt: now + this.config.requestTtlMs };
   }
 
@@ -159,7 +162,7 @@ export class LicenseService {
     if (!row) throw new Error("License request not found.");
     const privateKey = await this.signingKey();
     const licenseId = randomUUID();
-    const payload = { v: 1, licenseId, origins: [row.origin], issuedAt: this.now(), durationMs: ACTIVATION_DURATION_MS };
+    const payload = { v: 1, licenseId, origins: [row.origin], issuedAt: this.now(), durationMs: row.duration_ms };
     const code = createSignedLicenseToken(payload, privateKey);
     const encryptedCode = encryptText(code);
     this.store.approve(id, { licenseId, codeHash: licenseCodeHash(code), encryptedCode, now: this.now() });
@@ -180,7 +183,7 @@ export class LicenseService {
     const privateKey = await this.signingKey();
     const publicKey = publicKeyFor(privateKey);
     const payload = verifyLicenseToken(code, publicKey);
-    if (payload.v !== 1 || typeof payload.licenseId !== "string" || payload.durationMs !== ACTIVATION_DURATION_MS || !Array.isArray(payload.origins) || payload.deviceId) throw new Error("The activation code format is invalid.");
+    if (payload.v !== 1 || typeof payload.licenseId !== "string" || !isAllowedActivationDuration(payload.durationMs) || !Array.isArray(payload.origins) || payload.deviceId) throw new Error("The activation code format is invalid.");
     const origin = normalizeOrigin(body.origin || request.headers.origin || payload.origins[0]);
     if (!origin || !payload.origins.includes(origin)) throw new Error("This activation code is not valid for this website origin.");
     if (payload.issuedAt && Number(payload.issuedAt) > this.now() + 5 * 60 * 1000) throw new Error("This activation code is not valid yet.");
@@ -188,7 +191,7 @@ export class LicenseService {
     this.store.consume({ licenseId: payload.licenseId, codeHash, deviceId, origin, now: this.now() });
     const boundPayload = { ...payload, deviceId, boundAt: this.now() };
     const token = createSignedLicenseToken(boundPayload, privateKey);
-    return { ok: true, token, licenseId: payload.licenseId, deviceId, origin, expiresAt: this.now() + ACTIVATION_DURATION_MS };
+    return { ok: true, token, licenseId: payload.licenseId, deviceId, origin, expiresAt: this.now() + Number(payload.durationMs) };
   }
 
   async handle(request, response) {

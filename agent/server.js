@@ -11,7 +11,7 @@ import { config, paths } from "../lib/config.js";
 import { acceptMultipartJob } from "../lib/job-intake.js";
 import { firstAvailable, runCommand } from "../lib/command.js";
 import { processJob, writeCapabilities } from "../worker/index.js";
-import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, activateOnline, authorizeProcessing, ensureAgentAuth, getActivationRequestStatus as getActivationRequestStatusAgent, getAuthorizationState, getDeviceId as getDeviceIdFromAuth, getLicenseRequestConfig as getLicenseRequestConfigAgent, hasOnlineLicenseServer, loginAdmin as loginAdminAgent, logoutAdmin as logoutAdminAgent, requestActivationCode as requestActivationCodeAgent, startTrial as startTrialAgent } from "./auth.js";
+import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, activateOnline, authorizeProcessing, ensureAgentAuth, getActivationRequestStatus as getActivationRequestStatusAgent, getAuthorizationState, getDeviceId as getDeviceIdFromAuth, getLicenseAdminRequests as getLicenseAdminRequestsAgent, getLicenseAdminState as getLicenseAdminStateAgent, getLicenseRequestConfig as getLicenseRequestConfigAgent, hasOnlineLicenseServer, loginAdmin as loginAdminAgent, loginLicenseAdmin as loginLicenseAdminAgent, logoutAdmin as logoutAdminAgent, logoutLicenseAdmin as logoutLicenseAdminAgent, requestActivationCode as requestActivationCodeAgent, approveLicenseRequest as approveLicenseRequestAgent, declineLicenseRequest as declineLicenseRequestAgent, startTrial as startTrialAgent } from "./auth.js";
 
 const AGENT_VERSION = process.env.AGENT_VERSION || "0.2.1";
 const PROTOCOL_VERSION = 1;
@@ -675,12 +675,40 @@ export function getLicenseRequestConfig() {
   return getLicenseRequestConfigAgent();
 }
 
-export function requestActivationCode(origin, requesterLabel) {
-  return requestActivationCodeAgent(origin, requesterLabel);
+export function requestActivationCode(origin, requesterLabel, durationMs) {
+  return requestActivationCodeAgent(origin, requesterLabel, durationMs);
 }
 
 export function getActivationRequestStatus(requestId, requestToken) {
   return getActivationRequestStatusAgent(requestId, requestToken);
+}
+
+export function getLicenseAdminState() {
+  return getLicenseAdminStateAgent();
+}
+
+export function hasOnlineLicenseServerConfigured() {
+  return hasOnlineLicenseServer();
+}
+
+export function loginLicenseAdmin(username, password) {
+  return loginLicenseAdminAgent(username, password);
+}
+
+export function logoutLicenseAdmin() {
+  return logoutLicenseAdminAgent();
+}
+
+export function getLicenseAdminRequests() {
+  return getLicenseAdminRequestsAgent();
+}
+
+export function approveLicenseRequest(requestId) {
+  return approveLicenseRequestAgent(requestId);
+}
+
+export function declineLicenseRequest(requestId, reason) {
+  return declineLicenseRequestAgent(requestId, reason);
 }
 
 export function getDeviceId() {

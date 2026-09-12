@@ -7,6 +7,7 @@
   let licenseRequest = null;
   let licenseRequestPollTimer = null;
   let licenseRequestPollBusy = false;
+  let selectedLicenseDurationMs = 600000;
 
   function showNotice(message) {
     const notice = el("notice");
@@ -53,6 +54,7 @@
     el("agent-version").textContent = state.agentVersion || "—";
     el("protocol").textContent = `${state.protocol || "http"} · v${state.protocolVersion || "1"}`;
     renderLicenseRequest();
+    renderLicenseOwnerPanel(state);
     renderSessions(state.sessions || []);
     renderCapabilities(state.capabilities || {});
   }
@@ -128,6 +130,66 @@
     button.textContent = "Request activation code";
     status.className = "license-request-status";
     status.textContent = "No active activation request.";
+  }
+
+  function formatLicenseDuration(durationMs) {
+    const value = Number(durationMs);
+    const option = (licenseRequestConfig?.allowedDurations || []).find((entry) => Number(entry.durationMs) === value);
+    if (option) return option.label;
+    if (value === 600000) return "10 minutes";
+    if (value === 1800000) return "30 minutes";
+    if (value === 7200000) return "2 hours";
+    if (value === 21600000) return "6 hours";
+    if (value === 86400000) return "1 day";
+    return "Unsupported duration";
+  }
+
+  function renderLicenseOwnerRequests(items = []) {
+    const target = el("license-owner-requests");
+    if (!target) return;
+    if (!items.length) {
+      target.innerHTML = '<div class="empty">No license requests yet.</div>';
+      return;
+    }
+    target.innerHTML = items.map((item) => `<div class="license-owner-row"><div><strong>${escapeHtml(item.requesterLabel || "Website user")}</strong><small>${escapeHtml(item.origin || "")}</small><small>${formatLicenseDuration(item.durationMs)} · Created ${new Date(item.createdAt).toLocaleString()} · expires ${new Date(item.expiresAt).toLocaleString()}</small><small>Status: ${escapeHtml(item.status || "unknown")}</small></div>${item.status === "pending" ? `<div class="panel-actions"><button class="button primary" data-license-request-action="approve" data-license-request-id="${escapeHtml(item.id)}" type="button">Approve</button><button class="button secondary" data-license-request-action="decline" data-license-request-id="${escapeHtml(item.id)}" type="button">Decline</button></div>` : ""}</div>`).join("");
+    target.querySelectorAll("[data-license-request-action]").forEach((button) => button.addEventListener("click", () => decideLicenseOwnerRequest(button.dataset.licenseRequestId, button.dataset.licenseRequestAction, button)));
+  }
+
+  function renderLicenseOwnerPanel(state) {
+    const panel = el("license-owner-panel");
+    if (!panel) return;
+    const authenticated = Boolean(state.licenseAdmin?.authenticated);
+    panel.classList.toggle("hidden", !authenticated);
+    if (!authenticated) return;
+    el("license-owner-status").textContent = "Owner session active";
+    renderLicenseOwnerRequests(state.licenseRequests || []);
+  }
+
+  async function refreshLicenseOwnerRequests() {
+    const button = el("refresh-license-requests");
+    if (button) button.disabled = true;
+    try {
+      const value = await api.getLicenseRequests();
+      renderLicenseOwnerRequests(value.items || []);
+      showNotice("License requests refreshed.");
+    } catch (error) {
+      showNotice(error.message || "The license requests could not be loaded.");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async function decideLicenseOwnerRequest(requestId, action, button) {
+    if (button) button.disabled = true;
+    try {
+      if (action === "approve") await api.approveLicenseRequest(requestId);
+      else await api.declineLicenseRequest(requestId);
+      await refreshLicenseOwnerRequests();
+      showNotice(action === "approve" ? "License request approved." : "License request declined.");
+    } catch (error) {
+      showNotice(error.message || "The license request could not be updated.");
+      if (button) button.disabled = false;
+    }
   }
 
   function stopLicenseRequestPolling() {
@@ -234,13 +296,22 @@
       button.disabled = false;
     }
   });
+  document.querySelectorAll("[data-license-duration]").forEach((button) => button.addEventListener("click", () => {
+    selectedLicenseDurationMs = Number(button.dataset.licenseDuration);
+    el("license-duration").value = String(selectedLicenseDurationMs);
+    document.querySelectorAll("[data-license-duration]").forEach((option) => {
+      const selected = Number(option.dataset.licenseDuration) === selectedLicenseDurationMs;
+      option.classList.toggle("selected", selected);
+      option.setAttribute("aria-pressed", String(selected));
+    });
+  }));
   el("license-request-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const button = el("request-activation-button");
     button.disabled = true;
     showNotice("");
     try {
-      const value = await api.requestActivationCode(el("license-origin").value);
+      const value = await api.requestActivationCode(el("license-origin").value, selectedLicenseDurationMs);
       setLicenseRequest({ ...value, origin: el("license-origin").value.trim() });
       startLicenseRequestPolling();
       showNotice("Activation request sent. The owner must approve it from the web licensing dashboard.");
@@ -250,10 +321,11 @@
     }
   });
   el("admin-control-button").addEventListener("click", openAdminModal);
+  el("refresh-license-requests").addEventListener("click", refreshLicenseOwnerRequests);
   el("close-admin-modal").addEventListener("click", closeAdminModal);
   el("admin-modal").addEventListener("click", (event) => { if (event.target.matches("[data-close-admin-modal]")) closeAdminModal(); });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !el("admin-modal").classList.contains("hidden")) closeAdminModal(); });
-  el("login-form").addEventListener("submit", async (event) => { event.preventDefault(); showNotice(""); const button = event.currentTarget.querySelector("button"); button.disabled = true; try { render(await api.login(el("username").value, el("password").value)); el("password").value = ""; closeAdminModal(); } catch (error) { showNotice(error.message || "Admin login failed."); } finally { button.disabled = false; } });
+  el("login-form").addEventListener("submit", async (event) => { event.preventDefault(); showNotice(""); const button = event.currentTarget.querySelector("button"); button.disabled = true; try { const state = await api.login(el("username").value, el("password").value); render(state); el("password").value = ""; closeAdminModal(); if (state.licenseAdminError) showNotice(`Local Admin access is active, but license requests are unavailable: ${state.licenseAdminError}`); else if (state.licenseAdmin?.authenticated) showNotice("Admin access enabled. License requests loaded below."); } catch (error) { showNotice(error.message || "Admin login failed."); } finally { button.disabled = false; } });
   el("logout-button").addEventListener("click", async () => { try { render(await api.logout()); closeAdminModal(); } catch (error) { showNotice(error.message || "Logout failed."); } });
   el("activation-form").addEventListener("submit", async (event) => { event.preventDefault(); showNotice(""); const button = event.currentTarget.querySelector("button"); button.disabled = true; try { render(await api.activate(el("activation-code").value)); el("activation-code").value = ""; } catch (error) { showNotice(error.message || "Activation failed."); } finally { button.disabled = false; } });
   el("copy-device").addEventListener("click", async () => { try { await api.copyDeviceId(currentState.authorization.deviceId); showNotice("Device ID copied."); setTimeout(() => showNotice(""), 1800); } catch (error) { showNotice(error.message || "The device ID could not be copied."); } });

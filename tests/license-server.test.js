@@ -59,7 +59,10 @@ test("licensing server handles approval, online agent redemption, replay, and wr
     const invalidOrigin = await jsonRequest("/v1/license-requests", { method: "POST", headers: { Origin: "https://evil.example" }, body: JSON.stringify({ origin: "https://evil.example" }) });
     assert.equal(invalidOrigin.status, 403);
 
-    const createdResponse = await jsonRequest("/v1/license-requests", { method: "POST", headers: { Origin: "http://localhost:3000" }, body: JSON.stringify({ origin: "http://localhost:3000", requesterLabel: "Chrome user" }) });
+    const invalidDuration = await jsonRequest("/v1/license-requests", { method: "POST", headers: { Origin: "http://localhost:3000" }, body: JSON.stringify({ origin: "http://localhost:3000", requesterLabel: "Chrome user", durationMs: 60 * 60 * 1000 }) });
+    assert.equal(invalidDuration.status, 400);
+
+    const createdResponse = await jsonRequest("/v1/license-requests", { method: "POST", headers: { Origin: "http://localhost:3000" }, body: JSON.stringify({ origin: "http://localhost:3000", requesterLabel: "Chrome user", durationMs: 2 * 60 * 60 * 1000 }) });
     assert.equal(createdResponse.status, 201);
     const created = await createdResponse.json();
     assert.ok(created.requestId);
@@ -81,6 +84,7 @@ test("licensing server handles approval, online agent redemption, replay, and wr
     assert.equal(requests.status, 200);
     const adminItems = await requests.json();
     assert.equal(adminItems.items.length, 1);
+    assert.equal(adminItems.items[0].durationMs, 2 * 60 * 60 * 1000);
     assert.equal(Object.prototype.hasOwnProperty.call(adminItems.items[0], "code"), false);
 
     const approvedResponse = await fetch(`${base}/v1/admin/license-requests/${created.requestId}/approve`, { method: "POST", headers: { Authorization: `Bearer ${admin.token}`, "Content-Type": "application/json" }, body: "{}" });

@@ -40,9 +40,21 @@ if (!app.requestSingleInstanceLock()) {
 
   function registerDashboardIpc() {
     ipcMain.handle("agent:get-state", () => agent?.getManagementState?.() || {});
-    ipcMain.handle("agent:login", (_event, username, password) => {
+    ipcMain.handle("agent:login", async (_event, username, password) => {
       const value = agent.loginAdmin(String(username || ""), String(password || ""));
-      return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
+      let licenseAdmin = agent.getLicenseAdminState();
+      let licenseRequests = [];
+      let licenseAdminError = "";
+      if (agent.hasOnlineLicenseServerConfigured()) {
+        try {
+          licenseAdmin = await agent.loginLicenseAdmin(String(username || ""), String(password || ""));
+          licenseRequests = (await agent.getLicenseAdminRequests()).items || [];
+        } catch (error) {
+          licenseAdminError = error instanceof Error ? error.message : "The licensing requests could not be loaded.";
+        }
+      }
+      const state = await agent.getManagementState();
+      return { ...state, authorization: value, licenseAdmin, licenseRequests, licenseAdminError };
     });
     ipcMain.handle("agent:accept-legal", () => {
       const value = agent.acceptLegal();
@@ -53,13 +65,14 @@ if (!app.requestSingleInstanceLock()) {
       return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
     });
     ipcMain.handle("agent:get-license-request-config", () => agent.getLicenseRequestConfig());
-    ipcMain.handle("agent:request-activation-code", (_event, origin) => agent.requestActivationCode(String(origin || ""), `Local agent dashboard · ${process.platform}`));
+    ipcMain.handle("agent:request-activation-code", (_event, origin, durationMs) => agent.requestActivationCode(String(origin || ""), `Local agent dashboard · ${process.platform}`, Number(durationMs)));
     ipcMain.handle("agent:get-activation-request-status", (_event, requestId, requestToken) => agent.getActivationRequestStatus(String(requestId || ""), String(requestToken || "")));
     ipcMain.handle("agent:copy-text", (_event, value) => {
       clipboard.writeText(String(value || ""));
       return { ok: true };
     });
-    ipcMain.handle("agent:logout", () => {
+    ipcMain.handle("agent:logout", async () => {
+      await agent.logoutLicenseAdmin();
       agent.logoutAdmin();
       return agent.getManagementState();
     });
@@ -75,6 +88,9 @@ if (!app.requestSingleInstanceLock()) {
       const value = agent.revokeAllSessions();
       return agent.getManagementState().then((state) => ({ ...state, revokedCount: value }));
     });
+    ipcMain.handle("agent:get-license-requests", async () => agent.getLicenseAdminRequests());
+    ipcMain.handle("agent:approve-license-request", async (_event, requestId) => agent.approveLicenseRequest(String(requestId || "")));
+    ipcMain.handle("agent:decline-license-request", async (_event, requestId, reason) => agent.declineLicenseRequest(String(requestId || ""), String(reason || "Declined by owner")));
     ipcMain.handle("agent:copy-device-id", (_event, deviceId) => {
       const expected = agent.getDeviceId();
       if (String(deviceId || "") !== expected) throw new Error("The device ID is invalid.");

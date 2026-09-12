@@ -5,7 +5,7 @@ import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual, verif
 import { fileURLToPath } from "node:url";
 import { config, paths } from "../lib/config.js";
 import { createAgentAuth, getAgentAuth, hasUsedAgentLicense, recordUsedAgentLicense, updateAgentAuth } from "../lib/db.js";
-import { verifyLicenseToken, ACTIVATION_DURATION_MS as SHARED_ACTIVATION_DURATION_MS } from "../lib/license-token.js";
+import { activationDurationOptions, isAllowedActivationDuration, verifyLicenseToken } from "../lib/license-token.js";
 
 export const ADMIN_USERNAME = "Admin";
 export const TRIAL_DURATION_MS = 5 * 60 * 1000;
@@ -17,6 +17,8 @@ const DEFAULT_ORIGINS = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
 ];
+
+let onlineLicenseAdminToken = "";
 
 function passwordHash(password, salt) {
   return scryptSync(String(password), salt, 64, { N: 16_384, r: 8, p: 1 }).toString("base64");
@@ -258,7 +260,7 @@ function activateVerifiedPayload(payload, code, record, now) {
   // device binding prevents the same signed code being copied elsewhere.
   if (typeof payload.deviceId !== "string" || !payload.deviceId.trim()) throw new Error("This activation code is not bound to a device.");
   if (payload.deviceId !== record.device_id) throw new Error("This activation code belongs to a different device.");
-  if (payload.durationMs !== ACTIVATION_DURATION_MS) throw new Error("This activation code does not contain a 10-minute license.");
+  if (!isAllowedActivationDuration(payload.durationMs)) throw new Error("This activation code contains an unsupported duration.");
   if (!Array.isArray(payload.origins) || !normalizeOrigins(payload.origins).length) throw new Error("The activation code has no valid trusted website origins.");
   if (hasUsedAgentLicense(payload.licenseId) || record.activation_id === payload.licenseId) throw new Error("This activation code has already been used.");
   if (payload.issuedAt && Number(payload.issuedAt) > now + 5 * 60 * 1000) throw new Error("This activation code is not valid yet.");
@@ -268,7 +270,7 @@ function activateVerifiedPayload(payload, code, record, now) {
   updateAgentAuth({
     activationId: payload.licenseId,
     activationStartedAt: now,
-    activationExpiresAt: now + ACTIVATION_DURATION_MS,
+    activationExpiresAt: now + Number(payload.durationMs),
     activationOriginsJson: JSON.stringify(origins),
     activationCodeHash: codeHash,
   });
@@ -334,17 +336,19 @@ export function getLicenseRequestConfig() {
     serverUrl: onlineLicenseServerUrl() || localLicenseServerUrl(),
     localServerUrl: localLicenseServerUrl(),
     suggestedOrigins: defaultTrustedOrigins(),
+    allowedDurations: activationDurationOptions(),
   };
 }
 
-export async function requestActivationCode(origin, requesterLabel = "Local agent dashboard") {
+export async function requestActivationCode(origin, requesterLabel = "Local agent dashboard", durationMs = ACTIVATION_DURATION_MS) {
   requireLegalConsent();
   const normalizedOrigin = requestOrigin(origin);
+  if (!isAllowedActivationDuration(durationMs)) throw new Error("Choose an activation duration of 10 minutes, 30 minutes, 2 hours, 6 hours, or 1 day.");
   const label = String(requesterLabel || "Local agent dashboard").replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim().slice(0, 80) || "Local agent dashboard";
   return onlineLicenseFetch("/v1/license-requests", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ origin: normalizedOrigin, requesterLabel: label }),
+    body: JSON.stringify({ origin: normalizedOrigin, requesterLabel: label, durationMs: Number(durationMs) }),
   });
 }
 
@@ -370,12 +374,54 @@ export async function activateOnline(code, now = Date.now()) {
     const publicKey = readPublicKey();
     if (!publicKey) throw new Error("Activation is not configured on this agent. The owner must embed the license public key before packaging.");
     const payload = verifyLicenseToken(body.token, publicKey);
-    if (payload.durationMs !== SHARED_ACTIVATION_DURATION_MS) throw new Error("The licensing server returned an invalid activation duration.");
+    if (!isAllowedActivationDuration(payload.durationMs)) throw new Error("The licensing server returned an invalid activation duration.");
     if (payload.deviceId !== record.device_id) throw new Error("The licensing server returned a token for a different device.");
     return activateVerifiedPayload(payload, body.token, record, now);
   } catch (error) {
     throw error;
   }
+}
+
+export function getLicenseAdminState() {
+  return { authenticated: Boolean(onlineLicenseAdminToken) };
+}
+
+export async function loginLicenseAdmin(username, password) {
+  const body = await onlineLicenseFetch("/v1/admin/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: String(username || ""), password: String(password || "") }),
+  });
+  if (!body.token) throw new Error("The licensing server did not return an Admin session.");
+  onlineLicenseAdminToken = body.token;
+  return getLicenseAdminState();
+}
+
+export async function logoutLicenseAdmin() {
+  const token = onlineLicenseAdminToken;
+  onlineLicenseAdminToken = "";
+  if (!token) return getLicenseAdminState();
+  try {
+    await onlineLicenseFetch("/v1/admin/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+  } catch { /* local logout still clears the in-memory licensing session */ }
+  return getLicenseAdminState();
+}
+
+function onlineLicenseAdminOptions(options = {}) {
+  if (!onlineLicenseAdminToken) throw new Error("Log in as Admin in the local agent dashboard to view license requests.");
+  return { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${onlineLicenseAdminToken}` } };
+}
+
+export async function getLicenseAdminRequests() {
+  return onlineLicenseFetch("/v1/admin/license-requests", onlineLicenseAdminOptions());
+}
+
+export async function approveLicenseRequest(requestId) {
+  return onlineLicenseFetch(`/v1/admin/license-requests/${encodeURIComponent(String(requestId || ""))}/approve`, onlineLicenseAdminOptions({ method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }));
+}
+
+export async function declineLicenseRequest(requestId, reason = "Declined by owner") {
+  return onlineLicenseFetch(`/v1/admin/license-requests/${encodeURIComponent(String(requestId || ""))}/decline`, onlineLicenseAdminOptions({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason }) }));
 }
 
 export function getDeviceId() {

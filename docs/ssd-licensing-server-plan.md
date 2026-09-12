@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Media Toolbox will use this Mac as a small, licensing-only service for users on the public internet. Media processing remains in the existing server or Local Agent; this service only creates, approves, and consumes one-time ten-minute activation licenses.
+Media Toolbox will use this Mac as a small, licensing-only service for users on the public internet. Media processing remains in the existing server or Local Agent; this service only creates, approves, and consumes one-time activation licenses with a requested duration of 10 minutes, 30 minutes, 2 hours, 6 hours, or 1 day.
 
 The service listens on `127.0.0.1:4900` and is published with Tailscale Funnel using the Mac's stable `*.ts.net` hostname. It does not expose the SSD, the desktop, or shell commands.
 
@@ -20,10 +20,10 @@ SQLite uses full synchronous writes and rollback journaling on exFAT. License co
 
 ## License flow
 
-1. A user requests a license from the website and receives a request ID and private request token.
-2. The owner signs into the local owner dashboard and approves or declines the request.
-3. Approval creates one signed `MT1-...` code scoped to the requested website origin and ten minutes.
-4. The user dashboard displays the approved code and the user enters it in the desktop Local Agent dashboard.
+1. A user requests a license from the desktop Local Agent dashboard, choosing one of the five allowed durations, and receives a request ID and private request token.
+2. The owner signs into `/license-admin` or the desktop Local Agent dashboard as Admin and approves or declines the request.
+3. Approval creates one signed `MT1-...` code scoped to the requested website origin and duration.
+4. The desktop dashboard displays the approved code and the user activates it there.
 5. The agent redeems the code online with its device ID. The server atomically consumes and binds it to the first device, then returns a short-lived device-bound token.
 6. The server deletes the encrypted code payload after redemption and retains only a hash, binding, and audit metadata.
 

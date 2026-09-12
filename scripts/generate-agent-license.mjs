@@ -2,11 +2,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { generateKeyPair as createKeyPair, randomUUID, sign } from "node:crypto";
+import { activationDurationOptions } from "../lib/license-token.js";
 
 const keyDirectory = path.join(os.homedir(), ".config", "media-toolbox");
 const defaultPrivateKeyPath = path.join(keyDirectory, "agent-license-private.pem");
 const defaultPublicKeyPath = path.join(keyDirectory, "agent-license-public.pem");
-const TEN_MINUTES = 10 * 60 * 1000;
+const durationOption = (value) => activationDurationOptions().find((option) => option.value === value);
 
 function arg(name, fallback = "") {
   const index = process.argv.indexOf(name);
@@ -55,8 +56,9 @@ async function createLicense() {
   const deviceId = arg("--device-id").trim();
   const origins = arg("--origins").split(",").map((value) => value.trim()).filter(Boolean);
   const privatePath = path.resolve(arg("--private-key", process.env.AGENT_LICENSE_PRIVATE_KEY_FILE || defaultPrivateKeyPath));
-  if (duration !== "10m") throw new Error("Only --duration 10m is supported.");
-  if (!deviceId || !origins.length) throw new Error("Usage: npm run agent:license -- --device-id <device-id> --duration 10m --origins <origin1,origin2>");
+  const selectedDuration = durationOption(duration);
+  if (!selectedDuration) throw new Error("Only --duration 10m, 30m, 2h, 6h, or 1d is supported.");
+  if (!deviceId || !origins.length) throw new Error("Usage: npm run agent:license -- --device-id <device-id> --duration 10m|30m|2h|6h|1d --origins <origin1,origin2>");
   const privateKey = await fs.readFile(privatePath, "utf8");
   const payload = {
     v: 1,
@@ -64,7 +66,7 @@ async function createLicense() {
     deviceId,
     origins,
     issuedAt: Date.now(),
-    durationMs: TEN_MINUTES,
+    durationMs: selectedDuration.durationMs,
   };
   const payloadText = withoutPadding(Buffer.from(JSON.stringify(payload), "utf8"));
   const signature = withoutPadding(sign(null, Buffer.from(payloadText), privateKey));

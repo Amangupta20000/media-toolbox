@@ -151,6 +151,25 @@ if (getAuthorizationState().trialStartedAt !== state.trialStartedAt) process.exi
   assert.equal(child.status, 0, `The explicit dashboard trial action failed: ${child.stdout}${child.stderr}`);
 });
 
+test("dashboard exposes the trial action in the bottom-right tray with subdued admin access", async () => {
+  const dashboardHtml = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard.html"), "utf8");
+  const dashboardCss = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard.css"), "utf8");
+  assert.match(dashboardHtml, /id="start-trial-button"/);
+  assert.match(dashboardHtml, /id="admin-control-button"/);
+  assert.doesNotMatch(dashboardHtml, /bottom-left/);
+  assert.match(dashboardCss, /\.dashboard-actions\{position:fixed;left:0;right:0;bottom:0/);
+  assert.match(dashboardCss, /\.admin-action\{background:#102c3d;border:1px solid/);
+  assert.equal((dashboardHtml.match(/data-license-duration=/g) || []).length, 5);
+  assert.match(dashboardHtml, /id="license-owner-panel"/);
+  assert.doesNotMatch(dashboardHtml, /bottom-left/);
+});
+
+test("website local-agent setup does not expose license-request controls", async () => {
+  const source = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "components", "local-agent-setup.jsx"), "utf8");
+  assert.doesNotMatch(source, /createLicenseRequest|getLicenseRequest|license-request-box|Request activation/);
+  assert.match(source, /request a code.*desktop dashboard|request a code.*desktop/i);
+});
+
 test("desktop dashboard can request and poll an online activation code", async () => {
   const auth = await import("../agent/auth.js");
   const previousServerUrl = process.env.AGENT_LICENSE_SERVER_URL;
@@ -161,7 +180,7 @@ test("desktop dashboard can request and poll an online activation code", async (
     if (request.method === "POST" && request.url === "/v1/license-requests") {
       let body = "";
       for await (const chunk of request) body += chunk;
-      assert.deepEqual(JSON.parse(body), { origin: "http://localhost:3000", requesterLabel: "Local agent dashboard" });
+      assert.deepEqual(JSON.parse(body), { origin: "http://localhost:3000", requesterLabel: "Local agent dashboard", durationMs: 7200000 });
       response.writeHead(201, { "Content-Type": "application/json" });
       response.end(JSON.stringify({ requestId: "dashboard-request", requestToken: "request-secret", status: "pending", origin: "http://localhost:3000" }));
       return;
@@ -170,6 +189,22 @@ test("desktop dashboard can request and poll an online activation code", async (
       assert.equal(request.headers["x-request-token"], "request-secret");
       response.writeHead(200, { "Content-Type": "application/json" });
       response.end(JSON.stringify({ id: "dashboard-request", status: "approved", origin: "http://localhost:3000", code: "MT1-approved-dashboard-code" }));
+      return;
+    }
+    if (request.method === "POST" && request.url === "/v1/admin/login") {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ ok: true, token: "dashboard-admin-token" }));
+      return;
+    }
+    if (request.method === "GET" && request.url === "/v1/admin/license-requests") {
+      assert.equal(request.headers.authorization, "Bearer dashboard-admin-token");
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ items: [{ id: "owner-request", status: "pending", durationMs: 86400000, origin: "http://localhost:3000" }] }));
+      return;
+    }
+    if (request.method === "POST" && request.url === "/v1/admin/logout") {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ ok: true }));
       return;
     }
     response.writeHead(404);
@@ -185,12 +220,18 @@ test("desktop dashboard can request and poll an online activation code", async (
     assert.equal(config.available, true);
     assert.equal(config.localServerUrl, `http://127.0.0.1:${server.address().port}`);
     assert.ok(config.suggestedOrigins.includes("https://media-toolbox-woad.vercel.app"));
-    const created = await auth.requestActivationCode("http://localhost:3000", "Local agent dashboard");
+    assert.deepEqual(config.allowedDurations.map(({ value }) => value), ["10m", "30m", "2h", "6h", "1d"]);
+    const created = await auth.requestActivationCode("http://localhost:3000", "Local agent dashboard", 7200000);
     assert.equal(created.status, "pending");
     const approved = await auth.getActivationRequestStatus(created.requestId, created.requestToken);
     assert.equal(approved.status, "approved");
     assert.equal(approved.code, "MT1-approved-dashboard-code");
-    assert.equal(requests.length, 2);
+    const adminSession = await auth.loginLicenseAdmin("Admin", "12345");
+    assert.deepEqual(adminSession, { authenticated: true });
+    const ownerRequests = await auth.getLicenseAdminRequests();
+    assert.equal(ownerRequests.items[0].durationMs, 86400000);
+    await auth.logoutLicenseAdmin();
+    assert.equal(requests.length, 5);
   } finally {
     if (previousServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_URL;
     else process.env.AGENT_LICENSE_SERVER_URL = previousServerUrl;
