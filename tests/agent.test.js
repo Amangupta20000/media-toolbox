@@ -54,7 +54,7 @@ test("agent starts a persistent five-minute trial without login or activation", 
   assert.equal(initialState.authorization.trialAvailable, true);
   assert.equal(initialState.authorization.trialStartedAt, null);
   assert.equal(initialState.trialAvailable, false);
-  assert.throws(() => agent.loginAdmin("Admin", "12345"), /Privacy Policy|Terms/i);
+  assert.throws(() => agent.loginAdmin("Admin", "Aman"), /Privacy Policy|Terms/i);
 
   const blockedSession = await fetch(url("/v1/session"), {
     method: "POST",
@@ -166,6 +166,9 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   const updateConfig = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "build", "app-update.yml"), "utf8");
   const releaseWorkflow = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".github", "workflows", "agent-release.yml"), "utf8");
   assert.match(dashboardHtml, /id="start-trial-button"/);
+  assert.doesNotMatch(dashboardHtml, /Device details/);
+  assert.doesNotMatch(dashboardHtml, /id="device-id"/);
+  assert.match(dashboardHtml, /id="locked-help" class="locked-help hidden"/);
   assert.match(dashboardHtml, /id="admin-control-button"/);
   assert.match(dashboardHtml, /id="check-updates-bottom"/);
   assert.match(dashboardHtml, /id="start-license-server"/);
@@ -190,9 +193,14 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardPreload, /agent:install-update/);
   assert.match(dashboardPreload, /agent:open-release-page/);
   assert.match(dashboardRenderer, /currentState\?\.authorization\?\.mode === "admin"/);
+  assert.match(dashboardRenderer, /el\("locked-help"\)\.classList\.toggle\("hidden"/);
+  assert.doesNotMatch(dashboardRenderer, /copyDeviceId/);
+  assert.doesNotMatch(dashboardPreload, /copy-device-id/);
   assert.match(dashboardRenderer, /el\("run-self-test"\)/);
   assert.match(dashboardHtml, /id="agent-update-panel"/);
   assert.match(dashboardRenderer, /Restart and install/);
+  assert.match(dashboardRenderer, /status === "up-to-date"/);
+  assert.match(dashboardRenderer, /Agent is up to date/);
   assert.match(dashboardRenderer, /downloadUpdate/);
   assert.match(dashboardRenderer, /open-release/);
   assert.match(dashboardRenderer, /Update manually from GitHub Releases/);
@@ -493,7 +501,7 @@ test("desktop dashboard can request and poll an online activation code", async (
     const approved = await auth.getActivationRequestStatus(created.requestId, created.requestToken);
     assert.equal(approved.status, "approved");
     assert.equal(approved.code, "MT1-approved-dashboard-code");
-    const adminSession = await auth.loginLicenseAdmin("Admin", "12345");
+    const adminSession = await auth.loginLicenseAdmin("Admin", "Aman");
     assert.deepEqual(adminSession, { authenticated: true });
     const ownerRequests = await auth.getLicenseAdminRequests();
     assert.equal(ownerRequests.items[0].durationMs, 86400000);
@@ -574,7 +582,8 @@ test("dashboard reports a useful error when the public licensing server cannot b
 
 test("agent persists Admin authorization across restarts and rejects bad credentials", async () => {
   assert.throws(() => agent.loginAdmin("Admin", "wrong"), /incorrect/i);
-  agent.loginAdmin("Admin", "12345");
+  assert.throws(() => agent.loginAdmin("Admin", "12345"), /incorrect/i);
+  agent.loginAdmin("Admin", "Aman");
   assert.equal(agent.getAgentState().authorization.mode, "admin");
 
   const adminSessionResponse = await fetch(url("/v1/session"), {
@@ -587,7 +596,7 @@ test("agent persists Admin authorization across restarts and rejects bad credent
   agent.logoutAdmin();
   const revokedAdminAccess = await fetch(url("/v1/capabilities"), { headers: { Authorization: `Bearer ${adminSession.token}`, Origin: "http://localhost:3000" } });
   assert.equal(revokedAdminAccess.status, 401);
-  agent.loginAdmin("Admin", "12345");
+  agent.loginAdmin("Admin", "Aman");
 
   await agent.stopAgentServer();
   server = await agent.startAgentServer({ port: 0 });

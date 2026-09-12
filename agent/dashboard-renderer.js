@@ -28,7 +28,7 @@
     if (!panel || !title || !message || !action || !progress || !progressBar) return;
     const status = value.status || "unavailable";
     const runtime = value.kind === "runtime";
-    const visible = ["checking", "available", "downloading", "downloaded", "error", "manual"].includes(status);
+    const visible = ["checking", "available", "up-to-date", "downloading", "downloaded", "error", "manual"].includes(status);
     panel.classList.toggle("hidden", !visible);
     panel.classList.toggle("update-error", status === "error" || status === "manual");
     panel.classList.toggle("update-ready", status === "downloaded");
@@ -57,6 +57,12 @@
       message.textContent = runtime ? "The runtime package passed SHA-256 and Ed25519 verification. Restart the agent to activate it." : "The update is downloaded and will be verified before installation. Restart the agent to finish.";
       action.textContent = "Restart and install";
       action.dataset.action = "install";
+      action.disabled = false;
+    } else if (status === "up-to-date") {
+      title.textContent = runtime ? `Verified processing runtime is up to date${value.version ? ` · v${value.version}` : ""}` : `Agent is up to date${value.version ? ` · v${value.version}` : ""}`;
+      message.textContent = runtime ? "This installation already has the latest verified processing runtime." : "This installation already has the latest agent release.";
+      action.textContent = "Check again";
+      action.dataset.action = "check";
       action.disabled = false;
     } else if (status === "manual") {
       title.textContent = "Update manually from GitHub Releases";
@@ -101,6 +107,7 @@
     el("legal-consent").classList.toggle("hidden", legalAccepted);
     if (legalAccepted) el("legal-consent-checkbox").checked = false;
     el("accept-legal-button").disabled = legalAccepted || !el("legal-consent-checkbox").checked;
+    el("locked-help").classList.toggle("hidden", mode !== "locked" || !authorization.trialAvailable);
     document.querySelectorAll("#login-form input, #login-form button, #activation-form textarea, #activation-form button, #license-request-form input, #license-request-form button").forEach((control) => { control.disabled = !legalAccepted; });
     const activationReloginAvailable = Boolean(authorization.activationReloginAvailable);
     const activationSessionVisible = mode === "activation" || (mode === "locked" && activationReloginAvailable);
@@ -125,10 +132,6 @@
     trialButton.textContent = legalAccepted ? "Start 5-minute trial" : "Accept terms to start trial";
     el("admin-control-button").textContent = mode === "admin" ? "Admin access" : "Admin login";
     el("admin-control-button").classList.toggle("active", mode === "admin");
-    el("device-id").textContent = authorization.deviceId || "—";
-    el("trusted-origins").textContent = authorization.trustedOrigins?.length ? authorization.trustedOrigins.join(", ") : "None";
-    el("agent-version").textContent = state.agentVersion || "—";
-    el("protocol").textContent = `${state.protocol || "http"} · v${state.protocolVersion || "1"}`;
     renderLicenseRequest();
     renderLicenseOwnerPanel(state);
     renderSessions(state.sessions || []);
@@ -650,7 +653,6 @@
     } finally { button.disabled = false; }
   });
   el("activation-form").addEventListener("submit", async (event) => { event.preventDefault(); showNotice(""); const button = event.currentTarget.querySelector("button"); button.disabled = true; try { render(await api.activate(el("activation-code").value)); el("activation-code").value = ""; } catch (error) { showNotice(error.message || "Activation failed."); } finally { button.disabled = false; } });
-  el("copy-device").addEventListener("click", async () => { try { await api.copyDeviceId(currentState.authorization.deviceId); showNotice("Device ID copied."); setTimeout(() => showNotice(""), 1800); } catch (error) { showNotice(error.message || "The device ID could not be copied."); } });
   el("end-all").addEventListener("click", async () => { if (!confirm("End all connected browser sessions?")) return; try { render(await api.endAllSessions()); } catch (error) { showNotice(error.message || "Sessions could not be ended."); } });
   try {
     const savedRequest = localStorage.getItem("media-toolbox-agent-license-request");

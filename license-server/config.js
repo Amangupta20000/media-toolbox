@@ -3,6 +3,7 @@ import path from "node:path";
 
 const DEFAULT_VOLUME_UUID = "62D322F6-B7D6-3CB4-BB99-0A0A428E3F58";
 const DEFAULT_SSD_DIRECTORY = "/Volumes/Sandisk Exf/MediaToolboxLicensing";
+export const DEFAULT_ADMIN_PASSWORD = "Aman";
 
 function origin(value) {
   try {
@@ -25,7 +26,7 @@ export const licenseConfig = {
   volumeUuid: String(process.env.LICENSE_VOLUME_UUID || DEFAULT_VOLUME_UUID).trim().toUpperCase(),
   publicOrigins: listOrigins(process.env.LICENSE_PUBLIC_ORIGINS || "https://media-toolbox-woad.vercel.app,http://localhost:3000,http://127.0.0.1:3000"),
   adminUsername: process.env.LICENSE_ADMIN_USERNAME || "Admin",
-  adminPassword: process.env.LICENSE_ADMIN_PASSWORD || "12345",
+  adminPassword: process.env.LICENSE_ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD,
   adminSessionTtlMs: 8 * 60 * 60 * 1000,
   requestTtlMs: 24 * 60 * 60 * 1000,
   licenseRequestCleanupIntervalMs: 60 * 1000,

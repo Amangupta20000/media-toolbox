@@ -33,5 +33,4 @@ contextBridge.exposeInMainWorld("mediaToolboxAgent", {
   getLicenseAudit: () => ipcRenderer.invoke("agent:get-license-audit"),
   approveLicenseRequest: (requestId) => ipcRenderer.invoke("agent:approve-license-request", requestId),
   declineLicenseRequest: (requestId, reason) => ipcRenderer.invoke("agent:decline-license-request", requestId, reason),
-  copyDeviceId: (deviceId) => ipcRenderer.invoke("agent:copy-device-id", deviceId),
 });

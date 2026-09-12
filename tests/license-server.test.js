@@ -30,7 +30,7 @@ test("licensing server handles approval, online agent redemption, replay, and wr
     dataDir: root,
     publicOrigins: ["http://localhost:3000"],
     adminUsername: "Admin",
-    adminPassword: "12345",
+    adminPassword: "Aman",
     adminSessionTtlMs: 60 * 60 * 1000,
     requestTtlMs: 60 * 60 * 1000,
     maxBodyBytes: 32 * 1024,
@@ -87,7 +87,7 @@ test("licensing server handles approval, online agent redemption, replay, and wr
     const badLogin = await jsonRequest("/v1/admin/login", { method: "POST", headers: { Origin: "http://localhost:3000" }, body: JSON.stringify({ username: "Admin", password: "wrong" }) });
     assert.equal(badLogin.status, 401);
     assert.equal(badLogin.headers.get("access-control-allow-origin"), "http://localhost:3000");
-    const login = await jsonRequest("/v1/admin/login", { method: "POST", body: JSON.stringify({ username: "Admin", password: "12345" }) });
+    const login = await jsonRequest("/v1/admin/login", { method: "POST", body: JSON.stringify({ username: "Admin", password: "Aman" }) });
     assert.equal(login.status, 200);
     const admin = await login.json();
     assert.ok(admin.token);
@@ -249,7 +249,7 @@ test("authenticated owner can create or update the agent URL GitHub variable wit
     dataDir: root,
     publicOrigins: ["http://localhost:3000"],
     adminUsername: "Admin",
-    adminPassword: "12345",
+    adminPassword: "Aman",
     adminSessionTtlMs: 60 * 60 * 1000,
     requestTtlMs: 60 * 60 * 1000,
     maxBodyBytes: 32 * 1024,
@@ -275,7 +275,7 @@ test("authenticated owner can create or update the agent URL GitHub variable wit
     return originalFetch(url, options);
   };
   try {
-    const login = await originalFetch(`${base}/v1/admin/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "Admin", password: "12345" }) });
+    const login = await originalFetch(`${base}/v1/admin/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "Admin", password: "Aman" }) });
     const { token } = await login.json();
     const invalid = await originalFetch(`${base}/v1/admin/github/agent-license-server-url`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ url: "http://insecure.example" }) });
     assert.equal(invalid.status, 400);

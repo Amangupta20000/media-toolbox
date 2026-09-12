@@ -1,7 +1,7 @@
 import http from "node:http";
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { activationDurationOptions, createSignedLicenseToken, isAllowedActivationDuration, licenseCodeHash, verifyLicenseToken, ACTIVATION_DURATION_MS } from "../lib/license-token.js";
-import { licenseConfig } from "./config.js";
+import { DEFAULT_ADMIN_PASSWORD, licenseConfig } from "./config.js";
 import { createLicenseStore } from "./store.js";
 import { loadPrivateKey, publicKeyFor, encryptText, decryptText } from "./secrets.js";
 import { updateAgentLicenseServerVariable } from "./github.js";
@@ -83,6 +83,15 @@ function adminPasswordMatches(password, service) {
     expectedText = scryptSync(service.config.adminPassword, Buffer.from(saltText, "base64"), 64, { N: 16_384, r: 8, p: 1 }).toString("base64");
     service.store.setSetting("admin_password_salt", saltText);
     service.store.setSetting("admin_password_hash", expectedText);
+  } else if (service.config.adminPassword === DEFAULT_ADMIN_PASSWORD) {
+    const legacy = scryptSync("12345", Buffer.from(saltText, "base64"), 64, { N: 16_384, r: 8, p: 1 });
+    const stored = Buffer.from(expectedText, "base64");
+    if (legacy.length === stored.length && timingSafeEqual(legacy, stored)) {
+      saltText = randomBytes(16).toString("base64");
+      expectedText = scryptSync(service.config.adminPassword, Buffer.from(saltText, "base64"), 64, { N: 16_384, r: 8, p: 1 }).toString("base64");
+      service.store.setSetting("admin_password_salt", saltText);
+      service.store.setSetting("admin_password_hash", expectedText);
+    }
   }
   const expected = Buffer.from(expectedText, "base64");
   const actual = scryptSync(String(password || ""), Buffer.from(saltText, "base64"), 64, { N: 16_384, r: 8, p: 1 });

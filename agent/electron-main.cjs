@@ -236,12 +236,6 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle("agent:get-license-audit", async () => agent.getLicenseAdminAudit());
     ipcMain.handle("agent:approve-license-request", async (_event, requestId) => agent.approveLicenseRequest(String(requestId || "")));
     ipcMain.handle("agent:decline-license-request", async (_event, requestId, reason) => agent.declineLicenseRequest(String(requestId || ""), String(reason || "Declined by owner")));
-    ipcMain.handle("agent:copy-device-id", (_event, deviceId) => {
-      const expected = agent.getDeviceId();
-      if (String(deviceId || "") !== expected) throw new Error("The device ID is invalid.");
-      clipboard.writeText(expected);
-      return { ok: true };
-    });
   }
 
   function trustLocalCertificate(certPath) {

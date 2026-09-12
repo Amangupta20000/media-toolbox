@@ -8,6 +8,8 @@ import { createAgentAuth, getAgentAuth, hasUsedAgentLicense, recordUsedAgentLice
 import { activationDurationOptions, isAllowedActivationDuration, verifyLicenseToken } from "../lib/license-token.js";
 
 export const ADMIN_USERNAME = "Admin";
+export const ADMIN_PASSWORD = "Aman";
+const LEGACY_ADMIN_PASSWORD = "12345";
 export const TRIAL_DURATION_MS = 5 * 60 * 1000;
 export const ACTIVATION_DURATION_MS = 10 * 60 * 1000;
 // Offline tester access intentionally bypasses the online licensing server.
@@ -105,9 +107,12 @@ export function ensureAgentAuth() {
       deviceId: randomUUID(),
       username: ADMIN_USERNAME,
       passwordSalt: salt,
-      passwordHash: passwordHash("12345", salt),
+      passwordHash: passwordHash(ADMIN_PASSWORD, salt),
     });
     record = getAgentAuth();
+  } else if (record.username === ADMIN_USERNAME && passwordMatches(LEGACY_ADMIN_PASSWORD, record.password_salt, record.password_hash)) {
+    const salt = randomBytes(16).toString("base64");
+    record = updateAgentAuth({ passwordSalt: salt, passwordHash: passwordHash(ADMIN_PASSWORD, salt) });
   }
   return record;
 }

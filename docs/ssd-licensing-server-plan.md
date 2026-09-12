@@ -59,7 +59,7 @@ Tailscale Funnel is the selected no-domain public option. The Mac, Tailscale, SS
 
 ## Owner authentication
 
-The owner dashboard uses the existing fixed local Admin account (`Admin / 12345`) because that is the requested product behavior. The password is hashed, sessions expire, login is rate-limited, and every approval/decline is audited. This credential is intentionally weak and must be changed in a future release before treating the service as a high-value licensing system.
+The owner dashboard uses the existing fixed local Admin account (`Admin / Aman`) because that is the requested product behavior. The password is hashed, sessions expire, login is rate-limited, and every approval/decline is audited. This credential is intentionally weak and must be changed before treating the service as a high-value licensing system.
 
 ## Out of scope
 
