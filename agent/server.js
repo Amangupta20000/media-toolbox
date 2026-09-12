@@ -74,12 +74,65 @@ function authorize(request, url) {
   const token = tokenFrom(request, url);
   const session = state.sessions.get(token);
   if (!session || session.expiresAt < Date.now()) {
-    if (token) state.sessions.delete(token);
+    if (token && state.sessions.delete(token)) rebuildAllowedOrigins();
     return null;
   }
   const origin = request.headers.origin;
   if (origin && origin !== session.origin) return null;
   return { token, session };
+}
+
+function rebuildAllowedOrigins() {
+  state.allowedOrigins = new Set([...state.sessions.values()].map((session) => session.origin));
+}
+
+function pruneExpiredSessions() {
+  const now = Date.now();
+  let changed = false;
+  for (const [token, session] of state.sessions) {
+    if (session.expiresAt < now) {
+      state.sessions.delete(token);
+      changed = true;
+    }
+  }
+  if (changed) rebuildAllowedOrigins();
+}
+
+function validateWebsiteOrigin(value, requestOrigin = "") {
+  const requestedOrigin = String(value || "").trim();
+  if (!requestedOrigin || requestedOrigin === "null") throw new Error("The website origin is required for pairing.");
+  let parsedOrigin;
+  try { parsedOrigin = new URL(requestedOrigin); } catch { throw new Error("The website origin is invalid."); }
+  if (!["http:", "https:"].includes(parsedOrigin.protocol) || parsedOrigin.pathname !== "/" || parsedOrigin.search || parsedOrigin.hash) throw new Error("Only an HTTP or HTTPS website origin can be paired.");
+  if (requestOrigin && requestOrigin !== requestedOrigin) throw new Error("The pairing origin does not match this browser.");
+  return requestedOrigin;
+}
+
+function issueSession(origin, clientLabel = "") {
+  const now = Date.now();
+  const token = randomUUID();
+  const session = {
+    id: randomUUID(),
+    origin,
+    clientLabel: String(clientLabel || "Website session").replace(/\s+/g, " ").trim().slice(0, 80) || "Website session",
+    createdAt: now,
+    expiresAt: now + SESSION_TTL_MS,
+  };
+  state.sessions.set(token, session);
+  state.allowedOrigins.add(origin);
+  return { token, session };
+}
+
+function publicSession(session, currentToken = "") {
+  return {
+    id: session.id,
+    origin: session.origin,
+    clientLabel: session.clientLabel,
+    createdAt: session.createdAt,
+    expiresAt: session.expiresAt,
+    current: false,
+    ...(currentToken ? { current: state.sessions.get(currentToken) === session } : {}),
+  };
 }
 
 function readBody(request, limit = 16384) {
@@ -325,6 +378,7 @@ async function renderPdfPage(request, response, job, page) {
 }
 
 async function handle(request, response) {
+  pruneExpiredSessions();
   const url = new URL(request.url || "/", `${state.protocol}://${request.headers.host || "127.0.0.1"}`);
   const pathParts = url.pathname.split("/").filter(Boolean);
   const origin = addCors(request, response, pathParts[0] === "v1" && ["health", "pair"].includes(pathParts[1]));
@@ -335,27 +389,39 @@ async function handle(request, response) {
   }
   if (url.pathname === "/v1/health" && request.method === "GET") {
     const requestOrigin = String(request.headers.origin || "").trim();
-    const paired = requestOrigin ? state.allowedOrigins.has(requestOrigin) : state.allowedOrigins.size > 0;
-    return json(response, 200, { ok: true, service: "media-toolbox-agent", agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, protocol: state.protocol, platform: process.platform, arch: process.arch, paired }, request, origin || request.headers.origin || null);
+    const sessionCount = requestOrigin
+      ? [...state.sessions.values()].filter((session) => session.origin === requestOrigin).length
+      : state.sessions.size;
+    const paired = sessionCount > 0;
+    return json(response, 200, { ok: true, service: "media-toolbox-agent", agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, protocol: state.protocol, platform: process.platform, arch: process.arch, paired, sessionCount }, request, origin || request.headers.origin || null);
   }
   if (url.pathname === "/v1/pair" && request.method === "POST") {
     try {
       const body = await readJson(request);
-      const requestedOrigin = String(body.origin || request.headers.origin || "").trim();
-      if (!requestedOrigin || requestedOrigin === "null") throw new Error("The website origin is required for pairing.");
-      let parsedOrigin;
-      try { parsedOrigin = new URL(requestedOrigin); } catch { throw new Error("The website origin is invalid."); }
-      if (!["http:", "https:"].includes(parsedOrigin.protocol) || parsedOrigin.pathname !== "/" || parsedOrigin.search || parsedOrigin.hash) throw new Error("Only an HTTP or HTTPS website origin can be paired.");
-      if (request.headers.origin && request.headers.origin !== requestedOrigin) throw new Error("The pairing origin does not match this browser.");
+      const requestedOrigin = validateWebsiteOrigin(body.origin || request.headers.origin, request.headers.origin);
       if (String(body.code || "").trim() !== state.pairingCode) throw new Error("The pairing code is incorrect or expired.");
-      const token = randomUUID();
-      state.sessions.set(token, { origin: requestedOrigin, expiresAt: Date.now() + SESSION_TTL_MS });
-      state.allowedOrigins.add(requestedOrigin);
+      const { token, session } = issueSession(requestedOrigin, body.clientLabel);
       state.pairingCode = String(randomInt(100000, 1000000));
-      console.log(`Browser paired for ${requestedOrigin}. A new pairing code is ready.`);
-      return json(response, 200, { token, expiresAt: Date.now() + SESSION_TTL_MS, protocolVersion: PROTOCOL_VERSION }, request, origin || request.headers.origin || null);
+      console.log(`Browser paired for ${requestedOrigin} (${session.clientLabel}). A new pairing code is ready.`);
+      return json(response, 200, { token, sessionId: session.id, expiresAt: session.expiresAt, protocolVersion: PROTOCOL_VERSION, autoPaired: false }, request, origin || request.headers.origin || null);
     } catch (error) {
       return json(response, 401, { error: error instanceof Error ? error.message : "Pairing failed." }, request, origin || request.headers.origin || null);
+    }
+  }
+
+  // A website origin that has already been explicitly trusted may create a
+  // separate short-lived session for another browser, profile, or private
+  // window without asking the user to copy the pairing code again. New
+  // origins still require the one-time code above.
+  if (url.pathname === "/v1/session" && request.method === "POST") {
+    try {
+      const body = await readJson(request);
+      const requestedOrigin = validateWebsiteOrigin(body.origin || request.headers.origin, request.headers.origin);
+      if (!state.allowedOrigins.has(requestedOrigin)) return json(response, 403, { error: "Pair this website with the local agent first." }, request, origin);
+      const { token, session } = issueSession(requestedOrigin, body.clientLabel);
+      return json(response, 200, { token, sessionId: session.id, expiresAt: session.expiresAt, protocolVersion: PROTOCOL_VERSION, autoPaired: true }, request, origin);
+    } catch (error) {
+      return json(response, 400, { error: error instanceof Error ? error.message : "The browser session could not be created." }, request, origin);
     }
   }
 
@@ -395,6 +461,32 @@ async function handle(request, response) {
       const status = /not found/i.test(error?.message || "") ? 404 : 400;
       return json(response, status, { error: error instanceof Error ? error.message : "The downloaded file could not be deleted." }, request, origin);
     }
+  }
+
+  if (url.pathname === "/v1/sessions" && request.method === "GET") {
+    const items = [...state.sessions.values()]
+      .sort((left, right) => right.createdAt - left.createdAt)
+      .map((session) => publicSession(session, auth.token));
+    return json(response, 200, { items, sessionCount: items.length }, request, origin);
+  }
+
+  if (url.pathname === "/v1/sessions/revoke-all" && request.method === "POST") {
+    const revokedCount = state.sessions.size;
+    state.sessions.clear();
+    state.allowedOrigins.clear();
+    return json(response, 200, { ok: true, revokedCount }, request, origin);
+  }
+
+  const sessionMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)$/);
+  if (sessionMatch && request.method === "DELETE") {
+    const sessionId = decodeURIComponent(sessionMatch[1]);
+    const entry = [...state.sessions.entries()].find(([, session]) => session.id === sessionId);
+    if (!entry) return json(response, 404, { error: "Session not found or already ended." }, request, origin);
+    const [token, session] = entry;
+    const current = token === auth.token;
+    state.sessions.delete(token);
+    rebuildAllowedOrigins();
+    return json(response, 200, { ok: true, revokedSessionId: session.id, current, sessionCount: state.sessions.size }, request, origin);
   }
 
   if (url.pathname === "/v1/jobs" && request.method === "POST") {
@@ -450,7 +542,8 @@ async function handle(request, response) {
 }
 
 export function getAgentState() {
-  return { pairingCode: state.pairingCode, port: state.port, running: Boolean(state.server), protocol: state.protocol, agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION };
+  pruneExpiredSessions();
+  return { pairingCode: state.pairingCode, port: state.port, running: Boolean(state.server), protocol: state.protocol, agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, sessionCount: state.sessions.size };
 }
 
 export async function startAgentServer({ port = Number(process.env.AGENT_PORT) || DEFAULT_PORT, host = "127.0.0.1", protocol = process.env.AGENT_PROTOCOL || "http", certPath = process.env.AGENT_TLS_CERT || "", keyPath = process.env.AGENT_TLS_KEY || "" } = {}) {

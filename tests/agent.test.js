@@ -143,3 +143,51 @@ test("agent accepts an authenticated image job and returns a local result", asyn
   const missing = await fetch(url(`/v1/jobs/${createdJob.jobId}`), { headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" } });
   assert.equal(missing.status, 404);
 });
+
+test("agent supports automatic browser sessions and ending one or all sessions", async () => {
+  const automatic = await fetch(url("/v1/session"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
+    body: JSON.stringify({ origin: "http://localhost:3000", clientLabel: "Safari on macOS" }),
+  });
+  assert.equal(automatic.status, 200);
+  const automaticSession = await automatic.json();
+  assert.ok(automaticSession.token);
+  assert.ok(automaticSession.sessionId);
+  assert.equal(automaticSession.autoPaired, true);
+
+  const differentOrigin = await fetch(url("/v1/session"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "https://another.example" },
+    body: JSON.stringify({ origin: "https://another.example", clientLabel: "Chrome" }),
+  });
+  assert.equal(differentOrigin.status, 403);
+
+  const sessionsResponse = await fetch(url("/v1/sessions"), {
+    headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" },
+  });
+  assert.equal(sessionsResponse.status, 200);
+  const sessions = await sessionsResponse.json();
+  assert.ok(sessions.items.some((item) => item.id === automaticSession.sessionId && item.clientLabel === "Safari on macOS"));
+  assert.ok(sessions.items.some((item) => item.current));
+
+  const ended = await fetch(url(`/v1/sessions/${automaticSession.sessionId}`), {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" },
+  });
+  assert.equal(ended.status, 200);
+  assert.equal((await ended.json()).current, false);
+  const endedAccess = await fetch(url("/v1/capabilities"), {
+    headers: { Authorization: `Bearer ${automaticSession.token}`, Origin: "http://localhost:3000" },
+  });
+  assert.equal(endedAccess.status, 401);
+
+  const endedAll = await fetch(url("/v1/sessions/revoke-all"), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" },
+  });
+  assert.equal(endedAll.status, 200);
+  assert.ok((await endedAll.json()).revokedCount >= 1);
+  const healthAfterRevoke = await fetch(url("/v1/health"), { headers: { Origin: "http://localhost:3000" } });
+  assert.equal((await healthAfterRevoke.json()).paired, false);
+});

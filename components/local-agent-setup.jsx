@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Download, ExternalLink, Laptop, LoaderCircle, RefreshCw, ShieldCheck, TerminalSquare, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, ExternalLink, Laptop, LoaderCircle, LogOut, RefreshCw, ShieldCheck, TerminalSquare, XCircle } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
-import { agentBaseUrl, localAgentToken, pairLocalAgent, probeLocalAgent } from "./processing-client.js";
+import { agentBaseUrl, endAllLocalSessions, endLocalSession, getLocalSessions, localAgentToken, pairLocalAgent, probeLocalAgent } from "./processing-client.js";
 
 const releasesUrl = process.env.NEXT_PUBLIC_AGENT_RELEASES_URL || "https://github.com/Amangupta20000/media-toolbox/releases/latest";
 const macBuildSigned = process.env.NEXT_PUBLIC_MACOS_AGENT_SIGNED === "true";
@@ -13,6 +13,10 @@ export function LocalAgentSetup() {
   const [code, setCode] = useState("");
   const [pairing, setPairing] = useState(false);
   const [error, setError] = useState("");
+  const [sessions, setSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionAction, setSessionAction] = useState("");
+  const [sessionError, setSessionError] = useState("");
   const checkingRef = useRef(false);
 
   const publishStatus = useCallback((nextStatus) => {
@@ -20,13 +24,32 @@ export function LocalAgentSetup() {
     if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("media-toolbox-agent-status", { detail: nextStatus }));
   }, []);
 
+  const loadSessions = useCallback(async () => {
+    if (!localAgentToken()) { setSessions([]); return; }
+    setSessionsLoading(true);
+    setSessionError("");
+    try {
+      const value = await getLocalSessions();
+      setSessions(Array.isArray(value.items) ? value.items : []);
+    } catch (sessionLoadError) {
+      setSessionError(sessionLoadError instanceof Error ? sessionLoadError.message : "Connected sessions could not be loaded.");
+    } finally {
+      setSessionsLoading(false);
+    }
+  }, []);
+
   const check = useCallback(async () => {
     if (checkingRef.current) return;
     checkingRef.current = true;
     setError("");
-    try { publishStatus(await probeLocalAgent()); } catch (checkError) { publishStatus({ available: false, connected: false, error: checkError instanceof Error ? checkError.message : "The local agent is not running." }); }
+    try {
+      const nextStatus = await probeLocalAgent();
+      publishStatus(nextStatus);
+      if (nextStatus.connected) await loadSessions();
+      else setSessions([]);
+    } catch (checkError) { publishStatus({ available: false, connected: false, error: checkError instanceof Error ? checkError.message : "The local agent is not running." }); setSessions([]); }
     finally { checkingRef.current = false; }
-  }, [publishStatus]);
+  }, [loadSessions, publishStatus]);
 
   useEffect(() => {
     check();
@@ -44,7 +67,35 @@ export function LocalAgentSetup() {
     event.preventDefault();
     if (!/^\d{6}$/.test(code.trim())) { setError("Enter the 6-digit code shown by the Local agent."); return; }
     setPairing(true); setError("");
-    try { publishStatus(await pairLocalAgent(code)); setCode(""); } catch (pairError) { setError(pairError instanceof Error ? pairError.message : "Pairing failed."); } finally { setPairing(false); }
+    try {
+      const nextStatus = await pairLocalAgent(code);
+      publishStatus(nextStatus);
+      await loadSessions();
+      setCode("");
+    } catch (pairError) { setError(pairError instanceof Error ? pairError.message : "Pairing failed."); } finally { setPairing(false); }
+  };
+
+  const endSession = async (sessionId) => {
+    setSessionAction(sessionId); setSessionError("");
+    try {
+      const result = await endLocalSession(sessionId);
+      if (result.current) await check();
+      else await loadSessions();
+    } catch (sessionEndError) {
+      setSessionError(sessionEndError instanceof Error ? sessionEndError.message : "The session could not be ended.");
+    } finally { setSessionAction(""); }
+  };
+
+  const endAllSessions = async () => {
+    if (!window.confirm("End every connected browser session for this agent? Each browser will need to pair again.")) return;
+    setSessionAction("all"); setSessionError("");
+    try {
+      await endAllLocalSessions();
+      setSessions([]);
+      await check();
+    } catch (sessionEndError) {
+      setSessionError(sessionEndError instanceof Error ? sessionEndError.message : "The browser sessions could not be ended.");
+    } finally { setSessionAction(""); }
   };
 
   const capabilities = status?.capabilities;
@@ -66,6 +117,7 @@ export function LocalAgentSetup() {
     {showInstallStep && <section className="agent-install-card"><div className="card-heading"><div><span className="card-index">01</span><h2>Install the agent</h2></div><span className="optional-label">macOS · Windows · Linux</span></div><p className="card-description">Start here. Download the installer for the computer that should do the processing, install it, and launch the agent. It runs in the background, starts at login, and listens only on this computer.</p><div className="agent-download-grid"><a className="secondary-button" href={releasesUrl} target="_blank" rel="noreferrer"><Download size={17} /> macOS installer</a><a className="secondary-button" href={releasesUrl} target="_blank" rel="noreferrer"><Download size={17} /> Windows installer</a><a className="secondary-button" href={releasesUrl} target="_blank" rel="noreferrer"><Download size={17} /> Linux installer</a></div><div className="agent-https-note"><ShieldCheck size={17} /><span>Use the latest agent release for Safari and other secure production websites. It creates a trusted HTTPS connection to this device automatically.</span></div>{!macBuildSigned && <div className="agent-macos-note"><AlertTriangle size={17} /><span><strong>macOS first launch:</strong> This release is not Apple-notarized yet. If macOS says the app is “damaged”, copy it to Applications, then run <code>xattr -dr com.apple.quarantine "/Applications/Media Toolbox Agent.app"</code> in Terminal and open it again.</span></div>}<div className="agent-security-note"><ShieldCheck size={17} /><span>Pairing grants this website access only to jobs created by this browser. It cannot run shell commands or read arbitrary paths.</span></div></section>}
     {!pairingComplete && <section className="agent-pair-card"><div><div className="card-heading"><div><span className="card-index">{pairingStep}</span><h2>{agentFound ? "Enter pairing code" : "Pair this browser"}</h2></div><span className="optional-label">One time</span></div><p className="card-description">After installing, open the agent from the menu bar or system tray, choose “Show pairing code”, and enter the 6-digit code here.</p></div><form className="agent-pair-form" onSubmit={pair}><label htmlFor="pairing-code">Pairing code</label><div><input id="pairing-code" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" placeholder="123456" autoComplete="one-time-code" /><button className="primary-button" disabled={pairing}>{pairing ? <LoaderCircle className="spin" size={17} /> : <TerminalSquare size={17} />} Pair agent</button></div></form><div className="agent-open-actions"><a className="secondary-button" href="mediatoolbox://pair"><ExternalLink size={16} /> Open agent</a><span>Already installed? This opens the desktop agent.</span></div></section>}
     <section className="agent-capabilities-card"><div className="card-heading"><div><span className="card-index">03</span><h2>Available tools</h2></div><span className={status?.connected ? "optional-label" : "required-label"}>{status?.connected ? "Detected on this device" : "Waiting for agent"}</span></div><div className="agent-capabilities-grid">{capabilityRows.map(([label, available]) => <div className="agent-capability-row" key={label}><span className={`capability-dot ${available ? "ready" : ""}`} /><strong>{label}</strong><span>{available === undefined ? "Not checked" : available ? "Available" : "Unavailable"}</span></div>)}</div><p className="card-description">FFmpeg, ffprobe, and the image engine are included in the installer. HEIC uses macOS sips or the bundled HEIF-capable image engine. Readable MKV/WebM files use FFmpeg; MKVToolNix remains optional for damaged-container reconstruction.</p></section>
+    {status?.connected && <section className="agent-sessions-card"><div className="card-heading"><div><span className="card-index">04</span><h2>Connected browsers</h2></div><span className="optional-label">{sessions.length} active</span></div><p className="card-description">One agent can serve Chrome, Safari, other browsers, and private/incognito windows at the same time. After this website is paired once, another browser on the same website origin is paired automatically. Different website origins still require the one-time code.</p><div className="agent-session-list">{sessionsLoading ? <div className="agent-session-empty"><LoaderCircle className="spin" size={17} /> Loading sessions…</div> : sessions.length ? sessions.map((session) => <div className="agent-session-row" key={session.id}><div className="agent-session-copy"><strong>{session.clientLabel || "Website session"}{session.current && <span className="session-current-label">This browser</span>}</strong><small>{session.origin}</small><small>Connected {new Date(session.createdAt).toLocaleString()} · expires {new Date(session.expiresAt).toLocaleString()}</small></div><button className="secondary-button" type="button" onClick={() => endSession(session.id)} disabled={Boolean(sessionAction)}><LogOut size={16} /> {sessionAction === session.id ? "Ending…" : "End session"}</button></div>) : <div className="agent-session-empty">No active browser sessions.</div>}</div>{sessions.length > 0 && <button className="secondary-button agent-end-all" type="button" onClick={endAllSessions} disabled={Boolean(sessionAction)}><LogOut size={16} /> {sessionAction === "all" ? "Ending all sessions…" : "End all sessions"}</button>}{sessionError && <div className="session-error"><XCircle size={16} /><span>{sessionError}</span></div>}<p className="agent-session-note">Ending a session revokes its access immediately. It does not stop the desktop agent or delete local results.</p></section>}
     {error && <div className="error-banner"><XCircle size={18} /><span>{error}</span></div>}
   </AppShell>;
 }
