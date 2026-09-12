@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { AlertTriangle, Download, FileText, Film, Image as ImageIcon, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, Download, Eye, FileText, Film, Image as ImageIcon, Pencil, RefreshCw, Trash2, X } from "lucide-react";
 import { formatBytes } from "./file-dropzone.jsx";
+import { rememberHistoryEdit } from "./history-edit.js";
 import { deleteDownloadedFile, deleteLocalHistory, deleteServerHistory, getLocalHistory, getServerHistory, probeLocalAgent } from "./processing-client.js";
 
 const toolNames = {
@@ -66,6 +67,7 @@ export function ToolHistory({ tool }) {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [deletingId, setDeletingId] = useState("");
+  const [previewItem, setPreviewItem] = useState(null);
   const Icon = toolIcons[tool] || FileText;
 
   const loadHistory = async () => {
@@ -113,6 +115,7 @@ export function ToolHistory({ tool }) {
         await deleteServerHistory(item.id);
         setServer((current) => ({ ...current, items: current.items.filter((entry) => entry.id !== item.id) }));
       }
+      setPreviewItem((current) => current?.id === item.id ? null : current);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The saved result could not be deleted.");
     } finally {
@@ -122,6 +125,16 @@ export function ToolHistory({ tool }) {
 
   const localReady = local.status === "ready";
   const serverReady = server.status === "ready";
+
+  const editItem = (item) => {
+    const result = item.result || {};
+    if (!result.downloadUrl) {
+      setMessage("This saved result is no longer available for editing.");
+      return;
+    }
+    rememberHistoryEdit({ tool, downloadUrl: result.downloadUrl, filename: result.filename, mime: result.mime });
+    window.location.assign(tool === "pdf-editor" ? "/pdf-editor" : tool === "video-repair" ? "/video-repair" : "/image-converter");
+  };
 
   return <section className="history-panel" aria-labelledby={`${tool}-history-title`}>
     <div className="history-panel-heading">
@@ -138,10 +151,52 @@ export function ToolHistory({ tool }) {
       return <article className="history-item" key={`${item.storage}-${item.id}`}>
         <div className="history-item-icon"><Icon size={19} /></div>
         <div className="history-item-copy"><strong title={result.filename}>{result.filename || "Saved result"}</strong><span>{historyDate(item.updatedAt || item.createdAt)} · {formatBytes(result.bytes || 0)}</span><small>{item.location || (item.storage === "local" ? "Local agent Results folder" : "Server temporary storage")}</small></div>
-        <div className="history-item-actions"><a className="secondary-button" href={result.downloadUrl} download={result.filename}><Download size={16} /> Download</a><button className="icon-button history-delete-button" type="button" onClick={() => removeItem(item)} disabled={deletingId === item.id} aria-label={item.storage === "local" ? `Delete ${result.filename || "saved result"} from this device` : `Delete ${result.filename || "saved result"} from Downloads and server history`} title={item.storage === "local" ? "Delete from device" : "Delete from Downloads and server history"}><Trash2 size={17} /></button></div>
+        <div className="history-item-actions"><button className="icon-button history-preview-button" type="button" onClick={() => setPreviewItem(item)} aria-label={`Preview ${result.filename || "saved result"}`} title="Preview"><Eye size={17} /></button><a className="secondary-button" href={result.downloadUrl} download={result.filename}><Download size={16} /> Download</a><button className="icon-button history-delete-button" type="button" onClick={() => removeItem(item)} disabled={deletingId === item.id} aria-label={item.storage === "local" ? `Delete ${result.filename || "saved result"} from this device` : `Delete ${result.filename || "saved result"} from Downloads and server history`} title={item.storage === "local" ? "Delete from device" : "Delete from Downloads and server history"}><Trash2 size={17} /></button></div>
       </article>;
     })}</div>}
     {!loading && <p className="history-note">Server Delete first asks the paired Local agent to remove the named file from the Downloads folder, then removes the server copy and listing. If the file is missing or the agent is unavailable, the listing stays.</p>}
     {message && <div className="error-banner"><AlertTriangle size={17} /><span>{message}</span></div>}
+    {previewItem && <HistoryPreviewModal item={previewItem} onClose={() => setPreviewItem(null)} onDelete={() => removeItem(previewItem)} onEdit={() => editItem(previewItem)} deleting={deletingId === previewItem.id} />}
   </section>;
+}
+
+function previewUrlFor(result) {
+  if (result?.previewUrl) return result.previewUrl;
+  if (!result?.downloadUrl) return "";
+  return `${result.downloadUrl}${result.downloadUrl.includes("?") ? "&" : "?"}preview=1`;
+}
+
+function HistoryPreviewModal({ item, onClose, onDelete, onEdit, deleting }) {
+  const result = item.result || {};
+  const previewUrl = previewUrlFor(result);
+  const [previewError, setPreviewError] = useState(false);
+  const tool = item.tool;
+
+  useEffect(() => {
+    const handleKeyDown = (event) => { if (event.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handleKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [onClose]);
+
+  const handleDelete = () => {
+    onDelete();
+  };
+
+  return <div className="history-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="history-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="history-preview-title">
+      <div className="history-preview-header"><div><span>Saved result preview</span><strong id="history-preview-title" title={result.filename}>{result.filename || "Saved result"}</strong><small>{item.storage === "local" ? "Local agent result" : "Server result"} · {formatBytes(result.bytes || 0)}</small></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close preview" title="Close preview"><X size={20} /></button></div>
+      <div className="history-preview-body">
+        {!previewUrl && <div className="preview-unavailable"><AlertTriangle size={18} /><span>This saved result is no longer available for preview.</span></div>}
+        {previewUrl && tool === "image-converter" && (previewError ? <div className="preview-unavailable"><AlertTriangle size={18} /><span>This image cannot be previewed in this browser, but it can still be downloaded.</span></div> : <img className="history-preview-image" src={previewUrl} alt={`Preview of ${result.filename || "saved image"}`} onError={() => setPreviewError(true)} />)}
+        {previewUrl && tool === "video-repair" && (previewError ? <div className="preview-unavailable"><AlertTriangle size={18} /><span>This video cannot be previewed in this browser, but it can still be downloaded.</span></div> : <video className="history-preview-video" controls autoPlay={false} preload="metadata" playsInline onError={() => setPreviewError(true)} aria-label={`Preview of ${result.filename || "saved video"}`}><source src={previewUrl} /></video>)}
+        {previewUrl && tool === "pdf-editor" && <iframe className="history-preview-pdf" src={previewUrl} title={`Preview of ${result.filename || "saved PDF"}`} />}
+      </div>
+      <div className="history-preview-actions"><button className="secondary-button history-modal-delete" type="button" onClick={handleDelete} disabled={deleting}><Trash2 size={16} /> {deleting ? "Deleting…" : "Delete file"}</button><a className="primary-button" href={result.downloadUrl} download={result.filename}><Download size={17} /> Download</a><button className="secondary-button" type="button" onClick={onEdit}><Pencil size={16} /> Edit file</button></div>
+    </div>
+  </div>;
 }

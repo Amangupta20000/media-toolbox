@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Download, FilePlus2, FileText, GripVertical, ImagePlus, LoaderCircle, Lock, Plus, RotateCcw, Trash2, Unlock, UploadCloud, WandSparkles, X } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { formatBytes } from "./file-dropzone.jsx";
+import { takeHistoryEdit } from "./history-edit.js";
 import { ProcessingMode } from "./processing-mode.jsx";
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
@@ -287,6 +288,7 @@ export function PdfEditor() {
   const imageUrlsRef = useRef(new Set());
   const browserResultUrlRef = useRef("");
   const pdfLibraryPromiseRef = useRef(null);
+  const historyEditLoadedRef = useRef(false);
 
   const ensurePdfLibrary = () => {
     if (!pdfLibraryPromiseRef.current) {
@@ -402,6 +404,22 @@ export function PdfEditor() {
     setContinuingFile(null);
     addPdfFiles([file]);
   }, [continuingFile, loadingFiles, pdfFiles.length, pages.length, job, pdfLibrary]);
+
+  useEffect(() => {
+    if (historyEditLoadedRef.current) return;
+    historyEditLoadedRef.current = true;
+    const pending = takeHistoryEdit("pdf-editor");
+    if (!pending?.downloadUrl) return undefined;
+    let active = true;
+    fetch(pending.downloadUrl, { cache: "no-store" }).then(async (response) => {
+      if (!response.ok) throw new Error("The saved PDF could not be reopened.");
+      const blob = await response.blob();
+      if (active) setContinuingFile(new File([blob], pending.filename || "saved.pdf", { type: "application/pdf" }));
+    }).catch((loadError) => {
+      if (active) setError(loadError instanceof Error ? loadError.message : "The saved PDF could not be reopened.");
+    });
+    return () => { active = false; };
+  }, []);
 
   const handlePdfDragOver = (event) => {
     event.preventDefault();

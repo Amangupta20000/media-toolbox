@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock3, Download, FileCheck2, Info, LoaderCircle, RotateCcw, ShieldCheck, Sparkles, Zap } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { FileDropzone, formatBytes } from "./file-dropzone.jsx";
+import { takeHistoryEdit } from "./history-edit.js";
 import { ProcessingMode } from "./processing-mode.jsx";
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
@@ -113,6 +114,21 @@ export function ToolPage({ tool }) {
     setJpegConfirmed(false);
     setError("");
   };
+
+  useEffect(() => {
+    const pending = takeHistoryEdit(tool);
+    if (!pending?.downloadUrl) return undefined;
+    let active = true;
+    fetch(pending.downloadUrl, { cache: "no-store" }).then(async (response) => {
+      if (!response.ok) throw new Error("The saved result could not be reopened.");
+      const blob = await response.blob();
+      if (!active) return;
+      handleSourceFile(new File([blob], pending.filename || "saved-result", { type: pending.mime || blob.type || "application/octet-stream" }));
+    }).catch((loadError) => {
+      if (active) setError(loadError instanceof Error ? loadError.message : "The saved result could not be reopened.");
+    });
+    return () => { active = false; };
+  }, [tool]);
 
   const submit = async () => {
     setError("");
