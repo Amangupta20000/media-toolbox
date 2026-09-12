@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Download, FilePlus2, FileText, GripVertical, ImagePlus, LoaderCircle, Lock, Plus, Printer, RotateCcw, Trash2, Unlock, UploadCloud, WandSparkles, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Copy, Download, FilePlus2, FileText, GripVertical, ImagePlus, Keyboard, LoaderCircle, Lock, Plus, Printer, RotateCcw, RotateCw, Trash2, Unlock, UploadCloud, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { formatBytes } from "./file-dropzone.jsx";
 import { takeHistoryEdit } from "./history-edit.js";
@@ -11,7 +11,8 @@ import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 
 const MAX_PDFS = 5;
-const MAX_PDF_BYTES = 50 * 1024 * 1024;
+const MAX_PDF_BYTES = 15 * 1024 * 1024;
+const MAX_IMAGE_COORDINATE = 100000;
 const ACCEPTED_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".heic", ".heif", ".tif", ".tiff", ".gif", ".bmp"]);
 const A4 = { width: 595.28, height: 841.89, rotation: 0 };
 
@@ -22,6 +23,75 @@ function getPageImages(page) {
 
 function makeId() {
   return globalThis.crypto?.randomUUID?.() || `page-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizeRotation(value) {
+  const rotation = Number(value) || 0;
+  return ((rotation % 360) + 360) % 360;
+}
+
+function pageDisplayDimensions(page) {
+  const rotation = normalizeRotation(page?.rotation);
+  return rotation === 90 || rotation === 270
+    ? { width: Number(page?.height) || A4.height, height: Number(page?.width) || A4.width }
+    : { width: Number(page?.width) || A4.width, height: Number(page?.height) || A4.height };
+}
+
+function pageDisplayRatio(page) {
+  const dimensions = pageDisplayDimensions(page);
+  return dimensions.width / Math.max(1, dimensions.height);
+}
+
+function imageDisplayPlacement(page, image) {
+  const pageWidth = Number(page?.width) || A4.width;
+  const pageHeight = Number(page?.height) || A4.height;
+  const x = Number(image?.x) || 0;
+  const y = Number(image?.y) || 0;
+  const width = Number(image?.width) || 0;
+  const height = Number(image?.height) || 0;
+  switch (normalizeRotation(page?.rotation)) {
+    case 90:
+      return { x: pageHeight - y - height, y: x, width: height, height: width, pageWidth: pageHeight, pageHeight: pageWidth };
+    case 180:
+      return { x: pageWidth - x - width, y: pageHeight - y - height, width, height, pageWidth, pageHeight };
+    case 270:
+      return { x: y, y: pageWidth - x - width, width: height, height: width, pageWidth: pageHeight, pageHeight: pageWidth };
+    default:
+      return { x, y, width, height, pageWidth, pageHeight };
+  }
+}
+
+function validatePdfProject({ pages, pdfFiles, processingMode }) {
+  if (!Array.isArray(pages) || pages.length === 0) return "Add at least one page before exporting.";
+  if (pages.length > 2000) return "This PDF project has too many pages.";
+  if (processingMode !== "browser" && (!Array.isArray(pdfFiles) || pdfFiles.length === 0)) return "Add at least one PDF before exporting with Local agent or Server.";
+  const ids = new Set();
+  for (const [index, page] of pages.entries()) {
+    if (!page || typeof page !== "object" || ids.has(page.id)) return `Page ${index + 1} is invalid.`;
+    ids.add(page.id);
+    if (!["source", "raster", "blank"].includes(page.kind)) return `Page ${index + 1} has an unsupported type.`;
+    const rawRotation = page.rotation === undefined ? 0 : Number(page.rotation);
+    if (!Number.isFinite(rawRotation) || ![0, 90, 180, 270].includes(rawRotation)) return `Page ${index + 1} has an invalid rotation.`;
+    const rotation = normalizeRotation(rawRotation);
+    if (!Number.isFinite(Number(page.width)) || Number(page.width) <= 0 || !Number.isFinite(Number(page.height)) || Number(page.height) <= 0) return `Page ${index + 1} has invalid dimensions.`;
+    if ((page.kind === "source" || page.kind === "raster") && (!Number.isInteger(page.pdfIndex) || page.pdfIndex < 0 || page.pdfIndex >= pdfFiles.length)) return `Page ${index + 1} points to an unavailable PDF.`;
+    if (page.kind === "source" && (!Number.isInteger(page.pageIndex) || page.pageIndex < 0 || (Number.isInteger(pdfFiles[page.pdfIndex]?.pageCount) && page.pageIndex >= pdfFiles[page.pdfIndex].pageCount))) return `Page ${index + 1} points to an unavailable source page.`;
+    for (const [imageIndex, image] of getPageImages(page).entries()) {
+      if (!image || (!image.file && !image.sourceBytes)) return `Image ${imageIndex + 1} on page ${index + 1} is missing its source file.`;
+      const values = [image.x, image.y, image.width, image.height].map(Number);
+      if (!values.every(Number.isFinite) || values[2] <= 0 || values[3] <= 0 || values[0] < -MAX_IMAGE_COORDINATE || values[1] < -MAX_IMAGE_COORDINATE || values[0] + values[2] > MAX_IMAGE_COORDINATE || values[1] + values[3] > MAX_IMAGE_COORDINATE) return `Image ${imageIndex + 1} on page ${index + 1} has an invalid placement.`;
+    }
+  }
+  return "";
+}
+
+function validatePdfResult(result, expectedPageCount) {
+  if (!result || typeof result !== "object") return "The PDF export returned no result.";
+  if (!result.downloadUrl || !result.filename) return "The PDF export returned no downloadable file.";
+  if (!Number.isFinite(Number(result.bytes)) || Number(result.bytes) <= 0) return "The exported PDF is empty or its size could not be verified.";
+  if (!Number.isInteger(Number(result.pageCount)) || Number(result.pageCount) < 1) return "The exported PDF page count could not be verified.";
+  if (expectedPageCount && Number(result.pageCount) !== expectedPageCount) return `The exported PDF contains ${result.pageCount} pages, but ${expectedPageCount} were expected.`;
+  return "";
 }
 
 function fileExtension(name) {
@@ -73,14 +143,45 @@ async function inspectPdfOnServer(file) {
   return payload;
 }
 
+async function loadPdfDocumentWithPassword(pdfLibrary, data, filename) {
+  const task = pdfLibrary.getDocument({ data });
+  let passwordProtected = false;
+  let attempts = 0;
+  task.onPassword = (callback, reason) => {
+    passwordProtected = true;
+    attempts += 1;
+    const message = reason === 2
+      ? `The password for ${filename} was incorrect. Enter it again.`
+      : `Enter the password to open ${filename}.`;
+    const password = typeof window !== "undefined" ? window.prompt(message) : null;
+    if (password === null) {
+      task.destroy();
+      return;
+    }
+    if (!String(password)) {
+      task.destroy();
+      return;
+    }
+    callback(String(password));
+  };
+  try {
+    const documentProxy = await task.promise;
+    return { documentProxy, passwordProtected };
+  } catch (error) {
+    if (passwordProtected && attempts > 0) {
+      throw new Error("The PDF password was missing or incorrect. The file was not opened.");
+    }
+    throw error;
+  }
+}
+
 async function loadPdfFile(file, pdfLibrary, { allowServerFallback = false } = {}) {
   const data = new Uint8Array(await file.arrayBuffer());
   let browserError = null;
   if (pdfLibrary) {
     try {
-      const task = pdfLibrary.getDocument({ data });
-      const documentProxy = await task.promise;
-      return { data, documentProxy, pageCount: documentProxy.numPages, fallbackDocument: null, pageSizes: null, serverFallback: false };
+      const loaded = await loadPdfDocumentWithPassword(pdfLibrary, data, file.name);
+      return { data, documentProxy: loaded.documentProxy, pageCount: loaded.documentProxy.numPages, fallbackDocument: null, pageSizes: null, serverFallback: false, passwordProtected: loaded.passwordProtected };
     } catch (error) {
       browserError = error;
     }
@@ -92,7 +193,7 @@ async function loadPdfFile(file, pdfLibrary, { allowServerFallback = false } = {
     if (allowServerFallback) {
       try { inspection = await inspectPdfOnServer(file); } catch { /* the local fallback can still provide page metadata */ }
     }
-    return { data, documentProxy: null, pageCount: fallbackDocument.getPageCount(), fallbackDocument, pageSizes: inspection?.pages || null, previewToken: inspection?.previewToken || null, serverFallback: false };
+    return { data, documentProxy: null, pageCount: fallbackDocument.getPageCount(), fallbackDocument, pageSizes: inspection?.pages || null, previewToken: inspection?.previewToken || null, serverFallback: false, passwordProtected: false };
   } catch (fallbackError) {
     if (!allowServerFallback) {
       const detail = fallbackError instanceof Error ? fallbackError.message : browserError?.message;
@@ -100,7 +201,7 @@ async function loadPdfFile(file, pdfLibrary, { allowServerFallback = false } = {
     }
     try {
       const inspection = await inspectPdfOnServer(file);
-      return { data, documentProxy: null, pageCount: inspection.pageCount, fallbackDocument: null, pageSizes: inspection.pages, previewToken: inspection.previewToken, serverFallback: true };
+      return { data, documentProxy: null, pageCount: inspection.pageCount, fallbackDocument: null, pageSizes: inspection.pages, previewToken: inspection.previewToken, serverFallback: true, passwordProtected: false };
     } catch (serverError) {
       const detail = serverError instanceof Error ? serverError.message : fallbackError instanceof Error ? fallbackError.message : browserError?.message;
       throw new Error(detail || "The browser and server PDF readers could not open this file.");
@@ -129,11 +230,11 @@ function pageDimensions(pdfPage) {
   return { width: viewport.width, height: viewport.height, rotation: pdfPage.rotate || 0 };
 }
 
-async function renderThumbnail(pdfDocument, pageNumber) {
+async function renderThumbnail(pdfDocument, pageNumber, rotation = 0) {
   const pdfPage = await pdfDocument.getPage(pageNumber);
   const dimensions = pageDimensions(pdfPage);
   const scale = Math.min(0.25, 124 / dimensions.height, 180 / dimensions.width);
-  const viewport = pdfPage.getViewport({ scale, rotation: 0 });
+  const viewport = pdfPage.getViewport({ scale, rotation: normalizeRotation(rotation) });
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.ceil(viewport.width));
   canvas.height = Math.max(1, Math.ceil(viewport.height));
@@ -291,6 +392,7 @@ export function PdfEditor() {
   const [processingMode, setProcessingMode] = useState("local");
   const [jobMode, setJobMode] = useState("local");
   const [keepResult, setKeepResult] = useState(false);
+  const [previewZoom, setPreviewZoom] = useState(1);
   const [activeView, setActiveView] = useState("tool");
   const pdfInputRef = useRef(null);
   const imageInputRef = useRef(null);
@@ -336,6 +438,53 @@ export function PdfEditor() {
   const selectedPage = useMemo(() => pages.find((page) => page.id === selectedId) || pages[0] || null, [pages, selectedId]);
   const selectedPageImages = useMemo(() => getPageImages(selectedPage), [selectedPage]);
 
+  const changePreviewZoom = (delta) => setPreviewZoom((current) => Math.min(2, Math.max(0.6, Math.round((current + delta) * 10) / 10)));
+  const resetPreviewZoom = () => setPreviewZoom(1);
+
+  const rotateSelectedPage = (delta) => {
+    if (!selectedPage) return;
+    updatePage(selectedPage.id, { rotation: normalizeRotation((selectedPage.rotation || 0) + delta) });
+    setError("");
+  };
+
+  const duplicateSelectedPage = async () => {
+    if (!selectedPage) return;
+    const clonedImages = await Promise.all(getPageImages(selectedPage).map(async (image) => {
+      const clone = { ...image, id: makeId() };
+      if (image.file) {
+        clone.url = URL.createObjectURL(image.file);
+        imageUrlsRef.current.add(clone.url);
+      } else if (image.sourceBytes) {
+        clone.url = URL.createObjectURL(new Blob([image.sourceBytes], { type: image.file?.type || "image/png" }));
+        imageUrlsRef.current.add(clone.url);
+      } else if (image.url) {
+        try {
+          const response = await fetch(image.url);
+          if (response.ok) {
+            clone.url = URL.createObjectURL(await response.blob());
+            imageUrlsRef.current.add(clone.url);
+          }
+        } catch {
+          clone.url = image.url;
+        }
+      }
+      return clone;
+    }));
+    const duplicate = { ...selectedPage, id: makeId(), images: clonedImages };
+    setPages((current) => {
+      const selectedIndex = current.findIndex((page) => page.id === selectedPage.id);
+      const next = [...current];
+      next.splice(selectedIndex >= 0 ? selectedIndex + 1 : next.length, 0, duplicate);
+      return next;
+    });
+    setSelectedId(duplicate.id);
+    setError("");
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      scrollPreviewIntoView(duplicate.id);
+      scrollThumbnailIntoView(duplicate.id);
+    }));
+  };
+
   const addPdfFiles = async (candidates) => {
     const selectedFiles = Array.from(candidates || []);
     if (!selectedFiles.length) return;
@@ -344,7 +493,7 @@ export function PdfEditor() {
     if (pdfFiles.length + selectedFiles.length > MAX_PDFS) { setError(`You can add up to ${MAX_PDFS} PDFs.`); return; }
     for (const file of selectedFiles) {
       if (!isPdf(file)) { setError(`${file.name} is not a PDF.`); return; }
-      if (file.size > MAX_PDF_BYTES) { setError(`${file.name} is larger than the 50 MB limit.`); return; }
+      if (file.size > MAX_PDF_BYTES) { setError(`${file.name} is larger than the 15 MB limit.`); return; }
     }
 
     setLoadingFiles(true);
@@ -367,12 +516,14 @@ export function PdfEditor() {
       let thumbnailFailures = 0;
       let browserFallbacks = 0;
       let serverFallbacks = 0;
-    for (const file of selectedFiles) {
+      let passwordProtectedFiles = 0;
+      for (const file of selectedFiles) {
       const loaded = await loadPdfFile(file, activePdfLibrary, { allowServerFallback: processingMode === "server" });
       const pdfDocument = loaded.documentProxy;
         documentsRef.current[pdfIndex] = pdfDocument;
         if (loaded.fallbackDocument) browserFallbacks += 1;
         if (loaded.serverFallback) serverFallbacks += 1;
+        if (loaded.passwordProtected) passwordProtectedFiles += 1;
         const fileRecord = { id: makeId(), file, name: file.name, pageCount: loaded.pageCount, sourceBytes: loaded.data };
         newFiles.push(fileRecord);
         for (let pageNumber = 1; pageNumber <= loaded.pageCount; pageNumber += 1) {
@@ -391,7 +542,7 @@ export function PdfEditor() {
             const dimensions = thumbnailError?.pageDimensions || A4;
             thumbnail = { thumbnail: fallbackThumbnail(`Page ${pageNumber}`), width: dimensions.width, height: dimensions.height, rotation: dimensions.rotation || 0, previewFallback: true };
           }
-          newPages.push({ id: makeId(), kind: "source", pdfIndex, pageIndex: pageNumber - 1, sourceName: file.name, pageNumber, previewToken: loaded.previewToken || null, pdfPage: sourcePdfPage, ...thumbnail });
+          newPages.push({ id: makeId(), kind: loaded.passwordProtected ? "raster" : "source", pdfIndex, pageIndex: pageNumber - 1, sourceName: file.name, pageNumber, previewToken: loaded.previewToken || null, pdfPage: sourcePdfPage, ...thumbnail });
         }
         pdfIndex += 1;
       }
@@ -401,17 +552,18 @@ export function PdfEditor() {
         if (!selectedId && next[0]) setSelectedId(next[0].id);
         return next;
       });
-      if (browserFallbacks || serverFallbacks || thumbnailFailures) {
+      if (browserFallbacks || serverFallbacks || thumbnailFailures || passwordProtectedFiles) {
         const messages = [];
         if (browserFallbacks) messages.push("PDF preview was unavailable, so a safe PDF parser was used");
         if (serverFallbacks) messages.push("The browser used the server PDF reader to validate the document");
         if (thumbnailFailures) messages.push(`${thumbnailFailures} page preview${thumbnailFailures === 1 ? "" : "s"} could not be rendered`);
+        if (passwordProtectedFiles) messages.push(`${passwordProtectedFiles} password-protected PDF${passwordProtectedFiles === 1 ? " was" : "s were"} opened with the supplied password and will be safely flattened during export`);
         setPreviewError(`${messages.join("; ")}. The PDF can still be edited and exported.`);
       }
     } catch (loadError) {
       const detail = loadError instanceof Error ? loadError.message : "";
       console.error("PDF editor import failed", loadError);
-      setError(/password|encrypt/i.test(detail) ? "A password-protected PDF cannot be edited. Remove its password and try again." : detail ? `PDF import failed: ${detail.slice(0, 240)}` : "The browser and server PDF readers could not open this file.");
+      setError(/password|encrypt/i.test(detail) ? "The PDF could not be opened. Check the password and try again." : detail ? `PDF import failed: ${detail.slice(0, 240)}` : "The browser and server PDF readers could not open this file.");
     } finally {
       setLoadingFiles(false);
     }
@@ -842,7 +994,8 @@ export function PdfEditor() {
   };
 
   const submit = async () => {
-    if (!pages.length) { setError("Add at least one page before exporting."); return; }
+    const validationError = validatePdfProject({ pages, pdfFiles, processingMode });
+    if (validationError) { setError(`Export validation failed: ${validationError}`); return; }
     if (processingMode === "browser") {
       setProcessingMode("local");
       setError("Browser mode is temporarily unavailable. Choose Local agent or Server.");
@@ -869,19 +1022,33 @@ export function PdfEditor() {
     const form = new FormData();
     form.append("tool", "pdf-editor");
     pdfFiles.forEach((record) => form.append("pdf", record.file, record.name));
-    const operations = pages.map((page) => {
-      const operation = page.kind === "source" ? { kind: "source", pdfIndex: page.pdfIndex, pageIndex: page.pageIndex } : { kind: "blank", width: page.width, height: page.height, rotation: page.rotation || 0 };
-      const images = getPageImages(page);
-      if (images.length) {
-        if (page.kind === "source") Object.assign(operation, { width: page.width, height: page.height, rotation: page.rotation || 0 });
-        operation.images = images.map((image, imageIndex) => {
-          const imageField = `page-image-${page.id}-${image.id || imageIndex}`;
-          form.append(imageField, image.file, image.file.name);
-          return { imageField, image: { x: image.x, y: image.y, width: image.width, height: image.height } };
-        });
-      }
-      return operation;
-    });
+    let operations;
+    try {
+      operations = await Promise.all(pages.map(async (page) => {
+        const operation = page.kind === "source"
+          ? { kind: "source", pdfIndex: page.pdfIndex, pageIndex: page.pageIndex, width: page.width, height: page.height, rotation: normalizeRotation(page.rotation) }
+          : { kind: "blank", width: page.width, height: page.height, rotation: normalizeRotation(page.rotation) };
+        const images = getPageImages(page);
+        if (page.kind === "raster") {
+          const pdfPage = page.pdfPage || await documentsRef.current[page.pdfIndex]?.getPage(page.pageNumber);
+          if (!pdfPage) throw new Error(`The protected PDF page ${page.pageNumber} could not be rendered for export.`);
+          const rasterBytes = await renderPdfPageToJpeg(pdfPage);
+          images.unshift({ id: "protected-page", file: new File([rasterBytes], `protected-page-${page.pageNumber}.jpg`, { type: "image/jpeg" }), x: 0, y: 0, width: page.width, height: page.height });
+        }
+        if (images.length) {
+          if (page.kind === "source" || page.kind === "raster") Object.assign(operation, { width: page.width, height: page.height, rotation: page.rotation || 0 });
+          operation.images = images.map((image, imageIndex) => {
+            const imageField = `page-image-${page.id}-${image.id || imageIndex}`;
+            form.append(imageField, image.file, image.file.name);
+            return { imageField, image: { x: image.x, y: image.y, width: image.width, height: image.height } };
+          });
+        }
+        return operation;
+      }));
+    } catch (operationError) {
+      setError(operationError instanceof Error ? operationError.message : "A PDF page could not be prepared for export.");
+      return;
+    }
     form.append("operations", JSON.stringify(operations));
     if (processingMode === "local") form.append("retention", keepResult ? "keep" : "delete");
     try {
@@ -895,19 +1062,70 @@ export function PdfEditor() {
     }
   };
 
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (activeView !== "tool" || job || loadingFiles) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest("input, textarea, select, button, [contenteditable=\"true\"]")) return;
+      const command = event.metaKey || event.ctrlKey;
+      if (command && event.key.toLowerCase() === "d") {
+        event.preventDefault();
+        void duplicateSelectedPage();
+        return;
+      }
+      if (command && event.key === "Enter") {
+        event.preventDefault();
+        void submit();
+        return;
+      }
+      if (event.key === "Delete" || event.key === "Backspace") {
+        if (!selectedPage) return;
+        event.preventDefault();
+        deletePage(selectedPage.id);
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        rotateSelectedPage(-90);
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        rotateSelectedPage(90);
+        return;
+      }
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        changePreviewZoom(0.1);
+        return;
+      }
+      if (event.key === "-") {
+        event.preventDefault();
+        changePreviewZoom(-0.1);
+        return;
+      }
+      if (event.key === "0") {
+        event.preventDefault();
+        resetPreviewZoom();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeView, job, loadingFiles, selectedPage, previewZoom, pages, pdfFiles, processingMode]);
+
   return <AppShell>
-    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools · Beta <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · 50 MB each</span></div><h1>PDF editor</h1><p>Merge documents, reorder pages, remove pages, and add images to PDF pages or new blank pages.</p></div></div>
+    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools · Beta <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · 15 MB each</span></div><h1>PDF editor</h1><p>Merge documents, reorder pages, remove pages, and add images to PDF pages or new blank pages.</p></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
     {activeView === "history" ? <ToolHistory tool="pdf-editor" /> : <>
     {!job && <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />}
     {job ? <PdfJobCard job={job} mode={jobMode} keepResult={keepResult} onReset={reset} onContinue={continueEditing} /> : <section className={`pdf-editor-shell ${pdfDragActive ? "pdf-drop-active" : ""}`} onDragOver={handlePdfDragOver} onDragLeave={handlePdfDragLeave} onDrop={handlePdfDrop}>
-      <div className="pdf-editor-toolbar"><div><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDFS} PDFs · {pages.length} pages</span></div><div className="pdf-editor-actions"><button className="secondary-button" type="button" onClick={() => pdfInputRef.current?.click()} disabled={loadingFiles || pdfFiles.length >= MAX_PDFS}><Plus size={17} /> Add PDF</button><button className="secondary-button" type="button" onClick={addBlankPage}><FilePlus2 size={17} /> Blank page</button>{selectedPage && <button className="secondary-button" type="button" onClick={() => imageInputRef.current?.click()}><ImagePlus size={17} /> Add images</button>}{selectedPageImages.length > 0 && <button className="secondary-button" type="button" onClick={() => removeAllImages(selectedPage.id)}><Trash2 size={16} /> Remove images</button>}{selectedPage && <button className="icon-button delete-page-button" type="button" aria-label="Delete selected page" title="Delete selected page" onClick={() => deletePage(selectedPage.id)}><Trash2 size={17} /></button>}<button className="primary-button" type="button" onClick={submit} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles}><WandSparkles size={17} /> {uploadProgress ? `Uploading ${uploadProgress}%` : "Export PDF"}</button></div></div>
+      <div className="pdf-editor-toolbar"><div><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDFS} PDFs · {pages.length} pages</span></div><div className="pdf-editor-actions"><button className="secondary-button" type="button" onClick={() => pdfInputRef.current?.click()} disabled={loadingFiles || pdfFiles.length >= MAX_PDFS}><Plus size={17} /> Add PDF</button><button className="secondary-button" type="button" onClick={addBlankPage}><FilePlus2 size={17} /> Blank page</button>{selectedPage && <><button className="secondary-button small-button" type="button" onClick={() => rotateSelectedPage(-90)} aria-label="Rotate selected page left" title="Rotate left (←)"><RotateCcw size={16} /> Rotate</button><button className="secondary-button small-button" type="button" onClick={() => rotateSelectedPage(90)} aria-label="Rotate selected page right" title="Rotate right (→)"><RotateCw size={16} /></button><button className="secondary-button small-button" type="button" onClick={() => void duplicateSelectedPage()} aria-label="Duplicate selected page" title="Duplicate page (⌘/Ctrl+D)"><Copy size={16} /> Duplicate</button><button className="secondary-button small-button" type="button" onClick={() => imageInputRef.current?.click()}><ImagePlus size={17} /> Add images</button></>}{selectedPageImages.length > 0 && <button className="secondary-button small-button" type="button" onClick={() => removeAllImages(selectedPage.id)}><Trash2 size={16} /> Remove images</button>}{selectedPage && <button className="icon-button delete-page-button" type="button" aria-label="Delete selected page" title="Delete selected page (Delete/Backspace)" onClick={() => deletePage(selectedPage.id)}><Trash2 size={17} /></button>}<div className="pdf-zoom-controls" aria-label="Preview zoom"><button className="icon-button" type="button" onClick={() => changePreviewZoom(-0.1)} aria-label="Zoom out" title="Zoom out (-)"><ZoomOut size={16} /></button><button className="pdf-zoom-value" type="button" onClick={resetPreviewZoom} title="Reset zoom (0)">{Math.round(previewZoom * 100)}%</button><button className="icon-button" type="button" onClick={() => changePreviewZoom(0.1)} aria-label="Zoom in" title="Zoom in (+)"><ZoomIn size={16} /></button></div><button className="primary-button" type="button" onClick={submit} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles}><WandSparkles size={17} /> {uploadProgress ? `Uploading ${uploadProgress}%` : "Export PDF"}</button></div><div className="pdf-shortcuts"><Keyboard size={14} /> ←/→ rotate · ⌘/Ctrl+D duplicate · Delete remove · +/- zoom · ⌘/Ctrl+Enter export</div></div>
       <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { addPdfFiles(event.target.files); event.target.value = ""; }} />
       <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/heic,image/heif,image/tiff,image/gif,image/bmp,.png,.jpg,.jpeg,.heic,.heif,.tif,.tiff,.gif,.bmp" multiple hidden onChange={(event) => { addImages(event.target.files); event.target.value = ""; }} />
       {processingMode === "local" && <label className="keep-result-check pdf-retention-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label>}
       {!pdfFiles.length && !pages.length ? <PdfEmptyState onBrowse={() => pdfInputRef.current?.click()} loading={loadingFiles} dragActive={pdfDragActive} /> : !pages.length ? <PdfNoPagesState onBrowse={() => pdfInputRef.current?.click()} onBlank={addBlankPage} /> : <div className="pdf-editor-layout">
         <aside className="pdf-page-rail"><div className="pdf-rail-heading"><span>Pages</span><small>Pages load as you scroll</small></div><div ref={pageListRef} className="pdf-page-list" onDragOver={handlePageListDragOver} onDrop={handlePageListDrop}>{renderPageList()}</div></aside>
-        <section className="pdf-selected-panel"><div className="pdf-selected-heading"><div><span>Selected page {selectedPage ? pages.findIndex((page) => page.id === selectedPage.id) + 1 : "—"}</span><small>{selectedPage?.kind === "blank" ? "Blank page" : selectedPage?.sourceName || "Choose a page"}{selectedPage?.kind === "source" ? ` · Original page ${selectedPage.pageNumber}` : ""}</small></div></div><div ref={previewScrollRef} className="pdf-document-preview" onScroll={handlePreviewScroll}>{pages.map((page, index) => <Fragment key={page.id}><PdfPreviewPage page={page} index={index} selected={page.id === selectedPage?.id} pdfDocument={documentsRef.current[page.pdfIndex]} previewRootRef={previewScrollRef} elementRef={(element) => { if (element) previewElementRefs.current.set(page.id, element); else previewElementRefs.current.delete(page.id); }} onChange={(images) => updatePage(page.id, { images })} onRemove={(imageId) => removeImage(page.id, imageId)} onError={setPreviewError} /><PdfInsertPageButton pageNumber={index + 1} onClick={() => addBlankPageAfter(page.id)} /></Fragment>)}</div>{previewError && <div className="pdf-preview-error"><AlertTriangle size={16} /><span>{previewError}</span></div>}<p className="pdf-editor-tip"><GripVertical size={15} /> Scroll the preview to select a page. Click + Add page between previews to insert a blank page.</p></section>
+        <section className="pdf-selected-panel"><div className="pdf-selected-heading"><div><span>Selected page {selectedPage ? pages.findIndex((page) => page.id === selectedPage.id) + 1 : "—"}</span><small>{selectedPage?.kind === "blank" ? "Blank page" : selectedPage?.sourceName || "Choose a page"}{selectedPage?.kind === "source" ? ` · Original page ${selectedPage.pageNumber}` : ""}</small></div></div><div ref={previewScrollRef} className="pdf-document-preview" style={{ "--pdf-preview-zoom": previewZoom }} onScroll={handlePreviewScroll}>{pages.map((page, index) => <Fragment key={page.id}><PdfPreviewPage page={page} index={index} selected={page.id === selectedPage?.id} pdfDocument={documentsRef.current[page.pdfIndex]} previewRootRef={previewScrollRef} elementRef={(element) => { if (element) previewElementRefs.current.set(page.id, element); else previewElementRefs.current.delete(page.id); }} onChange={(images) => updatePage(page.id, { images })} onRemove={(imageId) => removeImage(page.id, imageId)} onError={setPreviewError} /><PdfInsertPageButton pageNumber={index + 1} onClick={() => addBlankPageAfter(page.id)} /></Fragment>)}</div>{previewError && <div className="pdf-preview-error"><AlertTriangle size={16} /><span>{previewError}</span></div>}<p className="pdf-editor-tip"><GripVertical size={15} /> Scroll the preview to select a page. Click + Add page between previews to insert a blank page.</p></section>
       </div>}
       {error && <div className="error-banner"><AlertTriangle size={18} /><span>{error}</span></div>}
     </section>}
@@ -916,7 +1134,7 @@ export function PdfEditor() {
 }
 
 function PdfEmptyState({ onBrowse, loading, dragActive }) {
-  return <div className="pdf-empty-state"><div className="pdf-empty-icon"><UploadCloud size={28} /></div><h2>{loading ? "Reading PDF pages…" : dragActive ? "Drop your PDF files" : "Add your first PDF"}</h2><p>{loading ? "Creating page previews for the editor." : dragActive ? "Release to add the PDFs to your project." : "Upload one PDF to edit it, or add up to five PDFs to merge them."}</p><button className="primary-button" type="button" onClick={onBrowse} disabled={loading}><FilePlus2 size={18} /> Browse PDF files</button><small>PDF only · 50 MB maximum per file</small></div>;
+  return <div className="pdf-empty-state"><div className="pdf-empty-icon"><UploadCloud size={28} /></div><h2>{loading ? "Reading PDF pages…" : dragActive ? "Drop your PDF files" : "Add your first PDF"}</h2><p>{loading ? "Creating page previews for the editor." : dragActive ? "Release to add the PDFs to your project." : "Upload one PDF to edit it, or add up to five PDFs to merge them."}</p><button className="primary-button" type="button" onClick={onBrowse} disabled={loading}><FilePlus2 size={18} /> Browse PDF files</button><small>PDF only · 15 MB maximum per file</small></div>;
 }
 
 function PdfNoPagesState({ onBrowse, onBlank }) {
@@ -946,10 +1164,10 @@ function PdfPreviewPage({ page, index, selected, pdfDocument, previewRootRef, el
     nodeRef.current = element;
     elementRef?.(element);
   };
-  const pageLabel = page.kind === "source" ? `Original page ${page.pageNumber}` : "New blank page";
+  const pageLabel = page.kind === "source" || page.kind === "raster" ? `Original page ${page.pageNumber}` : "New blank page";
   return <article ref={setNode} className={`pdf-preview-page ${selected ? "selected" : ""}`} aria-label={`Final page ${index + 1}, ${pageLabel}`}>
-    <div className="pdf-preview-page-heading"><strong>Final page {index + 1}</strong><span>{pageLabel}{page.kind === "source" ? ` · ${page.sourceName}` : ""}</span></div>
-    {shouldRender ? page.kind === "blank" ? <BlankPageCanvas page={page} onChange={onChange} onRemove={onRemove} /> : page.previewFallback ? <PdfFallbackPreview page={page} compact onChange={onChange} onRemove={onRemove} /> : <PdfPageCanvas page={page} pdfDocument={pdfDocument} pageNumber={page.pageNumber} onError={onError} onChange={onChange} onRemove={onRemove} /> : <div className="pdf-preview-page-placeholder" style={{ "--page-ratio": page.width / page.height }}><FileText size={24} /><span>Loading page {index + 1}</span></div>}
+    <div className="pdf-preview-page-heading"><strong>Final page {index + 1}</strong><span>{pageLabel}{page.kind === "source" || page.kind === "raster" ? ` · ${page.sourceName}` : ""}{page.kind === "raster" ? " · Password-protected source" : ""}</span></div>
+    {shouldRender ? page.kind === "blank" ? <BlankPageCanvas page={page} onChange={onChange} onRemove={onRemove} /> : page.previewFallback ? <PdfFallbackPreview page={page} compact onChange={onChange} onRemove={onRemove} /> : <PdfPageCanvas page={page} pdfDocument={pdfDocument} pageNumber={page.pageNumber} onError={onError} onChange={onChange} onRemove={onRemove} /> : <div className="pdf-preview-page-placeholder" style={{ "--page-ratio": pageDisplayRatio(page) }}><FileText size={24} /><span>Loading page {index + 1}</span></div>}
   </article>;
 }
 
@@ -959,8 +1177,8 @@ function PdfInsertPageButton({ pageNumber, onClick }) {
 
 function PdfPageThumbnail({ page, index, elementRef, thumbnailRootRef, pdfDocument, onThumbnailError, selected, draggedId, dropTargetId, dropPosition, recentlyDroppedId, onSelect, onDelete, onDragStart, onDragEnd, onDragOver, onDrop }) {
   return <>{dropTargetId === page.id && dropPosition === "before" && <div className="pdf-drop-gap" aria-hidden="true">Drop here</div>}<div ref={elementRef} className={`pdf-page-thumbnail ${selected ? "selected" : ""} ${draggedId === page.id ? "dragging" : ""} ${dropTargetId === page.id ? "drop-target" : ""} ${recentlyDroppedId === page.id && draggedId !== page.id ? "just-dropped" : ""}`} draggable onClick={onSelect} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop}>
-    <div className="thumbnail-frame">{page.kind === "source" ? <div className="thumbnail-page-surface" style={{ "--page-ratio": page.width / page.height }}><PdfThumbnailImage page={page} index={index} pdfDocument={pdfDocument} rootRef={thumbnailRootRef} onError={onThumbnailError} /><ThumbnailImageOverlayLayer page={page} /></div> : <BlankPageMiniature page={page} />}</div>
-    <div className="thumbnail-meta"><GripVertical className="thumbnail-grip" size={14} /><span><strong>Final {index + 1}</strong>{page.kind === "source" ? <> · <span className="thumbnail-original-page">Original {page.pageNumber}</span> · {page.sourceName}</> : " · New blank page"}</span><button type="button" aria-label={`Delete page ${index + 1}`} title="Delete page" onClick={(event) => { event.stopPropagation(); onDelete(); }}><X size={14} /></button></div>
+    <div className="thumbnail-frame">{page.kind === "source" || page.kind === "raster" ? <div className="thumbnail-page-surface" style={{ "--page-ratio": pageDisplayRatio(page) }}><PdfThumbnailImage page={page} index={index} pdfDocument={pdfDocument} rootRef={thumbnailRootRef} onError={onThumbnailError} /><ThumbnailImageOverlayLayer page={page} /></div> : <BlankPageMiniature page={page} />}</div>
+    <div className="thumbnail-meta"><GripVertical className="thumbnail-grip" size={14} /><span><strong>Final {index + 1}</strong>{page.kind === "source" || page.kind === "raster" ? <> · <span className="thumbnail-original-page">Original {page.pageNumber}</span> · {page.sourceName}</> : " · New blank page"}</span><button type="button" aria-label={`Delete page ${index + 1}`} title="Delete page" onClick={(event) => { event.stopPropagation(); onDelete(); }}><X size={14} /></button></div>
   </div>{dropTargetId === page.id && dropPosition === "after" && <div className="pdf-drop-gap" aria-hidden="true">Drop here</div>}</>;
 }
 
@@ -972,6 +1190,11 @@ function PdfThumbnailImage({ page, index, pdfDocument, rootRef, onError }) {
   useEffect(() => {
     if (index < 4) setActive(true);
   }, [index]);
+
+  useEffect(() => {
+    if (page.previewFallback && !pdfDocument) return;
+    setThumbnail(null);
+  }, [page.previewFallback, page.rotation, pdfDocument]);
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -991,7 +1214,7 @@ function PdfThumbnailImage({ page, index, pdfDocument, rootRef, onError }) {
   useEffect(() => {
     let mounted = true;
     if (!active || thumbnail || !pdfDocument) return undefined;
-    renderThumbnail(pdfDocument, page.pageNumber).then((result) => {
+    renderThumbnail(pdfDocument, page.pageNumber, page.rotation).then((result) => {
       if (mounted) setThumbnail(result.thumbnail);
     }).catch(() => {
       if (mounted) {
@@ -1000,20 +1223,20 @@ function PdfThumbnailImage({ page, index, pdfDocument, rootRef, onError }) {
       }
     });
     return () => { mounted = false; };
-  }, [active, page.pageNumber, pdfDocument, thumbnail, onError]);
+  }, [active, page.pageNumber, page.rotation, pdfDocument, thumbnail, onError]);
 
   if (!active) return <div ref={frameRef} className="thumbnail-loading" aria-label={`Page ${index + 1} thumbnail will load when visible`}>Scroll to load</div>;
   if (!thumbnail) return <div ref={frameRef} className="thumbnail-loading" aria-label={`Loading page ${index + 1} thumbnail`}>Loading…</div>;
-  return <img ref={frameRef} className="thumbnail-page-image" src={thumbnail} alt={`Page ${index + 1}`} loading={index < 4 ? "eager" : "lazy"} decoding="async" />;
+  return <img ref={frameRef} className="thumbnail-page-image" src={thumbnail} alt={`Page ${index + 1}`} loading={index < 4 ? "eager" : "lazy"} decoding="async" style={page.previewFallback ? { transform: `rotate(${normalizeRotation(page.rotation)}deg)` } : undefined} />;
 }
 
 function ThumbnailImageOverlayLayer({ page }) {
-  return <div className="thumbnail-image-overlay-layer">{getPageImages(page).map((image, index) => <img key={image.id || index} src={image.url} alt="" aria-hidden="true" style={{ left: `${image.x / page.width * 100}%`, top: `${image.y / page.height * 100}%`, width: `${image.width / page.width * 100}%`, height: `${image.height / page.height * 100}%` }} />)}</div>;
+  return <div className="thumbnail-image-overlay-layer">{getPageImages(page).map((image, index) => { const placement = imageDisplayPlacement(page, image); return <img key={image.id || index} src={image.url} alt="" aria-hidden="true" style={{ left: `${placement.x / placement.pageWidth * 100}%`, top: `${placement.y / placement.pageHeight * 100}%`, width: `${placement.width / placement.pageWidth * 100}%`, height: `${placement.height / placement.pageHeight * 100}%` }} />; })}</div>;
 }
 
 function BlankPageMiniature({ page }) {
   const images = getPageImages(page);
-  return <div className="blank-page-mini" style={{ aspectRatio: `${page.width} / ${page.height}` }}>{images.map((image, index) => <img key={image.id || index} src={image.url} alt={`Image ${index + 1} on blank page`} style={{ left: `${image.x / page.width * 100}%`, top: `${image.y / page.height * 100}%`, width: `${image.width / page.width * 100}%`, height: `${image.height / page.height * 100}%` }} />)}</div>;
+  return <div className="blank-page-mini" style={{ aspectRatio: pageDisplayRatio(page) }}>{images.map((image, index) => { const placement = imageDisplayPlacement(page, image); return <img key={image.id || index} src={image.url} alt={`Image ${index + 1} on blank page`} style={{ left: `${placement.x / placement.pageWidth * 100}%`, top: `${placement.y / placement.pageHeight * 100}%`, width: `${placement.width / placement.pageWidth * 100}%`, height: `${placement.height / placement.pageHeight * 100}%` }} />; })}</div>;
 }
 
 function PdfPageCanvas({ page, pdfDocument, pageNumber, onError, onChange, onRemove }) {
@@ -1040,7 +1263,7 @@ function PdfPageCanvas({ page, pdfDocument, pageNumber, onError, onChange, onRem
       drawing = true;
       const surface = surfaceRef.current;
       const scale = Math.min(1.35, Math.max(0.45, Math.min(surface.clientWidth / pageInfo.width, surface.clientHeight / pageInfo.height)));
-      const viewport = pageInfo.pdfPage.getViewport({ scale, rotation: 0 });
+      const viewport = pageInfo.pdfPage.getViewport({ scale, rotation: normalizeRotation(page.rotation) });
       const canvas = canvasRef.current;
       canvas.width = Math.ceil(viewport.width);
       canvas.height = Math.ceil(viewport.height);
@@ -1054,20 +1277,20 @@ function PdfPageCanvas({ page, pdfDocument, pageNumber, onError, onChange, onRem
     observer?.observe(surfaceRef.current);
     draw().catch(() => { if (active) onError("This PDF page could not be rendered in the browser."); });
     return () => { active = false; observer?.disconnect(); };
-  }, [pageInfo, onError]);
+  }, [pageInfo, page.rotation, onError]);
 
-  const ratio = pageInfo ? pageInfo.width / pageInfo.height : 1;
+  const ratio = pageInfo ? pageDisplayRatio({ ...page, width: pageInfo.width, height: pageInfo.height }) : pageDisplayRatio(page);
   return <div className="pdf-page-canvas-wrap"><div ref={surfaceRef} className="pdf-page-canvas-surface" style={{ "--page-ratio": ratio }}><canvas ref={canvasRef} aria-label={`PDF page ${pageNumber}`} /><ImageOverlayLayer page={page} onChange={onChange} onRemove={onRemove} /></div></div>;
 }
 
 function PdfFallbackPreview({ page, compact = false, onChange, onRemove }) {
   const previewUrl = page.previewToken ? `/api/pdf/preview?token=${encodeURIComponent(page.previewToken)}&page=${page.pageNumber}` : "";
-  return <div className="pdf-page-fallback"><div className="pdf-page-fallback-stage" style={{ "--page-ratio": page.width / page.height }}>{previewUrl ? <img src={previewUrl} alt={`Preview of PDF page ${page.pageNumber}`} /> : <div className="pdf-page-fallback-empty"><FileText size={28} /><strong>Preview is unavailable</strong></div>}<ImageOverlayLayer page={page} onChange={onChange} onRemove={onRemove} /></div>{!compact && <div className="pdf-page-fallback-note"><FileText size={22} /><strong>Server-rendered PDF preview</strong><span>Page {page.pageNumber} is ready to include in the exported PDF.</span></div>}</div>;
+  return <div className="pdf-page-fallback"><div className="pdf-page-fallback-stage" style={{ "--page-ratio": pageDisplayRatio(page) }}>{previewUrl ? <img src={previewUrl} alt={`Preview of PDF page ${page.pageNumber}`} style={{ transform: `rotate(${normalizeRotation(page.rotation)}deg)` }} /> : <div className="pdf-page-fallback-empty"><FileText size={28} /><strong>Preview is unavailable</strong></div>}<ImageOverlayLayer page={page} onChange={onChange} onRemove={onRemove} /></div>{!compact && <div className="pdf-page-fallback-note"><FileText size={22} /><strong>Server-rendered PDF preview</strong><span>Page {page.pageNumber} is ready to include in the exported PDF.</span></div>}</div>;
 }
 
 function BlankPageCanvas({ page, onChange, onRemove }) {
   const images = getPageImages(page);
-  return <div className="blank-page-preview-area"><div className="blank-page-canvas" style={{ "--page-ratio": page.width / page.height }}>{images.length ? <ImageOverlayLayer page={page} onChange={onChange} onRemove={onRemove} /> : <div className="blank-page-message"><ImagePlus size={25} /><span>Add images to this blank page</span></div>}</div><p className="blank-page-help">{images.length ? "Drag an image to move it. Use the corner handle to resize it. Use the lock to allow free resizing. Use × to remove it." : "Use Add images above to place one or more PNG, JPG, or other supported images."}</p></div>;
+  return <div className="blank-page-preview-area"><div className="blank-page-canvas" style={{ "--page-ratio": pageDisplayRatio(page) }}>{images.length ? <ImageOverlayLayer page={page} onChange={onChange} onRemove={onRemove} /> : <div className="blank-page-message"><ImagePlus size={25} /><span>Add images to this blank page</span></div>}</div><p className="blank-page-help">{images.length ? "Drag an image to move it. Use the corner handle to resize it. Use the lock to allow free resizing. Use × to remove it." : "Use Add images above to place one or more PNG, JPG, or other supported images."}</p></div>;
 }
 
 function ImageOverlayLayer({ page, onChange, onRemove }) {
@@ -1087,23 +1310,29 @@ function ImageOverlayLayer({ page, onChange, onRemove }) {
     if (!interaction) return;
     const image = images.find((item) => item.id === interaction.imageId);
     if (!image) return;
-    const dx = (event.clientX - interaction.startX) * page.width / interaction.bounds.width;
-    const dy = (event.clientY - interaction.startY) * page.height / interaction.bounds.height;
+    const displayDimensions = pageDisplayDimensions(page);
+    const displayDx = (event.clientX - interaction.startX) * displayDimensions.width / interaction.bounds.width;
+    const displayDy = (event.clientY - interaction.startY) * displayDimensions.height / interaction.bounds.height;
+    const rotation = normalizeRotation(page.rotation);
+    const dx = rotation === 90 ? displayDy : rotation === 180 ? -displayDx : rotation === 270 ? -displayDy : displayDx;
+    const dy = rotation === 90 ? -displayDx : rotation === 180 ? -displayDy : rotation === 270 ? displayDx : displayDy;
     if (interaction.mode === "move") {
-      onChange(images.map((item) => item.id === interaction.imageId ? { ...item, x: Math.max(0, Math.min(page.width - item.width, interaction.image.x + dx)), y: Math.max(0, Math.min(page.height - item.height, interaction.image.y + dy)) } : item));
+      onChange(images.map((item) => item.id === interaction.imageId ? { ...item, x: Math.max(-MAX_IMAGE_COORDINATE, Math.min(MAX_IMAGE_COORDINATE - item.width, interaction.image.x + dx)), y: Math.max(-MAX_IMAGE_COORDINATE, Math.min(MAX_IMAGE_COORDINATE - item.height, interaction.image.y + dy)) } : item));
     } else {
-      const width = Math.max(24, Math.min(page.width - interaction.image.x, interaction.image.width + dx));
+      const widthDelta = rotation === 90 || rotation === 270 ? displayDy : displayDx;
+      const heightDelta = rotation === 90 || rotation === 270 ? displayDx : displayDy;
+      const width = Math.max(24, Math.min(MAX_IMAGE_COORDINATE, interaction.image.width + widthDelta));
       const ratio = interaction.image.height / interaction.image.width;
       const height = interaction.image.lockAspectRatio === false
-        ? Math.max(24, Math.min(page.height - interaction.image.y, interaction.image.height + dy))
-        : Math.max(24, Math.min(page.height - interaction.image.y, width * ratio));
+        ? Math.max(24, Math.min(MAX_IMAGE_COORDINATE, interaction.image.height + heightDelta))
+        : Math.max(24, Math.min(MAX_IMAGE_COORDINATE, width * ratio));
       onChange(images.map((item) => item.id === interaction.imageId ? { ...item, width, height } : item));
     }
   };
   const onPointerUp = () => { interactionRef.current = null; };
   const toggleAspectRatio = (imageId) => onChange(images.map((item) => item.id === imageId ? { ...item, lockAspectRatio: item.lockAspectRatio === false } : item));
 
-  return <div ref={layerRef} className="pdf-image-overlay-layer" onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>{images.map((image, index) => <div className="pdf-image-overlay" key={image.id || index} style={{ left: `${image.x / page.width * 100}%`, top: `${image.y / page.height * 100}%`, width: `${image.width / page.width * 100}%`, height: `${image.height / page.height * 100}%`, zIndex: index + 1 }} onPointerDown={(event) => onPointerDown(event, "move", image)}><img src={image.url} alt={`Placed image ${index + 1}`} draggable="false" /><button type="button" className="image-remove-handle" aria-label={`Remove image ${index + 1}`} title="Remove image" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove?.(image.id); }}><X size={11} /></button><button type="button" className="image-ratio-handle" aria-label={image.lockAspectRatio === false ? `Keep image ${index + 1} aspect ratio` : `Allow image ${index + 1} free resizing`} title={image.lockAspectRatio === false ? "Keep aspect ratio" : "Allow free resizing"} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); toggleAspectRatio(image.id); }}>{image.lockAspectRatio === false ? <Unlock size={10} /> : <Lock size={10} />}</button><button type="button" className="image-resize-handle" aria-label={`Resize image ${index + 1}`} onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, "resize", image); }} /></div>)}</div>;
+  return <div ref={layerRef} className="pdf-image-overlay-layer" onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>{images.map((image, index) => { const placement = imageDisplayPlacement(page, image); return <div className="pdf-image-overlay" key={image.id || index} style={{ left: `${placement.x / placement.pageWidth * 100}%`, top: `${placement.y / placement.pageHeight * 100}%`, width: `${placement.width / placement.pageWidth * 100}%`, height: `${placement.height / placement.pageHeight * 100}%`, zIndex: index + 1 }} onPointerDown={(event) => onPointerDown(event, "move", image)}><img src={image.url} alt={`Placed image ${index + 1}`} draggable="false" /><button type="button" className="image-remove-handle" aria-label={`Remove image ${index + 1}`} title="Remove image" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove?.(image.id); }}><X size={11} /></button><button type="button" className="image-ratio-handle" aria-label={image.lockAspectRatio === false ? `Keep image ${index + 1} aspect ratio` : `Allow image ${index + 1} free resizing`} title={image.lockAspectRatio === false ? "Keep aspect ratio" : "Allow free resizing"} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); toggleAspectRatio(image.id); }}>{image.lockAspectRatio === false ? <Unlock size={10} /> : <Lock size={10} />}</button><button type="button" className="image-resize-handle" aria-label={`Resize image ${index + 1}`} onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, "resize", image); }} /></div>; })}</div>;
 }
 
 function pdfPreviewUrl(downloadUrl) {
@@ -1200,7 +1429,8 @@ function PdfJobCard({ job: initialJob, mode = "server", keepResult = false, onRe
       try {
         const current = await getProcessingJob(mode, initialJob.id);
         if (!active) return;
-        setJob(current);
+        const resultError = current.status === "completed" ? validatePdfResult(current.result) : "";
+        setJob(resultError ? { ...current, status: "failed", error: `Export validation failed: ${resultError}` } : current);
         if (current.status === "queued" || current.status === "processing") window.setTimeout(poll, 1000);
       } catch (error) {
         if (active) setJob((current) => ({ ...current, status: "failed", error: error instanceof Error ? error.message : "Unable to read PDF job status." }));

@@ -9,11 +9,61 @@
   let licenseRequestPollBusy = false;
   let selectedLicenseDurationMs = 600000;
   let licenseServerState = {};
+  let licenseServerNotice = "";
+  let licenseServerNoticeKind = "";
 
   function showNotice(message) {
     const notice = el("notice");
     notice.textContent = message || "";
     notice.classList.toggle("hidden", !message);
+  }
+
+  function renderUpdate(value = {}) {
+    const panel = el("agent-update-panel");
+    const title = el("agent-update-title");
+    const message = el("agent-update-message");
+    const action = el("agent-update-action");
+    const progress = el("agent-update-progress");
+    const progressBar = el("agent-update-progress-bar");
+    if (!panel || !title || !message || !action || !progress || !progressBar) return;
+    const status = value.status || "unavailable";
+    const visible = ["checking", "available", "downloading", "downloaded", "error"].includes(status);
+    panel.classList.toggle("hidden", !visible);
+    panel.classList.toggle("update-error", status === "error");
+    panel.classList.toggle("update-ready", status === "downloaded");
+    progress.classList.toggle("hidden", status !== "downloading");
+    progressBar.style.width = `${Math.max(0, Math.min(100, Number(value.progress) || 0))}%`;
+    if (status === "checking") {
+      title.textContent = "Checking for agent updates";
+      message.textContent = "Checking the latest signed release…";
+      action.textContent = "Checking…";
+      action.dataset.action = "";
+      action.disabled = true;
+    } else if (status === "available") {
+      title.textContent = `Agent update available${value.version ? ` · v${value.version}` : ""}`;
+      message.textContent = "Download the signed update. The agent will remain available until you choose to restart and install it.";
+      action.textContent = "Update now";
+      action.dataset.action = "download";
+      action.disabled = false;
+    } else if (status === "downloading") {
+      title.textContent = `Downloading agent update${value.version ? ` · v${value.version}` : ""}`;
+      message.textContent = `${Math.max(0, Math.min(100, Math.round(Number(value.progress) || 0)))}% downloaded. Keep the dashboard open until the download completes.`;
+      action.textContent = "Downloading…";
+      action.dataset.action = "";
+      action.disabled = true;
+    } else if (status === "downloaded") {
+      title.textContent = `Agent update ready${value.version ? ` · v${value.version}` : ""}`;
+      message.textContent = "The update is downloaded and will be verified before installation. Restart the agent to finish.";
+      action.textContent = "Restart and install";
+      action.dataset.action = "install";
+      action.disabled = false;
+    } else {
+      title.textContent = "Agent update check failed";
+      message.textContent = value.error || "The latest release could not be checked. Check your internet connection and try again.";
+      action.textContent = "Check again";
+      action.dataset.action = "check";
+      action.disabled = false;
+    }
   }
 
   function formatRemaining(value) {
@@ -32,18 +82,36 @@
     pill.textContent = state.running ? "Agent running" : "Agent stopped";
     pill.classList.toggle("ready", Boolean(state.running));
     el("authorization-title").textContent = labels[mode] || "Locked";
-    el("authorization-message").textContent = !authorization.legalAccepted ? "Accept the Privacy Policy and Terms & Conditions below before starting processing or logging in." : mode === "locked" ? (authorization.trialAvailable ? "A five-minute trial is available and starts on the first local processing session." : "Admin login or a valid activation code is required for processing.") : mode === "trial" ? "Your one-time trial is active on this installation." : mode === "activation" ? "This installation is authorized by a signed license." : "Unlimited local processing is unlocked until logout.";
+    el("authorization-message").textContent = !authorization.legalAccepted ? "Accept the Privacy Policy and Terms & Conditions below before starting processing or logging in." : mode === "locked" ? (authorization.activationReloginAvailable ? "The activation session is logged out. Log in again to continue; its original expiry time is unchanged." : authorization.activationSessionLimitReached ? "The real activation time is exhausted by the active browser sessions. End a session to restore the real remaining time." : authorization.trialAvailable ? "A five-minute trial is available and starts on the first local processing session." : "Admin login or a valid activation code is required for processing.") : mode === "trial" ? "Your one-time trial is active on this installation." : mode === "activation" ? "This installation is authorized by a signed license." : "Unlimited local processing is unlocked until logout.";
     el("countdown").textContent = mode === "admin" ? "Unlimited" : formatRemaining(authorization.remainingMs);
+    const showActivationTimer = mode !== "admin" && Boolean(authorization.activationId);
+    el("timer-info").classList.toggle("hidden", !showActivationTimer);
+    el("original-countdown").classList.toggle("hidden", !showActivationTimer);
+    el("timer-rule").classList.toggle("hidden", !showActivationTimer || !el("timer-rule").dataset.open);
+    if (showActivationTimer) el("original-countdown").textContent = `Original time remaining: ${formatRemaining(authorization.activationOriginalRemainingMs)}`;
     const badge = el("mode-badge"); badge.textContent = labels[mode] || "Locked"; badge.className = `badge ${mode}`;
     const legalAccepted = Boolean(authorization.legalAccepted);
     el("legal-consent").classList.toggle("hidden", legalAccepted);
     if (legalAccepted) el("legal-consent-checkbox").checked = false;
     el("accept-legal-button").disabled = legalAccepted || !el("legal-consent-checkbox").checked;
     document.querySelectorAll("#login-form input, #login-form button, #activation-form textarea, #activation-form button, #license-request-form input, #license-request-form button").forEach((control) => { control.disabled = !legalAccepted; });
+    const activationReloginAvailable = Boolean(authorization.activationReloginAvailable);
+    const activationSessionVisible = mode === "activation" || (mode === "locked" && activationReloginAvailable);
+    el("activation-code-block").classList.toggle("hidden", activationSessionVisible);
+    el("activation-session-access").classList.toggle("hidden", !activationSessionVisible);
+    if (activationSessionVisible) {
+      const sessionActive = mode === "activation";
+      el("activation-session-title").textContent = sessionActive ? "Activation session active" : "Activation session logged out";
+      el("activation-session-message").textContent = sessionActive
+        ? "Logging out ends this agent's browser sessions, but the activation expiry time will continue running."
+        : `Log in again to resume processing. Time remaining: ${formatRemaining(authorization.remainingMs)}. The one-time code is not needed again.`;
+      el("activation-session-button").textContent = sessionActive ? "Log out activation" : "Log in again";
+      el("activation-session-button").disabled = !legalAccepted;
+    }
     el("admin-access").classList.toggle("hidden", mode === "admin");
     el("logout-access").classList.toggle("hidden", mode !== "admin");
     const trialButton = el("start-trial-button");
-    const trialVisible = mode === "locked" && Boolean(authorization.trialAvailable);
+    const trialVisible = mode === "locked" && Boolean(authorization.trialAvailable) && !authorization.activationId;
     trialButton.classList.toggle("hidden", !trialVisible);
     trialButton.disabled = !legalAccepted || !trialVisible;
     trialButton.title = legalAccepted ? "Start the one-time five-minute trial on this installation." : "Accept the Privacy Policy and Terms & Conditions first.";
@@ -58,16 +126,29 @@
     renderLicenseOwnerPanel(state);
     renderSessions(state.sessions || []);
     renderCapabilities(state.capabilities || {});
-    renderLicenseServer(licenseServerState);
+    renderLicenseServer(licenseServerState, currentState?.authorization?.mode === "admin");
   }
 
-  function renderLicenseServer(value = {}) {
+  function setLicenseServerNotice(message, kind = "") {
+    licenseServerNotice = String(message || "");
+    licenseServerNoticeKind = kind;
+    const notice = el("license-server-notice");
+    if (!notice) return;
+    notice.textContent = licenseServerNotice;
+    notice.className = `license-server-notice ${licenseServerNoticeKind} ${licenseServerNotice ? "" : "hidden"}`.trim();
+  }
+
+  function renderLicenseServer(value = {}, visible = false) {
     licenseServerState = value || {};
+    const panel = el("license-server-panel");
+    if (panel) panel.classList.toggle("hidden", !visible);
+    if (!visible) return;
     const badge = el("license-server-badge");
     const message = el("license-server-message");
     const startButton = el("start-license-server");
     const stopButton = el("stop-license-server");
     if (!badge || !message || !startButton || !stopButton) return;
+    setLicenseServerNotice(licenseServerNotice, licenseServerNoticeKind);
     const healthy = Boolean(value.healthy);
     const mounted = Boolean(value.ssdMounted);
     badge.textContent = healthy ? "Running" : mounted ? "Stopped" : "SSD not mounted";
@@ -85,11 +166,11 @@
   }
 
   async function refreshLicenseServer() {
-    if (!api.getLicenseServerState) return;
+    if (!api.getLicenseServerState || currentState?.authorization?.mode !== "admin") return;
     try {
-      renderLicenseServer(await api.getLicenseServerState());
+      renderLicenseServer(await api.getLicenseServerState(), true);
     } catch (error) {
-      renderLicenseServer({ healthy: false, ssdMounted: false, error: error.message || "The licensing server status could not be checked." });
+      renderLicenseServer({ healthy: false, ssdMounted: false, error: error.message || "The licensing server status could not be checked." }, true);
     }
   }
 
@@ -115,7 +196,7 @@
     const mode = currentState?.authorization?.mode || "locked";
     const legalAccepted = Boolean(currentState?.authorization?.legalAccepted);
     const available = Boolean(licenseRequestConfig?.available);
-    block.classList.toggle("hidden", mode !== "locked");
+    block.classList.toggle("hidden", mode !== "locked" || Boolean(currentState?.authorization?.activationId));
     if (!originInput.value && licenseRequestConfig?.suggestedOrigins?.length) originInput.value = licenseRequestConfig.suggestedOrigins[0];
     if (mode !== "locked") return;
     if (!available) {
@@ -178,6 +259,28 @@
     return "Unsupported duration";
   }
 
+  const auditLabels = {
+    "request.created": "Activation requested",
+    "request.approved": "Request approved",
+    "request.declined": "Request declined",
+    "request.expired": "Request expired",
+    "license.redeemed": "License redeemed",
+    "license.expired": "Code expired",
+    "device.activity": "Device activity",
+    "admin.login": "Admin login",
+    "admin.login.failed": "Failed admin login",
+    "admin.logout": "Admin logout",
+    "admin.session.expired": "Admin session expired",
+  };
+
+  function auditDetailText(item) {
+    const details = item.details || {};
+    return Object.entries(details)
+      .filter(([key, value]) => value !== null && value !== undefined && value !== "" && key !== "userAgent")
+      .map(([key, value]) => `${key}: ${value}`)
+      .join(" · ");
+  }
+
   function renderLicenseOwnerRequests(items = []) {
     const target = el("license-owner-requests");
     if (!target) return;
@@ -194,17 +297,33 @@
     if (!panel) return;
     const authenticated = Boolean(state.licenseAdmin?.authenticated);
     panel.classList.toggle("hidden", !authenticated);
+    const auditPanel = el("license-audit-panel");
+    if (auditPanel) auditPanel.classList.toggle("hidden", !authenticated);
     if (!authenticated) return;
     el("license-owner-status").textContent = "Owner session active";
     renderLicenseOwnerRequests(state.licenseRequests || []);
+    renderLicenseAudit(state.licenseAudit || [], state.licenseAuditStoragePath || "");
+  }
+
+  function renderLicenseAudit(items = [], storagePath = "") {
+    const target = el("license-audit-events");
+    const storage = el("license-audit-storage");
+    if (!target) return;
+    if (!items.length) {
+      target.innerHTML = '<div class="empty">No audit events yet.</div>';
+    } else {
+      target.innerHTML = items.map((item) => `<div class="license-audit-row"><div><strong>${escapeHtml(auditLabels[item.event] || item.event || "Audit event")}</strong><small>${item.createdAt ? new Date(item.createdAt).toLocaleString() : "—"} · ${escapeHtml(item.origin || "No browser origin")}${item.requestId ? ` · Request ${escapeHtml(String(item.requestId).slice(0, 8))}` : ""}</small><small>${escapeHtml(auditDetailText(item) || "No additional details")}</small></div></div>`).join("");
+    }
+    if (storage) storage.textContent = storagePath ? `Stored in ${storagePath}.` : "";
   }
 
   async function refreshLicenseOwnerRequests() {
     const button = el("refresh-license-requests");
     if (button) button.disabled = true;
     try {
-      const value = await api.getLicenseRequests();
+      const [value, audit] = await Promise.all([api.getLicenseRequests(), api.getLicenseAudit ? api.getLicenseAudit() : Promise.resolve({})]);
       renderLicenseOwnerRequests(value.items || []);
+      renderLicenseAudit(audit.items || [], audit.storagePath || "");
       showNotice("License requests refreshed.");
     } catch (error) {
       showNotice(error.message || "The license requests could not be loaded.");
@@ -289,9 +408,25 @@
     target.innerHTML = entries.map(([label, ready]) => `<div class="capability ${ready ? "ready" : ""}"><strong>${label}</strong><span>${ready ? "Available" : "Unavailable"}</span></div>`).join("");
   }
 
+  function renderDiagnostics(value = null) {
+    const target = el("diagnostics");
+    if (!target) return;
+    if (!value) {
+      target.innerHTML = '<div class="empty">Run the self-test to check this installation.</div>';
+      return;
+    }
+    const checkedAt = value.checkedAt ? new Date(value.checkedAt).toLocaleString() : "now";
+    target.innerHTML = `<div class="diagnostics-summary ${value.ok ? "pass" : "fail"}"><strong>${value.ok ? "Self-test completed" : "Self-test found a blocking issue"}</strong><span>Checked ${escapeHtml(checkedAt)}</span></div>${(value.items || []).map((item) => `<div class="diagnostic-row ${escapeHtml(item.status || "warn")}"><span class="diagnostic-status" aria-hidden="true">${item.status === "pass" ? "✓" : item.status === "fail" ? "!" : "~"}</span><div><strong>${escapeHtml(item.label || "Check")}</strong><small>${escapeHtml(item.detail || "No details available.")}</small></div></div>`).join("")}`;
+  }
+
   function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]); }
 
-  async function refresh() { try { render(await api.getState()); } catch (error) { showNotice(error.message || "The agent dashboard could not read its state."); } }
+  async function refresh() { try { const state = await api.getState(); render(state); if (state.authorization?.mode === "admin") await refreshLicenseServer(); } catch (error) { showNotice(error.message || "The agent dashboard could not read its state."); } }
+
+  async function refreshUpdateState() {
+    if (!api.getUpdateState) return;
+    try { renderUpdate(await api.getUpdateState()); } catch (error) { renderUpdate({ status: "error", error: error.message || "The latest agent release could not be checked." }); }
+  }
 
   function closeAdminModal() {
     el("admin-modal").classList.add("hidden");
@@ -334,19 +469,24 @@
     const button = el("check-license-server");
     button.disabled = true;
     try {
-      await refreshLicenseServer();
-      showNotice(licenseServerState.healthy ? "The licensing server is reachable." : (licenseServerState.error || "The licensing server is not running."));
+      const value = await api.getLicenseServerState();
+      renderLicenseServer(value, true);
+      setLicenseServerNotice(value.healthy ? "The licensing server is reachable." : (value.error || "The licensing server is not running."), value.healthy ? "success" : "error");
+    } catch (error) {
+      renderLicenseServer({ healthy: false, ssdMounted: false, error: error.message || "The licensing server status could not be checked." }, true);
+      setLicenseServerNotice(error.message || "The licensing server status could not be checked.", "error");
     } finally { button.disabled = false; }
   });
   el("start-license-server").addEventListener("click", async () => {
     const button = el("start-license-server");
     button.disabled = true;
-    showNotice("");
+    setLicenseServerNotice("");
     try {
-      renderLicenseServer(await api.startLicenseServer());
-      showNotice("The SSD licensing server is running. The saved Tailscale Funnel can now reach it.");
+      const value = await api.startLicenseServer();
+      renderLicenseServer(value, true);
+      setLicenseServerNotice("The SSD licensing server is running. The saved Tailscale Funnel can now reach it.", "success");
     } catch (error) {
-      showNotice(error.message || "The licensing server could not be started.");
+      setLicenseServerNotice(error.message || "The licensing server could not be started.", "error");
       await refreshLicenseServer();
     }
   });
@@ -355,10 +495,11 @@
     if (!confirm("Stop the local SSD licensing server? Public license requests will return 502 until it is started again.")) return;
     button.disabled = true;
     try {
-      renderLicenseServer(await api.stopLicenseServer());
-      showNotice("The licensing server was stopped.");
+      const value = await api.stopLicenseServer();
+      renderLicenseServer(value, true);
+      setLicenseServerNotice("The licensing server was stopped.", "success");
     } catch (error) {
-      showNotice(error.message || "The licensing server could not be stopped.");
+      setLicenseServerNotice(error.message || "The licensing server could not be stopped.", "error");
       await refreshLicenseServer();
     }
   });
@@ -388,11 +529,67 @@
   });
   el("admin-control-button").addEventListener("click", openAdminModal);
   el("refresh-license-requests").addEventListener("click", refreshLicenseOwnerRequests);
+  el("refresh-license-audit")?.addEventListener("click", refreshLicenseOwnerRequests);
   el("close-admin-modal").addEventListener("click", closeAdminModal);
   el("admin-modal").addEventListener("click", (event) => { if (event.target.matches("[data-close-admin-modal]")) closeAdminModal(); });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !el("admin-modal").classList.contains("hidden")) closeAdminModal(); });
-  el("login-form").addEventListener("submit", async (event) => { event.preventDefault(); showNotice(""); const button = event.currentTarget.querySelector("button"); button.disabled = true; try { const state = await api.login(el("username").value, el("password").value); render(state); el("password").value = ""; closeAdminModal(); if (state.licenseAdminError) showNotice(`Local Admin access is active, but license requests are unavailable: ${state.licenseAdminError}`); else if (state.licenseAdmin?.authenticated) showNotice("Admin access enabled. License requests loaded below."); } catch (error) { showNotice(error.message || "Admin login failed."); } finally { button.disabled = false; } });
-  el("logout-button").addEventListener("click", async () => { try { render(await api.logout()); closeAdminModal(); } catch (error) { showNotice(error.message || "Logout failed."); } });
+  el("login-form").addEventListener("submit", async (event) => { event.preventDefault(); showNotice(""); const button = event.currentTarget.querySelector("button"); button.disabled = true; try { const state = await api.login(el("username").value, el("password").value); render(state); el("password").value = ""; closeAdminModal(); if (state.authorization?.mode === "admin") refreshLicenseServer(); if (state.licenseAdminError) showNotice(`Local Admin access is active, but license requests are unavailable: ${state.licenseAdminError}`); else if (state.licenseAdmin?.authenticated) showNotice("Admin access enabled. License requests loaded below."); } catch (error) { showNotice(error.message || "Admin login failed."); } finally { button.disabled = false; } });
+  el("logout-button").addEventListener("click", async () => { try { render(await api.logout()); closeAdminModal(); showNotice(""); } catch (error) { showNotice(error.message || "Logout failed."); } });
+  el("activation-session-button").addEventListener("click", async () => {
+    const button = el("activation-session-button");
+    button.disabled = true;
+    showNotice("");
+    try {
+      const relogin = Boolean(currentState?.authorization?.activationReloginAvailable);
+      render(relogin ? await api.loginActivation() : await api.logoutActivation());
+      showNotice(relogin ? "Activation session resumed. Its original expiry time was preserved." : "Activation session logged out. Browser sessions were ended.");
+    } catch (error) {
+      showNotice(error.message || "The activation session could not be changed.");
+      button.disabled = false;
+    }
+  });
+  el("timer-info").addEventListener("click", () => {
+    const rule = el("timer-rule");
+    if (!rule || el("timer-info").classList.contains("hidden")) return;
+    const open = rule.dataset.open === "true";
+    rule.dataset.open = open ? "" : "true";
+    rule.classList.toggle("hidden", open);
+  });
+  el("refresh-sessions").addEventListener("click", async () => {
+    const button = el("refresh-sessions");
+    button.disabled = true;
+    try {
+      render(await api.getState());
+      showNotice("Connected sessions refreshed.");
+    } catch (error) {
+      showNotice(error.message || "Connected sessions could not be refreshed.");
+    } finally { button.disabled = false; }
+  });
+  el("agent-update-action").addEventListener("click", async () => {
+    const button = el("agent-update-action");
+    const updateAction = button.dataset.action;
+    if (!updateAction) return;
+    button.disabled = true;
+    try {
+      const nextState = updateAction === "download" ? await api.downloadUpdate() : updateAction === "install" ? await api.installUpdate() : await api.checkForUpdates();
+      renderUpdate(nextState);
+      if (updateAction === "check" && nextState.status === "up-to-date") showNotice("The agent is up to date.");
+    } catch (error) {
+      renderUpdate({ status: "error", error: error.message || "The agent update could not be completed." });
+    } finally { button.disabled = false; }
+  });
+  el("run-self-test").addEventListener("click", async () => {
+    const button = el("run-self-test");
+    button.disabled = true;
+    el("diagnostics").innerHTML = '<div class="empty">Running self-test…</div>';
+    try {
+      renderDiagnostics(await api.runDiagnostics());
+      showNotice("Agent self-test completed.");
+    } catch (error) {
+      el("diagnostics").innerHTML = `<div class="diagnostics-summary fail"><strong>Self-test failed</strong><span>${escapeHtml(error.message || "The diagnostics could not be completed.")}</span></div>`;
+      showNotice(error.message || "The agent self-test could not be completed.");
+    } finally { button.disabled = false; }
+  });
   el("activation-form").addEventListener("submit", async (event) => { event.preventDefault(); showNotice(""); const button = event.currentTarget.querySelector("button"); button.disabled = true; try { render(await api.activate(el("activation-code").value)); el("activation-code").value = ""; } catch (error) { showNotice(error.message || "Activation failed."); } finally { button.disabled = false; } });
   el("copy-device").addEventListener("click", async () => { try { await api.copyDeviceId(currentState.authorization.deviceId); showNotice("Device ID copied."); setTimeout(() => showNotice(""), 1800); } catch (error) { showNotice(error.message || "The device ID could not be copied."); } });
   el("end-all").addEventListener("click", async () => { if (!confirm("End all connected browser sessions?")) return; try { render(await api.endAllSessions()); } catch (error) { showNotice(error.message || "Sessions could not be ended."); } });
@@ -405,6 +602,8 @@
   }
   refreshLicenseServer();
   refresh();
+  if (api.onUpdateState) api.onUpdateState(renderUpdate);
+  refreshUpdateState();
   setInterval(async () => { if (currentState?.authorization?.mode !== "admin") await refresh(); }, 1000);
   setInterval(refreshLicenseServer, 5000);
 }());

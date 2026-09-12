@@ -2,6 +2,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 const { execFileSync } = require("node:child_process");
 const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, Tray } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const { createLicenseServerManager, findNode22Executable } = require("./license-server-manager.cjs");
 
 if (!app.requestSingleInstanceLock()) {
@@ -13,6 +14,65 @@ if (!app.requestSingleInstanceLock()) {
   let pairingWatch;
   let dashboardWindow;
   let licenseServerManager;
+  const updateState = {
+    status: "unavailable",
+    currentVersion: app.getVersion(),
+    checkedAt: null,
+    version: null,
+    releaseDate: null,
+    releaseNotes: null,
+    progress: 0,
+    error: "Updates are available after installing a packaged agent release.",
+  };
+
+  function publishUpdateState(nextState = {}) {
+    Object.assign(updateState, nextState, { currentVersion: app.getVersion() });
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) dashboardWindow.webContents.send("agent:update-state", { ...updateState });
+    return { ...updateState };
+  }
+
+  function canUseAutoUpdater() {
+    return app.isPackaged && !process.defaultApp;
+  }
+
+  function setupAutoUpdater() {
+    if (!canUseAutoUpdater()) {
+      publishUpdateState({ status: "unavailable", error: "Updates are checked by packaged agent releases." });
+      return;
+    }
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.on("checking-for-update", () => publishUpdateState({ status: "checking", error: "", checkedAt: new Date().toISOString() }));
+    autoUpdater.on("update-available", (info) => publishUpdateState({ status: "available", version: info.version, releaseDate: info.releaseDate || null, releaseNotes: info.releaseNotes || null, progress: 0, error: "", checkedAt: new Date().toISOString() }));
+    autoUpdater.on("update-not-available", (info) => publishUpdateState({ status: "up-to-date", version: info.version || app.getVersion(), releaseDate: info.releaseDate || null, releaseNotes: info.releaseNotes || null, progress: 0, error: "", checkedAt: new Date().toISOString() }));
+    autoUpdater.on("download-progress", (progress) => publishUpdateState({ status: "downloading", progress: Math.max(0, Math.min(100, Math.round(progress.percent || 0))), error: "" }));
+    autoUpdater.on("update-downloaded", (info) => publishUpdateState({ status: "downloaded", version: info.version, releaseDate: info.releaseDate || null, releaseNotes: info.releaseNotes || null, progress: 100, error: "" }));
+    autoUpdater.on("error", (error) => publishUpdateState({ status: "error", error: error instanceof Error ? error.message : String(error || "The update check failed."), checkedAt: new Date().toISOString() }));
+  }
+
+  async function checkForUpdates() {
+    if (!canUseAutoUpdater()) return publishUpdateState({ status: "unavailable", error: "Updates are checked by packaged agent releases.", checkedAt: new Date().toISOString() });
+    try {
+      await autoUpdater.checkForUpdates();
+      return { ...updateState };
+    } catch (error) {
+      return publishUpdateState({ status: "error", error: error instanceof Error ? error.message : "The update check failed.", checkedAt: new Date().toISOString() });
+    }
+  }
+
+  async function downloadUpdate() {
+    if (!canUseAutoUpdater()) throw new Error("Updates are available only in a packaged agent release.");
+    if (updateState.status !== "available" && updateState.status !== "error") throw new Error("There is no update ready to download.");
+    await autoUpdater.downloadUpdate();
+    return { ...updateState };
+  }
+
+  function installUpdate() {
+    if (!canUseAutoUpdater()) throw new Error("Updates are available only in a packaged agent release.");
+    if (updateState.status !== "downloaded") throw new Error("Download the update before installing it.");
+    autoUpdater.quitAndInstall(false, true);
+    return { ...updateState };
+  }
 
   function openDashboard() {
     if (dashboardWindow && !dashboardWindow.isDestroyed()) {
@@ -42,6 +102,18 @@ if (!app.requestSingleInstanceLock()) {
 
   function registerDashboardIpc() {
     ipcMain.handle("agent:get-state", () => agent?.getManagementState?.() || {});
+    ipcMain.handle("agent:get-update-state", () => ({ ...updateState }));
+    ipcMain.handle("agent:check-for-updates", () => checkForUpdates());
+    ipcMain.handle("agent:download-update", () => downloadUpdate());
+    ipcMain.handle("agent:install-update", () => installUpdate());
+    ipcMain.handle("agent:run-diagnostics", () => agent?.runDiagnostics?.() || Promise.reject(new Error("The agent diagnostics are not ready.")));
+    ipcMain.handle("agent:open-results-folder", async () => {
+      const directory = path.join(app.getPath("userData"), "data", "Results");
+      await fs.promises.mkdir(directory, { recursive: true });
+      const error = await shell.openPath(directory);
+      if (error) throw new Error(error);
+      return { ok: true, path: directory };
+    });
     ipcMain.handle("agent:get-license-server-state", () => licenseServerManager?.getState?.() || { available: false, healthy: false, running: false, error: "The licensing server manager is not ready." });
     ipcMain.handle("agent:start-license-server", () => licenseServerManager?.start?.() || Promise.reject(new Error("The licensing server manager is not ready.")));
     ipcMain.handle("agent:stop-license-server", () => licenseServerManager?.stop?.() || Promise.reject(new Error("The licensing server manager is not ready.")));
@@ -49,17 +121,22 @@ if (!app.requestSingleInstanceLock()) {
       const value = agent.loginAdmin(String(username || ""), String(password || ""));
       let licenseAdmin = agent.getLicenseAdminState();
       let licenseRequests = [];
+      let licenseAudit = [];
+      let licenseAuditStoragePath = "";
       let licenseAdminError = "";
       if (agent.hasOnlineLicenseServerConfigured()) {
         try {
           licenseAdmin = await agent.loginLicenseAdmin(String(username || ""), String(password || ""));
           licenseRequests = (await agent.getLicenseAdminRequests()).items || [];
+          const audit = await agent.getLicenseAdminAudit();
+          licenseAudit = audit.items || [];
+          licenseAuditStoragePath = audit.storagePath || "";
         } catch (error) {
           licenseAdminError = error instanceof Error ? error.message : "The licensing requests could not be loaded.";
         }
       }
       const state = await agent.getManagementState();
-      return { ...state, authorization: value, licenseAdmin, licenseRequests, licenseAdminError };
+      return { ...state, authorization: value, licenseAdmin, licenseRequests, licenseAudit, licenseAuditStoragePath, licenseAdminError };
     });
     ipcMain.handle("agent:accept-legal", () => {
       const value = agent.acceptLegal();
@@ -67,6 +144,10 @@ if (!app.requestSingleInstanceLock()) {
     });
     ipcMain.handle("agent:start-trial", () => {
       const value = agent.startTrial();
+      return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
+    });
+    ipcMain.handle("agent:login-activation", () => {
+      const value = agent.loginActivation();
       return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
     });
     ipcMain.handle("agent:get-license-request-config", () => agent.getLicenseRequestConfig());
@@ -81,6 +162,10 @@ if (!app.requestSingleInstanceLock()) {
       agent.logoutAdmin();
       return agent.getManagementState();
     });
+    ipcMain.handle("agent:logout-activation", () => {
+      const value = agent.logoutActivation();
+      return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
+    });
     ipcMain.handle("agent:activate", async (_event, code) => {
       const value = await agent.activateLicense(String(code || ""));
       return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
@@ -94,6 +179,7 @@ if (!app.requestSingleInstanceLock()) {
       return agent.getManagementState().then((state) => ({ ...state, revokedCount: value }));
     });
     ipcMain.handle("agent:get-license-requests", async () => agent.getLicenseAdminRequests());
+    ipcMain.handle("agent:get-license-audit", async () => agent.getLicenseAdminAudit());
     ipcMain.handle("agent:approve-license-request", async (_event, requestId) => agent.approveLicenseRequest(String(requestId || "")));
     ipcMain.handle("agent:decline-license-request", async (_event, requestId, reason) => agent.declineLicenseRequest(String(requestId || ""), String(reason || "Declined by owner")));
     ipcMain.handle("agent:copy-device-id", (_event, deviceId) => {
@@ -188,6 +274,11 @@ if (!app.requestSingleInstanceLock()) {
     agent = await import("./server.js");
     await agent.startAgentServer();
     registerDashboardIpc();
+    setupAutoUpdater();
+    const firstUpdateCheck = setTimeout(() => checkForUpdates().catch(() => undefined), 8000);
+    firstUpdateCheck.unref?.();
+    const scheduledUpdateCheck = setInterval(() => checkForUpdates().catch(() => undefined), 6 * 60 * 60 * 1000);
+    scheduledUpdateCheck.unref?.();
     tray = new Tray(require("electron").nativeImage.createEmpty());
     tray.setToolTip("Media Toolbox local agent");
     tray.setContextMenu(Menu.buildFromTemplate([

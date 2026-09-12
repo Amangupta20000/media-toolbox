@@ -158,21 +158,105 @@ if (getAuthorizationState().trialStartedAt !== state.trialStartedAt) process.exi
 test("dashboard exposes the trial action in the bottom-right tray with subdued admin access", async () => {
   const dashboardHtml = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard.html"), "utf8");
   const dashboardCss = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard.css"), "utf8");
+  const dashboardRenderer = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard-renderer.js"), "utf8");
   const dashboardPreload = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "preload.cjs"), "utf8");
   const builderConfig = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "electron-builder.yml"), "utf8");
+  const updateConfig = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "build", "app-update.yml"), "utf8");
+  const releaseWorkflow = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".github", "workflows", "agent-release.yml"), "utf8");
   assert.match(dashboardHtml, /id="start-trial-button"/);
   assert.match(dashboardHtml, /id="admin-control-button"/);
   assert.match(dashboardHtml, /id="start-license-server"/);
   assert.match(dashboardHtml, /id="check-license-server"/);
+  assert.match(dashboardHtml, /id="license-server-panel" class="panel license-server-panel hidden"/);
+  assert.match(dashboardHtml, /id="license-server-notice"/);
   assert.doesNotMatch(dashboardHtml, /bottom-left/);
   assert.match(dashboardCss, /\.dashboard-actions\{position:fixed;left:0;right:0;bottom:0/);
   assert.match(dashboardCss, /\.admin-action\{background:#102c3d;border:1px solid/);
   assert.match(dashboardPreload, /agent:start-license-server/);
   assert.match(dashboardPreload, /agent:get-license-server-state/);
+  assert.match(dashboardPreload, /agent:login-activation/);
+  assert.match(dashboardPreload, /agent:logout-activation/);
+  assert.match(dashboardPreload, /agent:run-diagnostics/);
+  assert.match(dashboardPreload, /agent:open-results-folder/);
+  assert.match(dashboardPreload, /agent:get-update-state/);
+  assert.match(dashboardPreload, /agent:check-for-updates/);
+  assert.match(dashboardPreload, /agent:download-update/);
+  assert.match(dashboardPreload, /agent:install-update/);
+  assert.match(dashboardRenderer, /currentState\?\.authorization\?\.mode === "admin"/);
+  assert.match(dashboardRenderer, /el\("run-self-test"\)/);
+  assert.match(dashboardHtml, /id="agent-update-panel"/);
+  assert.match(dashboardRenderer, /Restart and install/);
+  assert.match(dashboardRenderer, /downloadUpdate/);
+  assert.match(builderConfig, /provider: github/);
+  assert.match(builderConfig, /to: app-update\.yml/);
+  assert.match(updateConfig, /repo: media-toolbox/);
+  assert.match(releaseWorkflow, /-name 'latest\*\.yml'/);
+  assert.match(releaseWorkflow, /-name '\*\.blockmap'/);
+  assert.match(releaseWorkflow, /Cache Electron packaging downloads/);
+  assert.match(releaseWorkflow, /electron-builder-\$\{\{ runner\.os \}\}-\$\{\{ runner\.arch \}\}-node22-/);
+  assert.match(releaseWorkflow, /~\/\.cache\/electron-builder/);
+  assert.match(releaseWorkflow, /npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund/);
+  assert.match(builderConfig, /nativeRebuilder: parallel/);
+  assert.match(releaseWorkflow, /linux-target: AppImage/);
+  assert.match(releaseWorkflow, /linux-target: deb/);
+  assert.match(releaseWorkflow, /name: media-toolbox-agent-\$\{\{ matrix\.artifact \}\}/);
+  assert.match(dashboardRenderer, /setLicenseServerNotice/);
+  assert.match(dashboardHtml, /id="activation-session-access"/);
+  assert.match(dashboardRenderer, /activationReloginAvailable/);
+  assert.match(dashboardRenderer, /render\(await api\.logout\(\)\); closeAdminModal\(\); showNotice\(""\);/);
+  assert.match(dashboardHtml, /id="timer-info"/);
+  assert.match(dashboardHtml, /id="original-countdown"/);
+  assert.match(dashboardHtml, /two-thirds of the current original remaining time/);
+  assert.match(dashboardRenderer, /activationSessionLimitReached/);
+  assert.match(dashboardHtml, /id="refresh-sessions"/);
+  assert.match(dashboardRenderer, /Connected sessions refreshed\./);
   assert.match(builderConfig, /license-server\/\*\*\/\*/);
   assert.equal((dashboardHtml.match(/data-license-duration=/g) || []).length, 5);
   assert.match(dashboardHtml, /id="license-owner-panel"/);
+  assert.match(dashboardHtml, /id="license-audit-panel"/);
+  assert.match(dashboardHtml, /id="refresh-license-audit"/);
+  assert.match(dashboardPreload, /agent:get-license-audit/);
+  assert.match(dashboardRenderer, /license-audit-events/);
+  assert.match(dashboardRenderer, /api\.getLicenseAudit/);
   assert.doesNotMatch(dashboardHtml, /bottom-left/);
+});
+
+test("agent self-test covers connectivity, storage, and every media capability", async () => {
+  const diagnostics = await agent.runDiagnostics();
+  assert.equal(diagnostics.ok, true);
+  assert.ok(diagnostics.checkedAt);
+  assert.deepEqual(
+    diagnostics.items.map((item) => item.id),
+    ["agent", "permissions", "disk", "ffmpeg", "imagemagick", "heic", "mkv", "untrunc"],
+  );
+  assert.ok(diagnostics.items.every((item) => ["pass", "warn", "fail"].includes(item.status)));
+  assert.equal(diagnostics.capabilities.agentVersion, "0.2.1");
+});
+
+test("history and protected PDF flows expose the new safe controls", async () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const history = await fs.readFile(path.join(root, "components", "tool-history.jsx"), "utf8");
+  const pdfEditor = await fs.readFile(path.join(root, "components", "pdf-editor.jsx"), "utf8");
+  const styles = await fs.readFile(path.join(root, "styles", "globals.css"), "utf8");
+  const worker = await fs.readFile(path.join(root, "worker", "index.js"), "utf8");
+  assert.match(history, /Open Results folder/);
+  assert.match(history, /type="search"/);
+  assert.match(history, /File size/);
+  assert.match(history, /Duration/);
+  assert.match(history, /history-status-badge/);
+  assert.match(pdfEditor, /task\.onPassword/);
+  assert.match(pdfEditor, /window\.prompt/);
+  assert.match(pdfEditor, /kind: loaded\.passwordProtected \? "raster" : "source"/);
+  assert.match(pdfEditor, /rotateSelectedPage/);
+  assert.match(pdfEditor, /duplicateSelectedPage/);
+  assert.match(pdfEditor, /previewZoom/);
+  assert.match(pdfEditor, /validatePdfProject/);
+  assert.match(pdfEditor, /Keyboard/);
+  assert.match(pdfEditor, /Export validation failed/);
+  assert.match(styles, /\.pdf-image-overlay-layer \{[^}]*overflow: visible/);
+  assert.match(styles, /zoom: var\(--pdf-preview-zoom, 1\)/);
+  assert.match(worker, /referencedPdfIndices/);
+  assert.match(worker, /copiedPage\.setRotation/);
 });
 
 test("dashboard licensing server manager starts and stops the loopback service", async () => {
@@ -566,16 +650,109 @@ test("agent supports automatic browser sessions and ending one or all sessions",
 });
 
 test("activation authorization expires after exactly ten minutes", async () => {
-  const active = agent.getAgentState().authorization;
+  const auth = await import("../agent/auth.js");
+  const active = auth.activate(makeActivationCode({ durationMs: 10 * 60 * 1000 }));
   assert.equal(active.mode, "activation");
   assert.equal(active.activationExpiresAt - active.activationStartedAt, 10 * 60 * 1000);
   assert.ok(active.remainingMs > 0 && active.remainingMs <= 10 * 60 * 1000);
 
-  const auth = await import("../agent/auth.js");
   const expired = auth.getAuthorizationState(active.activationStartedAt + 10 * 60 * 1000 + 1);
   assert.equal(expired.mode, "locked");
   assert.equal(expired.authorized, false);
   const denied = auth.authorizeProcessing("http://localhost:3000", active.activationStartedAt + 10 * 60 * 1000 + 1);
   assert.equal(denied.ok, false);
   assert.equal(denied.code, "activation_required");
+});
+
+test("activation logout and re-login preserve the original expiry deadline", async () => {
+  const auth = await import("../agent/auth.js");
+  const code = makeActivationCode({ durationMs: 30 * 60 * 1000 });
+  const activated = auth.activate(code);
+  const startedAt = activated.activationStartedAt;
+  const loggedOut = auth.logoutActivation(startedAt + 10 * 60 * 1000);
+  assert.equal(loggedOut.mode, "locked");
+  assert.equal(loggedOut.reason, "activation_logged_out");
+  assert.equal(loggedOut.activationReloginAvailable, true);
+  assert.equal(loggedOut.activationExpiresAt, startedAt + 30 * 60 * 1000);
+  assert.equal(loggedOut.remainingMs, 20 * 60 * 1000);
+
+  const loggedInAgain = auth.loginActivation(startedAt + 15 * 60 * 1000);
+  assert.equal(loggedInAgain.mode, "activation");
+  assert.equal(loggedInAgain.activationSessionActive, true);
+  assert.equal(loggedInAgain.activationStartedAt, startedAt);
+  assert.equal(loggedInAgain.activationExpiresAt, startedAt + 30 * 60 * 1000);
+  assert.equal(loggedInAgain.remainingMs, 15 * 60 * 1000);
+  assert.throws(() => auth.activate(code), /already been used/i);
+
+  const browserSessionResponse = await fetch(url("/v1/session"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
+    body: JSON.stringify({ origin: "http://localhost:3000", clientLabel: "Activation logout test" }),
+  });
+  assert.equal(browserSessionResponse.status, 200);
+  const browserSession = await browserSessionResponse.json();
+  agent.logoutActivation();
+  assert.equal(agent.getAgentState().authorization.mode, "locked");
+  assert.equal(agent.getAgentState().authorization.activationReloginAvailable, true);
+  const revokedResponse = await fetch(url("/v1/capabilities"), { headers: { Authorization: `Bearer ${browserSession.token}`, Origin: "http://localhost:3000" } });
+  assert.equal(revokedResponse.status, 402);
+  assert.equal((await revokedResponse.json()).code, "activation_required");
+  agent.loginActivation();
+  assert.equal(agent.getAgentState().authorization.mode, "activation");
+});
+
+test("activation session limits recalculate real time after the second session", async () => {
+  const auth = await import("../agent/auth.js");
+  const active = auth.getAuthorizationState();
+  assert.equal(active.mode, "activation");
+  const now = active.activationStartedAt + 10 * 60 * 1000;
+  const original = auth.getAuthorizationState(now, 2);
+  const secondSession = auth.getAuthorizationState(now, 2);
+  assert.equal(secondSession.activationSessionPenaltyCount, 0);
+  assert.equal(secondSession.activationEffectiveRemainingMs, original.activationOriginalRemainingMs);
+
+  const thirdAuthorization = auth.getAuthorizationState(now, 3);
+  const expectedAfterThird = Math.floor(original.activationOriginalRemainingMs * 2 / 3);
+  assert.equal(thirdAuthorization.activationSessionPenaltyCount, 1);
+  assert.equal(thirdAuthorization.activationEffectiveRemainingMs, expectedAfterThird);
+
+  const fourthSession = auth.getAuthorizationState(now, 4);
+  const expectedAfterFourth = Math.floor(original.activationOriginalRemainingMs * (2 / 3) ** 2);
+  assert.equal(fourthSession.activationSessionPenaltyCount, 2);
+  assert.equal(fourthSession.activationEffectiveRemainingMs, expectedAfterFourth);
+  assert.ok(fourthSession.activationEffectiveRemainingMs < thirdAuthorization.activationEffectiveRemainingMs);
+
+  const session1Response = await fetch(url("/v1/session"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
+    body: JSON.stringify({ origin: "http://localhost:3000", clientLabel: "Session one" }),
+  });
+  const session2Response = await fetch(url("/v1/session"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
+    body: JSON.stringify({ origin: "http://localhost:3000", clientLabel: "Session two" }),
+  });
+  assert.equal(session1Response.status, 200);
+  assert.equal(session2Response.status, 200);
+  const session1 = await session1Response.json();
+  const session2 = await session2Response.json();
+  const thirdResponse = await fetch(url("/v1/session"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
+    body: JSON.stringify({ origin: "http://localhost:3000", clientLabel: "Session three" }),
+  });
+  assert.equal(thirdResponse.status, 200);
+  const beforeRemoval = agent.getAgentState().authorization;
+  assert.equal(beforeRemoval.activationSessionPenaltyCount, 1);
+  const thirdBrowserSession = await thirdResponse.json();
+  const removed = await fetch(url(`/v1/sessions/${thirdBrowserSession.sessionId}`), {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${session1.token}`, Origin: "http://localhost:3000" },
+  });
+  assert.equal(removed.status, 200);
+  const afterRemoval = agent.getAgentState().authorization;
+  assert.equal(afterRemoval.activationSessionPenaltyCount, 0);
+  assert.ok(afterRemoval.activationEffectiveRemainingMs > beforeRemoval.activationEffectiveRemainingMs);
+  await fetch(url(`/v1/sessions/${session1.sessionId}`), { method: "DELETE", headers: { Authorization: `Bearer ${session2.token}`, Origin: "http://localhost:3000" } });
+  agent.revokeAllSessions();
 });

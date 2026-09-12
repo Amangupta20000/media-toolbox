@@ -87,6 +87,15 @@ test("licensing server handles approval, online agent redemption, replay, and wr
     assert.equal(adminItems.items[0].durationMs, 2 * 60 * 60 * 1000);
     assert.equal(Object.prototype.hasOwnProperty.call(adminItems.items[0], "code"), false);
 
+    const unauthorizedAudit = await fetch(`${base}/v1/admin/audit-log`);
+    assert.equal(unauthorizedAudit.status, 401);
+    const auditBeforeRedemptionResponse = await fetch(`${base}/v1/admin/audit-log`, { headers: { Authorization: `Bearer ${admin.token}` } });
+    assert.equal(auditBeforeRedemptionResponse.status, 200);
+    const auditBeforeRedemption = await auditBeforeRedemptionResponse.json();
+    assert.equal(auditBeforeRedemption.storagePath, path.join(root, "licenses.sqlite3"));
+    assert.ok(auditBeforeRedemption.items.some((item) => item.event === "request.created" && item.requestId === created.requestId));
+    assert.ok(auditBeforeRedemption.items.some((item) => item.event === "admin.login"));
+
     const approvedResponse = await fetch(`${base}/v1/admin/license-requests/${created.requestId}/approve`, { method: "POST", headers: { Authorization: `Bearer ${admin.token}`, "Content-Type": "application/json" }, body: "{}" });
     assert.equal(approvedResponse.status, 200);
 
@@ -116,6 +125,11 @@ activateOnline(process.env.ACTIVATION_CODE).then(() => { console.log(JSON.string
     assert.notEqual(badRedeem.status, 200);
     const logout = await fetch(`${base}/v1/admin/logout`, { method: "POST", headers: { Authorization: `Bearer ${admin.token}` } });
     assert.equal(logout.status, 200);
+    const auditEvents = new Set(store.listAuditLog().map((item) => item.event));
+    assert.ok(auditEvents.has("request.approved"));
+    assert.ok(auditEvents.has("license.redeemed"));
+    assert.ok(auditEvents.has("device.activity"));
+    assert.ok(auditEvents.has("admin.logout"));
     const afterLogout = await fetch(`${base}/v1/admin/license-requests`, { headers: { Authorization: `Bearer ${admin.token}` } });
     assert.equal(afterLogout.status, 401);
   } finally {
@@ -192,9 +206,23 @@ test("license requests are automatically removed according to their status reten
   assert.equal(store.getRequest(recentDeclined.id).status, "declined");
   assert.equal(store.getRequest(recentApproved.id).status, "approved");
   assert.equal(store.getRequest(expiredPending.id).status, "expired");
+  assert.ok(store.listAuditLog().some((item) => item.event === "request.expired" && item.requestId === expiredPending.id));
   assert.ok(store.database.prepare("SELECT 1 FROM license_consumptions WHERE license_id = ?").get("old-redeemed"));
   assert.equal(store.listRequests().some((row) => row.id === oldRedeemed.id || row.id === oldDeclined.id || row.id === oldApproved.id), false);
 
+  store.close();
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test("audit log records admin session expiry on the SSD-backed store", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-license-audit-test-"));
+  const { LicenseStore } = await import("../license-server/store.js");
+  const store = new LicenseStore(root);
+  const now = 1_800_000_000_000;
+  store.createAdminSession({ now: now - 10_000, expiresAt: now - 1 });
+  const counts = store.cleanup(now);
+  assert.equal(counts.expiredAdminSessions, 1);
+  assert.ok(store.listAuditLog().some((item) => item.event === "admin.session.expired"));
   store.close();
   await fs.rm(root, { recursive: true, force: true });
 });

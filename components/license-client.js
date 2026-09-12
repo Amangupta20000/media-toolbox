@@ -67,6 +67,11 @@ export function getAdminLicenseRequests() {
   return licenseFetch("/v1/admin/license-requests", adminOptions());
 }
 
+export function getAdminAuditLog(limit = 200) {
+  const safeLimit = Math.max(1, Math.min(500, Number.parseInt(limit, 10) || 200));
+  return licenseFetch(`/v1/admin/audit-log?limit=${safeLimit}`, adminOptions());
+}
+
 export function approveLicenseRequest(id) {
   return licenseFetch(`/v1/admin/license-requests/${encodeURIComponent(id)}/approve`, adminOptions({ method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }));
 }

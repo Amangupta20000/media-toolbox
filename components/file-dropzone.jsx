@@ -3,26 +3,34 @@
 import { useRef, useState } from "react";
 import { FileImage, FileVideo, UploadCloud, X } from "lucide-react";
 
-export function FileDropzone({ file, onFile, onClear, accept, label, hint, variant = "image", disabled = false, required = false }) {
+export function FileDropzone({ file, files, onFile, onFiles, onClear, onRemoveFile, accept, label, hint, variant = "image", disabled = false, required = false, multiple = false }) {
   const inputRef = useRef(null);
   const [dragging, setDragging] = useState(false);
   const Icon = variant === "image" ? FileImage : FileVideo;
-  const choose = (candidate) => { if (candidate && !disabled) onFile(candidate); };
+  const selectedFiles = Array.isArray(files) ? files : file ? [file] : [];
+  const choose = (candidate) => {
+    if (disabled || !candidate) return;
+    if (multiple) onFiles?.(Array.from(candidate));
+    else onFile?.(candidate);
+  };
   return <div
-    className={`dropzone ${dragging ? "dragging" : ""} ${file ? "has-file" : ""} ${disabled ? "disabled" : ""}`}
+    className={`dropzone ${dragging ? "dragging" : ""} ${selectedFiles.length ? "has-file" : ""} ${disabled ? "disabled" : ""}`}
     onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
     onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
     onDragLeave={(event) => { if (event.currentTarget === event.target) setDragging(false); }}
-    onDrop={(event) => { event.preventDefault(); setDragging(false); choose(event.dataTransfer.files[0]); }}
+    onDrop={(event) => { event.preventDefault(); setDragging(false); choose(multiple ? event.dataTransfer.files : event.dataTransfer.files[0]); }}
     onClick={() => !disabled && inputRef.current?.click()}
     role="button" tabIndex={disabled ? -1 : 0}
     onKeyDown={(event) => { if ((event.key === "Enter" || event.key === " ") && !disabled) inputRef.current?.click(); }}
   >
-    <input ref={inputRef} type="file" accept={accept} required={required && !file} aria-required={required} hidden onChange={(event) => choose(event.target.files?.[0])} />
-    {file ? <div className="selected-file" onClick={(event) => event.stopPropagation()}>
-      <div className="file-symbol"><Icon size={21} /></div>
-      <div className="selected-file-copy"><strong>{file.name}</strong><span>{formatBytes(file.size)} · ready to process</span></div>
-      <button className="clear-file" aria-label={`Remove ${file.name}`} onClick={onClear}><X size={17} /></button>
+    <input ref={inputRef} type="file" accept={accept} multiple={multiple} required={required && !selectedFiles.length} aria-required={required} hidden onChange={(event) => { choose(multiple ? event.target.files : event.target.files?.[0]); event.target.value = ""; }} />
+    {selectedFiles.length ? <div className="selected-file-list" onClick={(event) => event.stopPropagation()}>
+      {selectedFiles.map((selectedFile, index) => <div className="selected-file" key={`${selectedFile.name}-${selectedFile.size}-${selectedFile.lastModified || index}`}>
+        <div className="file-symbol"><Icon size={21} /></div>
+        <div className="selected-file-copy"><strong title={selectedFile.name}>{selectedFile.name}</strong><span>{formatBytes(selectedFile.size)} · ready to process</span></div>
+        <button className="clear-file" aria-label={`Remove ${selectedFile.name}`} onClick={() => multiple ? onRemoveFile?.(index) : onClear?.()}><X size={17} /></button>
+      </div>)}
+      {multiple && <span className="dropzone-add-more" role="button" tabIndex={0} onClick={() => !disabled && inputRef.current?.click()} onKeyDown={(event) => { if ((event.key === "Enter" || event.key === " ") && !disabled) inputRef.current?.click(); }}>Drop more or click to add files</span>}
     </div> : <div className="dropzone-empty">
       <div className="upload-symbol"><UploadCloud size={24} /></div>
       <div><strong>{label}</strong><span>{hint}</span></div>

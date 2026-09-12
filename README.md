@@ -5,12 +5,13 @@ Private image conversion, video repair, and PDF editing tools. The website runs 
 ## Features
 
 - Image conversion to original format, JPG/JPEG, PNG, HEIC/HEIF, TIFF, GIF, and BMP.
+- Convert up to five images in one request; each image can use its own output extension and optional whole-KB target.
 - Selectable image engine: Auto, ImageMagick/libheif, or macOS `sips` fallback when developing locally on macOS.
 - Optional whole-KB size target using decimal KB (1 KB = 1,000 bytes). JPG/HEIC quality is searched from 100 to 5; when the best valid output is smaller than the requested target, safe metadata padding is used where the format supports it without changing pixels.
 - Pixel dimensions preserved; JPEG transparency warning included.
 - Video recovery with lossless remux, MKV/WebM repair, optional Untrunc reference recovery, tolerant transcode, and video-only fallback.
 - Recovered video is validated with strict FFmpeg decoding; when Untrunc exposes decodable but damaged frames, the worker re-encodes them into a fresh H.264/AAC MP4 and reports the best-effort limitation.
-- PDF editor beta: load 1-5 PDFs (50 MB each), merge them, reorder or delete pages, add blank pages, and place/move/resize PNG, JPG, JPEG, or HEIC images on blank pages.
+- PDF editor beta: load 1-5 PDFs (15 MB each), merge them, reorder or delete pages, add blank pages, and place/move/resize PNG, JPG, JPEG, or HEIC images on blank pages.
 - PDF editor merges and exports through the Local agent or Server while retaining source page sizes and rotations and never modifying the original PDFs. Inserted HEIC/TIFF/GIF/BMP images use the ImageMagick/libheif normalization path when needed. PDF page previews and thumbnails are rendered by the application; no browser PDF viewer is used.
 - Responsive two-column workspace with a collapsible tool sidebar.
 - Drag-and-drop or browse upload controls.
@@ -40,6 +41,8 @@ npm run agent
 ```
 
 Build an installer for the current operating system with `npm run agent:package`. GitHub Actions builds macOS, Windows, and Linux installers on an `agent-v*` tag. Set `NEXT_PUBLIC_AGENT_RELEASES_URL` in the website environment to the repository's latest Releases page. The setup page links users to those installers.
+
+Packaged agents check GitHub Releases shortly after startup and periodically while running. When a newer signed release is available, the desktop dashboard shows an **Agent update** notification. Click **Update now** to download it, then click **Restart and install** after the download completes. Development agents do not attempt release updates. The release workflow must publish the updater metadata (`latest*.yml` and blockmaps) alongside the installers; this is handled by `.github/workflows/agent-release.yml`.
 
 Generate the owner signing key pair once, outside the repository:
 
@@ -121,6 +124,8 @@ The owner opens the hidden `/admin` route, signs in, and approves or declines pe
 
 The initial owner credential is intentionally fixed as `Admin / 12345` to match the product requirement. It is hashed for comparison, rate-limited, and should be replaced before using this service for valuable licenses. Never put the private signing key, master key, Tailscale auth key, GitHub token, or the SSD directory in Vercel or GitHub variables.
 
+The licensing server also keeps an owner-only audit log in the same SSD-backed `licenses.sqlite3` database. It records activation requests, approvals, declines, redemptions, expiries, admin session logins/logouts, and device activity without storing activation codes or private keys. The web `/admin` page and the desktop agent dashboard show the latest entries after Admin authentication.
+
 The licensing regression tests cover the storage boundary, request flow, admin approval, one-time redemption, wrong-device/replay rejection, and local-agent online redemption. See [`docs/ssd-licensing-server-plan.md`](docs/ssd-licensing-server-plan.md) for the deployment boundary and later scaling options.
 
 For a Vercel frontend that uses the Local agent, set `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_AGENT_URL` (`http://127.0.0.1:4789` for local HTTP development; secure production pages automatically use `https://127.0.0.1:4789`), `NEXT_PUBLIC_AGENT_RELEASES_URL`, `NEXT_PUBLIC_MACOS_AGENT_SIGNED`, and (when using public license requests) `NEXT_PUBLIC_LICENSE_SERVER_URL`. Do not set `NEXT_PUBLIC_AGENT_URL` to a cloud URL: the browser must reach the agent on the same computer. Users must install the latest agent release for Safari production access. The Vercel filesystem is ephemeral and Vercel does not run the separate worker process, so server processing and server history require a persistent backend deployment such as the Docker deployment described below.
@@ -154,7 +159,7 @@ The healthy video should come from the same device/app and use the same video si
 
 ## PDF editor limits and behavior
 
-- Each PDF can be up to 50 MB; the combined PDF upload can be up to 250 MB.
+- Each PDF can be up to 15 MB; the combined PDF upload can be up to 250 MB.
 - Up to five PDFs can be open in one editor project. A single PDF is supported too.
 - A blank page starts at A4 portrait when there is no selected source page. An image is fitted inside the page and can then be moved or resized.
 - The result is always one new PDF. Source PDFs are copied, never overwritten. PDF annotations, form fields, attachments, and other advanced structures may not survive page copying; the visible page content, page size, rotation, and order are the supported guarantees.

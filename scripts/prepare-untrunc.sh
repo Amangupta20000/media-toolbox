@@ -65,7 +65,11 @@ FF_CONFIG_FLAGS="$FF_CONFIG_FLAGS --disable-asm"
 if [ "$PLATFORM_DIR" = "darwin" ]; then
   FF_CONFIG_FLAGS="$FF_CONFIG_FLAGS --extra-cflags=-Wno-error=incompatible-function-pointer-types"
 fi
-make -C "$SOURCE_DIR" FF_VER=3.3.9 FF_CONFIG_FLAGS="$FF_CONFIG_FLAGS"
+MAKE_JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '2')"
+if ! [[ "$MAKE_JOBS" =~ ^[0-9]+$ ]] || [ "$MAKE_JOBS" -lt 1 ]; then
+  MAKE_JOBS=2
+fi
+make -C "$SOURCE_DIR" -j"$MAKE_JOBS" FF_VER=3.3.9 FF_CONFIG_FLAGS="$FF_CONFIG_FLAGS"
 cp "$SOURCE_DIR/untrunc" "$TARGET_PATH"
 chmod 755 "$TARGET_PATH"
 if [ -f "$SOURCE_DIR/COPYING" ]; then

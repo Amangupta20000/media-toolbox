@@ -10,6 +10,8 @@ import { activationDurationOptions, isAllowedActivationDuration, verifyLicenseTo
 export const ADMIN_USERNAME = "Admin";
 export const TRIAL_DURATION_MS = 5 * 60 * 1000;
 export const ACTIVATION_DURATION_MS = 10 * 60 * 1000;
+export const ACTIVATION_FREE_SESSION_LIMIT = 2;
+export const ACTIVATION_SESSION_TIME_FACTOR = 2 / 3;
 export const LEGAL_VERSION = "1.0.0";
 
 const DEFAULT_ORIGINS = [
@@ -99,6 +101,8 @@ function clearExpiredAuthorization(record, now) {
       activationStartedAt: null,
       activationExpiresAt: null,
       activationOriginsJson: "[]",
+      activationCodeHash: null,
+      activationSessionActive: 1,
     });
   }
   return record;
@@ -113,30 +117,62 @@ function hasLegalConsent(record) {
   );
 }
 
-function authorizationMode(record, now, legalAccepted = hasLegalConsent(record)) {
+function activationTiming(record, now, sessionCount = 0) {
+  const originalExpiresAt = record.activation_expires_at || null;
+  const available = Boolean(record.activation_id && originalExpiresAt && originalExpiresAt > now);
+  if (!available) return { available: false, originalExpiresAt: null, originalRemainingMs: null, effectiveExpiresAt: null, effectiveRemainingMs: null, penaltyCount: 0 };
+  const originalRemainingMs = Math.max(0, originalExpiresAt - now);
+  const count = Number.isInteger(Number(sessionCount)) ? Number(sessionCount) : 0;
+  const penaltyCount = Math.max(0, count - ACTIVATION_FREE_SESSION_LIMIT);
+  const effectiveRemainingMs = Math.floor(originalRemainingMs * (ACTIVATION_SESSION_TIME_FACTOR ** penaltyCount));
+  return {
+    available: true,
+    originalExpiresAt,
+    originalRemainingMs,
+    effectiveExpiresAt: now + effectiveRemainingMs,
+    effectiveRemainingMs,
+    penaltyCount,
+  };
+}
+
+function authorizationMode(record, now, legalAccepted = hasLegalConsent(record), sessionCount = 0) {
   if (!legalAccepted) return "locked";
   if (record.admin_unlocked) return "admin";
-  if (record.activation_expires_at && record.activation_expires_at > now) return "activation";
+  const activation = activationTiming(record, now, sessionCount);
+  if (activation.available) {
+    if (activation.effectiveRemainingMs <= 0) return "locked";
+    return record.activation_session_active === 0 ? "locked" : "activation";
+  }
   if (record.trial_started_at && record.trial_started_at + TRIAL_DURATION_MS > now) return "trial";
   return "locked";
 }
 
-export function getAuthorizationState(now = Date.now()) {
+export function getAuthorizationState(now = Date.now(), sessionCount = 0) {
   let record = ensureAgentAuth();
   record = clearExpiredAuthorization(record, now);
   const legalAccepted = hasLegalConsent(record);
-  const mode = authorizationMode(record, now, legalAccepted);
+  const mode = authorizationMode(record, now, legalAccepted, sessionCount);
   const trialExpiresAt = record.trial_started_at ? record.trial_started_at + TRIAL_DURATION_MS : null;
-  const activeActivation = mode === "activation";
-  const trustedOrigins = activeActivation
-    ? (JSON.parse(record.activation_origins_json || "[]").filter(Boolean))
-    : defaultTrustedOrigins();
-  const expiresAt = mode === "trial" ? trialExpiresAt : activeActivation ? record.activation_expires_at : null;
+  const activation = activationTiming(record, now, sessionCount);
+  const activationAvailable = activation.available;
+  const activationLoggedOut = activationAvailable && record.activation_session_active === 0;
+  const activationOrigins = JSON.parse(record.activation_origins_json || "[]").filter(Boolean);
+  const trustedOrigins = activationAvailable ? activationOrigins : defaultTrustedOrigins();
+  const activationSessionLimitReached = activationAvailable && record.activation_session_active !== 0 && activation.effectiveRemainingMs <= 0;
+  const expiresAt = mode === "trial"
+    ? trialExpiresAt
+    : mode === "activation"
+      ? activation.effectiveExpiresAt
+      : activationLoggedOut
+        ? activation.originalExpiresAt
+        : activationSessionLimitReached
+          ? activation.effectiveExpiresAt
+          : null;
   const trialAvailable = !record.trial_started_at && !record.trial_consumed;
   return {
     mode,
     authorized: mode !== "locked",
-    reason: mode === "locked" ? (!legalAccepted ? "legal_consent_required" : record.trial_consumed || record.trial_started_at ? "trial_expired" : "authorization_required") : "authorized",
+    reason: mode === "locked" ? (!legalAccepted ? "legal_consent_required" : activationLoggedOut ? "activation_logged_out" : activationSessionLimitReached ? "activation_session_limit" : record.trial_consumed || record.trial_started_at ? "trial_expired" : "authorization_required") : "authorized",
     legalAccepted,
     legalVersion: legalAccepted ? LEGAL_VERSION : null,
     legalAcceptedAt: legalAccepted ? Math.min(record.privacy_accepted_at, record.terms_accepted_at) : null,
@@ -147,9 +183,16 @@ export function getAuthorizationState(now = Date.now()) {
     trialStartedAt: record.trial_started_at || null,
     trialExpiresAt,
     trialAvailable,
-    activationId: activeActivation ? record.activation_id : null,
-    activationStartedAt: activeActivation ? record.activation_started_at : null,
-    activationExpiresAt: activeActivation ? record.activation_expires_at : null,
+    activationId: activationAvailable ? record.activation_id : null,
+    activationStartedAt: activationAvailable ? record.activation_started_at : null,
+    activationExpiresAt: activationAvailable ? record.activation_expires_at : null,
+    activationSessionActive: activationAvailable ? record.activation_session_active !== 0 : false,
+    activationReloginAvailable: activationLoggedOut,
+    activationOriginalRemainingMs: activation.originalRemainingMs,
+    activationEffectiveExpiresAt: activation.effectiveExpiresAt,
+    activationEffectiveRemainingMs: activation.effectiveRemainingMs,
+    activationSessionPenaltyCount: activation.penaltyCount,
+    activationSessionLimitReached,
     expiresAt,
     remainingMs: expiresAt ? Math.max(0, expiresAt - now) : null,
   };
@@ -195,8 +238,8 @@ export function isTrustedOrigin(origin, state = getAuthorizationState()) {
   return Boolean(normalized && state.trustedOrigins.includes(normalized));
 }
 
-export function authorizeProcessing(origin, now = Date.now()) {
-  let state = getAuthorizationState(now);
+export function authorizeProcessing(origin, now = Date.now(), sessionCount = 0) {
+  let state = getAuthorizationState(now, sessionCount);
   if (!isTrustedOrigin(origin, state)) return { ok: false, code: "origin_not_trusted", state };
   if (!state.legalAccepted) return { ok: false, code: "legal_consent_required", state };
   if (state.authorized) return { ok: true, state };
@@ -204,7 +247,7 @@ export function authorizeProcessing(origin, now = Date.now()) {
   const record = ensureAgentAuth();
   if (!record.trial_started_at && !record.trial_consumed) {
     updateAgentAuth({ trialStartedAt: now, trialConsumed: 1 });
-    state = getAuthorizationState(now);
+    state = getAuthorizationState(now, sessionCount);
     return { ok: true, state };
   }
   return { ok: false, code: "activation_required", state };
@@ -222,6 +265,27 @@ export function loginAdmin(username, password) {
 export function logoutAdmin() {
   updateAgentAuth({ adminUnlocked: 0 });
   return getAuthorizationState();
+}
+
+export function logoutActivation(now = Date.now()) {
+  const current = getAuthorizationState(now);
+  if (!current.activationExpiresAt) return current;
+  updateAgentAuth({ activationSessionActive: 0 });
+  return getAuthorizationState(now);
+}
+
+export function loginActivation(now = Date.now()) {
+  requireLegalConsent();
+  const current = getAuthorizationState(now);
+  if (!current.activationExpiresAt || !current.activationReloginAvailable) {
+    if (current.mode === "activation") return current;
+    const error = new Error("No active activation session is available to log in again.");
+    error.code = "activation_required";
+    error.authorization = current;
+    throw error;
+  }
+  updateAgentAuth({ activationSessionActive: 1 });
+  return getAuthorizationState(now);
 }
 
 function decodeBase64Url(value) {
@@ -273,6 +337,7 @@ function activateVerifiedPayload(payload, code, record, now) {
     activationExpiresAt: now + Number(payload.durationMs),
     activationOriginsJson: JSON.stringify(origins),
     activationCodeHash: codeHash,
+    activationSessionActive: 1,
   });
   return getAuthorizationState(now);
 }
@@ -414,6 +479,11 @@ function onlineLicenseAdminOptions(options = {}) {
 
 export async function getLicenseAdminRequests() {
   return onlineLicenseFetch("/v1/admin/license-requests", onlineLicenseAdminOptions());
+}
+
+export async function getLicenseAdminAudit(limit = 200) {
+  const safeLimit = Math.max(1, Math.min(500, Number.parseInt(limit, 10) || 200));
+  return onlineLicenseFetch(`/v1/admin/audit-log?limit=${safeLimit}`, onlineLicenseAdminOptions());
 }
 
 export async function approveLicenseRequest(requestId) {

@@ -71,6 +71,8 @@ export class LicenseStore {
         details TEXT NOT NULL DEFAULT '{}',
         created_at INTEGER NOT NULL
       );
+      CREATE INDEX IF NOT EXISTS audit_log_created_at_idx ON audit_log(created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS audit_log_event_idx ON audit_log(event, created_at DESC, id DESC);
     `);
   }
 
@@ -78,14 +80,14 @@ export class LicenseStore {
     this.database.close();
   }
 
-  createRequest({ origin, requesterLabel = "", durationMs, now, expiresAt }) {
+  createRequest({ origin, requesterLabel = "", durationMs, now, expiresAt, auditDetails = {} }) {
     const id = randomUUID();
     const requestToken = token();
     this.database.prepare(`INSERT INTO license_requests
       (id, request_token_hash, origin, requester_label, status, duration_ms, created_at, updated_at, expires_at)
       VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)`)
       .run(id, sha256(requestToken), origin, requesterLabel, durationMs, now, now, expiresAt);
-    this.audit("request.created", id, origin, { requesterLabel });
+    this.audit("request.created", id, origin, { requesterLabel, ...auditDetails }, now);
     return { id, requestToken };
   }
 
@@ -101,48 +103,51 @@ export class LicenseStore {
     return this.database.prepare("SELECT * FROM license_requests ORDER BY created_at DESC LIMIT 200").all();
   }
 
-  approve(id, { licenseId, codeHash, encryptedCode, now }) {
+  approve(id, { licenseId, codeHash, encryptedCode, now, auditDetails = {} }) {
     const result = this.database.transaction(() => {
       const row = this.getRequest(id);
       if (!row) throw new Error("License request not found.");
       if (row.status !== "pending") throw new Error("Only pending license requests can be approved.");
       if (row.expires_at <= now) {
         this.database.prepare("UPDATE license_requests SET status = 'expired', updated_at = ? WHERE id = ?").run(now, id);
+        this.audit("request.expired", id, row.origin, { reason: "approved_after_expiry" }, now);
         throw new Error("This license request has expired.");
       }
       this.database.prepare(`UPDATE license_requests SET status = 'approved', license_id = ?, code_hash = ?, code_ciphertext = ?, code_iv = ?, code_tag = ?, updated_at = ? WHERE id = ? AND status = 'pending'`)
         .run(licenseId, codeHash, encryptedCode.ciphertext, encryptedCode.iv, encryptedCode.tag, now, id);
-      this.audit("request.approved", id, row.origin, { licenseId });
+      this.audit("request.approved", id, row.origin, { licenseId, ...auditDetails }, now);
       return this.getRequest(id);
     })();
     return result;
   }
 
-  decline(id, { reason = "Declined by owner", now }) {
+  decline(id, { reason = "Declined by owner", now, auditDetails = {} }) {
     const result = this.database.transaction(() => {
       const row = this.getRequest(id);
       if (!row) throw new Error("License request not found.");
       if (row.status !== "pending") throw new Error("Only pending license requests can be declined.");
       this.database.prepare("UPDATE license_requests SET status = 'declined', decline_reason = ?, updated_at = ? WHERE id = ? AND status = 'pending'").run(reason, now, id);
-      this.audit("request.declined", id, row.origin, { reason });
+      this.audit("request.declined", id, row.origin, { reason, ...auditDetails }, now);
       return this.getRequest(id);
     })();
     return result;
   }
 
-  consume({ licenseId, codeHash, deviceId, origin, now }) {
+  consume({ licenseId, codeHash, deviceId, origin, now, auditDetails = {} }) {
     return this.database.transaction(() => {
       const row = this.database.prepare("SELECT * FROM license_requests WHERE license_id = ? AND code_hash = ?").get(licenseId, codeHash);
       if (!row) throw new Error("The activation code is invalid or was not issued by this licensing server.");
       if (row.status !== "approved") throw new Error("This activation code has already been used or is no longer active.");
       if (row.expires_at <= now) {
         this.database.prepare("UPDATE license_requests SET status = 'expired', updated_at = ? WHERE id = ?").run(now, row.id);
+        this.audit("license.expired", row.id, row.origin, { licenseId, reason: "redeemed_after_expiry" }, now);
         throw new Error("This activation code has expired.");
       }
       const result = this.database.prepare(`UPDATE license_requests SET status = 'redeemed', redeemed_at = ?, redeemed_device_id = ?, redeemed_origin = ?, updated_at = ?, code_ciphertext = NULL, code_iv = NULL, code_tag = NULL WHERE id = ? AND status = 'approved'`).run(now, deviceId, origin, now, row.id);
       if (result.changes !== 1) throw new Error("This activation code has already been used.");
       this.database.prepare("INSERT INTO license_consumptions (license_id, code_hash, device_id, origin, redeemed_at) VALUES (?, ?, ?, ?, ?)").run(licenseId, codeHash, deviceId, origin, now);
-      this.audit("license.redeemed", row.id, origin, { licenseId, deviceId });
+      this.audit("license.redeemed", row.id, origin, { licenseId, deviceId, ...auditDetails }, now);
+      this.audit("device.activity", row.id, origin, { activity: "license.redeemed", licenseId, deviceId, ...auditDetails }, now);
       return { ...row, status: "redeemed", redeemedAt: now };
     })();
   }
@@ -162,6 +167,25 @@ export class LicenseStore {
     this.database.prepare("DELETE FROM admin_sessions WHERE token_hash = ?").run(sha256(raw));
   }
 
+  listAuditLog(limit = 200) {
+    const safeLimit = Math.max(1, Math.min(500, Number.parseInt(limit, 10) || 200));
+    return this.database.prepare("SELECT id, event, request_id, origin, details, created_at FROM audit_log ORDER BY created_at DESC, id DESC LIMIT ?").all(safeLimit).map((row) => {
+      let details = {};
+      try {
+        const parsed = JSON.parse(row.details || "{}");
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) details = parsed;
+      } catch { /* keep malformed legacy details private and harmless */ }
+      return {
+        id: row.id,
+        event: row.event,
+        requestId: row.request_id,
+        origin: row.origin,
+        details,
+        createdAt: row.created_at,
+      };
+    });
+  }
+
   getSetting(key) {
     return this.database.prepare("SELECT value FROM settings WHERE key = ?").get(key)?.value || null;
   }
@@ -172,17 +196,24 @@ export class LicenseStore {
 
   cleanup(now) {
     return this.database.transaction(() => {
+      const expiredAdminSessionRows = this.database.prepare("SELECT expires_at FROM admin_sessions WHERE expires_at <= ?").all(now);
       const expiredAdminSessions = this.database.prepare("DELETE FROM admin_sessions WHERE expires_at <= ?").run(now).changes;
+      for (const row of expiredAdminSessionRows) this.audit("admin.session.expired", null, null, { expiresAt: row.expires_at }, now);
+      const expiredPendingRows = this.database.prepare("SELECT id, origin, expires_at FROM license_requests WHERE status = 'pending' AND expires_at <= ?").all(now);
       const expiredPendingRequests = this.database.prepare("UPDATE license_requests SET status = 'expired', updated_at = ? WHERE status = 'pending' AND expires_at <= ?").run(now, now).changes;
+      for (const row of expiredPendingRows) this.audit("request.expired", row.id, row.origin, { reason: "request_ttl", expiresAt: row.expires_at }, now);
       const deletedRedeemedRequests = this.database.prepare("DELETE FROM license_requests WHERE status = 'redeemed' AND redeemed_at IS NOT NULL AND redeemed_at <= ?").run(now - LICENSE_REQUEST_RETENTION_MS.redeemed).changes;
       const deletedDeclinedRequests = this.database.prepare("DELETE FROM license_requests WHERE status = 'declined' AND updated_at <= ?").run(now - LICENSE_REQUEST_RETENTION_MS.declined).changes;
-      const deletedApprovedRequests = this.database.prepare("DELETE FROM license_requests WHERE status = 'approved' AND updated_at <= ?").run(now - LICENSE_REQUEST_RETENTION_MS.approved).changes;
+      const approvedRetentionCutoff = now - LICENSE_REQUEST_RETENTION_MS.approved;
+      const expiredApprovedRows = this.database.prepare("SELECT id, origin, license_id, expires_at FROM license_requests WHERE status = 'approved' AND updated_at <= ?").all(approvedRetentionCutoff);
+      const deletedApprovedRequests = this.database.prepare("DELETE FROM license_requests WHERE status = 'approved' AND updated_at <= ?").run(approvedRetentionCutoff).changes;
+      for (const row of expiredApprovedRows) this.audit(row.expires_at <= now ? "license.expired" : "request.expired", row.id, row.origin, { licenseId: row.license_id, reason: "unredeemed_request_ttl", expiresAt: row.expires_at }, now);
       return { expiredAdminSessions, expiredPendingRequests, deletedRedeemedRequests, deletedDeclinedRequests, deletedApprovedRequests };
     })();
   }
 
-  audit(event, requestId, origin, details = {}) {
-    this.database.prepare("INSERT INTO audit_log (event, request_id, origin, details, created_at) VALUES (?, ?, ?, ?, ?)").run(event, requestId || null, origin || null, JSON.stringify(details), Date.now());
+  audit(event, requestId, origin, details = {}, createdAt = Date.now()) {
+    this.database.prepare("INSERT INTO audit_log (event, request_id, origin, details, created_at) VALUES (?, ?, ?, ?, ?)").run(event, requestId || null, origin || null, JSON.stringify(details || {}), createdAt);
   }
 }
 

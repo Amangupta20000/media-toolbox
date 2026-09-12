@@ -12,6 +12,10 @@ function clientIp(request) {
   return String(request.headers["cf-connecting-ip"] || request.socket.remoteAddress || "unknown");
 }
 
+function clientUserAgent(request) {
+  return String(request.headers["user-agent"] || "unknown").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 240) || "unknown";
+}
+
 function normalizeOrigin(value) {
   try {
     const parsed = new URL(String(value || "").trim());
@@ -135,7 +139,14 @@ export class LicenseService {
     const durationMs = body.durationMs === undefined ? ACTIVATION_DURATION_MS : Number(body.durationMs);
     if (!isAllowedActivationDuration(durationMs)) throw new Error(`Choose one of the supported activation durations: ${activationDurationOptions().map(({ label }) => label).join(", ")}.`);
     const now = this.now();
-    const created = this.store.createRequest({ origin, requesterLabel, durationMs, now, expiresAt: now + this.config.requestTtlMs });
+    const created = this.store.createRequest({
+      origin,
+      requesterLabel,
+      durationMs,
+      now,
+      expiresAt: now + this.config.requestTtlMs,
+      auditDetails: { clientIp: clientIp(request), userAgent: clientUserAgent(request) },
+    });
     return { requestId: created.id, requestToken: created.requestToken, status: "pending", createdAt: now, expiresAt: now + this.config.requestTtlMs };
   }
 
@@ -167,14 +178,24 @@ export class LicenseService {
     const payload = { v: 1, licenseId, origins: [row.origin], issuedAt: this.now(), durationMs: row.duration_ms };
     const code = createSignedLicenseToken(payload, privateKey);
     const encryptedCode = encryptText(code);
-    this.store.approve(id, { licenseId, codeHash: licenseCodeHash(code), encryptedCode, now: this.now() });
+    this.store.approve(id, {
+      licenseId,
+      codeHash: licenseCodeHash(code),
+      encryptedCode,
+      now: this.now(),
+      auditDetails: { clientIp: clientIp(request), userAgent: clientUserAgent(request) },
+    });
     return publicRequest(this.store.getRequest(id));
   }
 
   decline(request, id, body) {
     this.requireAdmin(request);
     const reason = String(body.reason || "Declined by owner").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 200);
-    return publicRequest(this.store.decline(id, { reason, now: this.now() }));
+    return publicRequest(this.store.decline(id, {
+      reason,
+      now: this.now(),
+      auditDetails: { clientIp: clientIp(request), userAgent: clientUserAgent(request) },
+    }));
   }
 
   async redeem(request, body) {
@@ -190,7 +211,14 @@ export class LicenseService {
     if (!origin || !payload.origins.includes(origin)) throw new Error("This activation code is not valid for this website origin.");
     if (payload.issuedAt && Number(payload.issuedAt) > this.now() + 5 * 60 * 1000) throw new Error("This activation code is not valid yet.");
     const codeHash = licenseCodeHash(code);
-    this.store.consume({ licenseId: payload.licenseId, codeHash, deviceId, origin, now: this.now() });
+    this.store.consume({
+      licenseId: payload.licenseId,
+      codeHash,
+      deviceId,
+      origin,
+      now: this.now(),
+      auditDetails: { clientIp: clientIp(request), userAgent: clientUserAgent(request) },
+    });
     const boundPayload = { ...payload, deviceId, boundAt: this.now() };
     const token = createSignedLicenseToken(boundPayload, privateKey);
     return { ok: true, token, licenseId: payload.licenseId, deviceId, origin, expiresAt: this.now() + Number(payload.durationMs) };
@@ -213,18 +241,32 @@ export class LicenseService {
       if (url.pathname === "/v1/admin/login" && request.method === "POST") {
         this.checkRate(`login:${clientIp(request)}`, 20);
         const body = await readJson(request, this.config.maxBodyBytes);
-        if (String(body.username || "") !== this.config.adminUsername || !adminPasswordMatches(body.password, this)) throw new Error("The Admin username or password is incorrect.");
+        const username = String(body.username || "");
+        if (username !== this.config.adminUsername || !adminPasswordMatches(body.password, this)) {
+          this.store.audit("admin.login.failed", null, origin, { username: username.slice(0, 80), clientIp: clientIp(request), userAgent: clientUserAgent(request) }, this.now());
+          throw new Error("The Admin username or password is incorrect.");
+        }
         const now = this.now();
-        return json(response, 200, { ok: true, ...this.store.createAdminSession({ now, expiresAt: now + this.config.adminSessionTtlMs }) }, origin);
+        const session = this.store.createAdminSession({ now, expiresAt: now + this.config.adminSessionTtlMs });
+        this.store.audit("admin.login", null, origin, { username, clientIp: clientIp(request), userAgent: clientUserAgent(request), expiresAt: session.expiresAt }, now);
+        return json(response, 200, { ok: true, ...session }, origin);
       }
       if (url.pathname === "/v1/admin/logout" && request.method === "POST") {
-        this.store.deleteAdminSession(this.requireAdmin(request));
+        const token = this.requireAdmin(request);
+        this.store.deleteAdminSession(token);
+        this.store.audit("admin.logout", null, origin, { clientIp: clientIp(request), userAgent: clientUserAgent(request) }, this.now());
         return json(response, 200, { ok: true }, origin);
       }
       if (url.pathname === "/v1/admin/license-requests" && request.method === "GET") {
         this.requireAdmin(request);
         this.store.cleanup(this.now());
         return json(response, 200, { items: this.store.listRequests().map((row) => publicRequest(row)) }, origin);
+      }
+      if (url.pathname === "/v1/admin/audit-log" && request.method === "GET") {
+        this.requireAdmin(request);
+        this.store.cleanup(this.now());
+        const limit = url.searchParams.get("limit") || "200";
+        return json(response, 200, { items: this.store.listAuditLog(limit), storagePath: `${this.config.dataDir}/licenses.sqlite3` }, origin);
       }
       if (url.pathname === "/v1/admin/github/agent-license-server-url" && request.method === "POST") {
         this.requireAdmin(request);

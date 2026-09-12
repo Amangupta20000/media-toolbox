@@ -4,6 +4,7 @@ import http from "node:http";
 import https from "node:https";
 import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { getJob, getJobForPublic, claimNextJob, deleteJob, listExpiredJobs, listRetainedJobs, updateJob, appendJobLog } from "../lib/db.js";
@@ -11,7 +12,7 @@ import { config, paths } from "../lib/config.js";
 import { acceptMultipartJob } from "../lib/job-intake.js";
 import { firstAvailable, runCommand } from "../lib/command.js";
 import { processJob, writeCapabilities } from "../worker/index.js";
-import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, activateOnline, authorizeProcessing, ensureAgentAuth, getActivationRequestStatus as getActivationRequestStatusAgent, getAuthorizationState, getDeviceId as getDeviceIdFromAuth, getLicenseAdminRequests as getLicenseAdminRequestsAgent, getLicenseAdminState as getLicenseAdminStateAgent, getLicenseRequestConfig as getLicenseRequestConfigAgent, hasOnlineLicenseServer, loginAdmin as loginAdminAgent, loginLicenseAdmin as loginLicenseAdminAgent, logoutAdmin as logoutAdminAgent, logoutLicenseAdmin as logoutLicenseAdminAgent, requestActivationCode as requestActivationCodeAgent, approveLicenseRequest as approveLicenseRequestAgent, declineLicenseRequest as declineLicenseRequestAgent, startTrial as startTrialAgent } from "./auth.js";
+import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, activateOnline, authorizeProcessing, ensureAgentAuth, getActivationRequestStatus as getActivationRequestStatusAgent, getAuthorizationState as getAuthorizationStateAgent, getDeviceId as getDeviceIdFromAuth, getLicenseAdminAudit as getLicenseAdminAuditAgent, getLicenseAdminRequests as getLicenseAdminRequestsAgent, getLicenseAdminState as getLicenseAdminStateAgent, getLicenseRequestConfig as getLicenseRequestConfigAgent, hasOnlineLicenseServer, loginActivation as loginActivationAgent, loginAdmin as loginAdminAgent, loginLicenseAdmin as loginLicenseAdminAgent, logoutActivation as logoutActivationAgent, logoutAdmin as logoutAdminAgent, logoutLicenseAdmin as logoutLicenseAdminAgent, requestActivationCode as requestActivationCodeAgent, approveLicenseRequest as approveLicenseRequestAgent, declineLicenseRequest as declineLicenseRequestAgent, startTrial as startTrialAgent } from "./auth.js";
 
 const AGENT_VERSION = process.env.AGENT_VERSION || "0.2.1";
 const PROTOCOL_VERSION = 1;
@@ -29,6 +30,10 @@ const state = {
   cleanupTimer: null,
   authorizationMode: "locked",
 };
+
+function currentAuthorization(now = Date.now()) {
+  return getAuthorizationStateAgent(now, state.sessions.size);
+}
 
 function json(response, status, payload, request, origin = null) {
   if (origin) {
@@ -52,7 +57,7 @@ function originFor(request, allowAny = false) {
   return state.allowedOrigins.has(origin) ? origin : null;
 }
 
-function authorizationRequired(response, request, origin, authorization = getAuthorizationState()) {
+function authorizationRequired(response, request, origin, authorization = currentAuthorization()) {
   return json(response, 402, {
     error: "Admin login or activation required.",
     code: "activation_required",
@@ -60,7 +65,7 @@ function authorizationRequired(response, request, origin, authorization = getAut
   }, request, origin);
 }
 
-function legalConsentRequired(response, request, origin, authorization = getAuthorizationState()) {
+function legalConsentRequired(response, request, origin, authorization = currentAuthorization()) {
   return json(response, 402, {
     error: "Accept the Privacy Policy and Terms & Conditions in the local agent dashboard before continuing.",
     code: "legal_consent_required",
@@ -106,13 +111,13 @@ function authorize(request, url) {
 }
 
 function rebuildAllowedOrigins() {
-  state.allowedOrigins = new Set(getAuthorizationState().trustedOrigins);
+  state.allowedOrigins = new Set(currentAuthorization().trustedOrigins);
 }
 
 function refreshAuthorization() {
-  const authorization = getAuthorizationState();
+  const authorization = currentAuthorization();
   state.allowedOrigins = new Set(authorization.trustedOrigins);
-  if (!authorization.authorized && state.sessions.size) state.sessions.clear();
+  if (!authorization.authorized && authorization.reason !== "activation_session_limit" && state.sessions.size) state.sessions.clear();
   state.authorizationMode = authorization.mode;
   return authorization;
 }
@@ -303,6 +308,69 @@ async function moveKeptResult(job) {
   await fsp.rm(path.dirname(job.source_path), { recursive: true, force: true });
 }
 
+function resultsDirectory() {
+  return path.join(config.dataDir, "Results");
+}
+
+async function openResultsDirectory() {
+  const directory = resultsDirectory();
+  await fsp.mkdir(directory, { recursive: true });
+  const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer.exe" : "xdg-open";
+  const child = spawn(opener, [directory], { detached: true, stdio: "ignore", windowsHide: true });
+  child.unref();
+  return directory;
+}
+
+async function directoryWritable(directory) {
+  await fsp.mkdir(directory, { recursive: true });
+  const probe = path.join(directory, `.media-toolbox-self-test-${randomUUID()}`);
+  await fsp.writeFile(probe, "Media Toolbox self-test\n", { flag: "wx" });
+  await fsp.rm(probe, { force: true });
+  return true;
+}
+
+function diagnosticItem(id, label, status, detail) {
+  return { id, label, status, detail };
+}
+
+export async function runDiagnostics() {
+  const results = [];
+  results.push(diagnosticItem("agent", "Agent connectivity", state.server ? "pass" : "fail", state.server ? `Listening on ${state.protocol}://127.0.0.1:${state.port}` : "The local agent server is not running."));
+
+  const resultsDir = resultsDirectory();
+  const writableDirectories = [config.dataDir, paths.jobs, resultsDir];
+  try {
+    for (const directory of writableDirectories) await directoryWritable(directory);
+    results.push(diagnosticItem("permissions", "File permissions", "pass", "The agent can create and remove files in its data, jobs, and Results folders."));
+  } catch (error) {
+    results.push(diagnosticItem("permissions", "File permissions", "fail", error instanceof Error ? error.message : "The agent cannot write to its data folders."));
+  }
+
+  try {
+    const stats = await fsp.statfs(config.dataDir);
+    const freeBytes = Number(stats.bavail) * Number(stats.bsize);
+    const requiredBytes = config.videoMaxBytes;
+    const status = freeBytes >= requiredBytes ? "pass" : "warn";
+    const freeGb = (freeBytes / 1024 ** 3).toFixed(1);
+    results.push(diagnosticItem("disk", "Disk space", status, `${freeGb} GB is available. ${status === "pass" ? "Enough for the configured video limit." : "Low space may prevent large video jobs from completing."}`));
+  } catch (error) {
+    results.push(diagnosticItem("disk", "Disk space", "warn", error instanceof Error ? error.message : "Free disk space could not be measured."));
+  }
+
+  try { await writeCapabilities(); } catch { /* the capability report below still explains missing tools */ }
+  let capabilities = {};
+  try { capabilities = JSON.parse(await fsp.readFile(paths.capabilities, "utf8")); } catch { /* handled as unavailable */ }
+  const toolChecks = [
+    ["ffmpeg", "FFmpeg", capabilities.video?.ffmpeg, "Required for video repair and video previews."],
+    ["imagemagick", "ImageMagick", capabilities.image?.imagemagick, capabilities.image?.sharp ? "Unavailable, but the bundled image engine can still process common formats." : "Required for ImageMagick image conversion."],
+    ["heic", "HEIC support", capabilities.image?.heic, "HEIC can use macOS sips, ImageMagick/libheif, or the bundled HEIF engine."],
+    ["mkv", "MKV support", capabilities.video?.mkvmerge || capabilities.video?.mkvFallback, capabilities.video?.mkvmerge ? "MKVToolNix is available for container reconstruction." : "FFmpeg fallback is available; MKVToolNix is not installed."],
+    ["untrunc", "Untrunc", capabilities.video?.untrunc, "Optional: required only for reference-based recovery of missing MP4 metadata."],
+  ];
+  for (const [id, label, available, detail] of toolChecks) results.push(diagnosticItem(id, label, available ? "pass" : "warn", available ? "Available." : detail));
+  return { ok: results.every((item) => item.status !== "fail"), checkedAt: new Date().toISOString(), items: results, capabilities: { ...capabilities, agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION } };
+}
+
 async function cleanupExpired() {
   const cutoff = Date.now() - config.jobRetentionHours * 60 * 60 * 1000;
   for (const row of listExpiredJobs(cutoff)) {
@@ -461,7 +529,7 @@ async function handle(request, response) {
       const body = await readJson(request);
       const requestedOrigin = validateWebsiteOrigin(body.origin || request.headers.origin, request.headers.origin);
       if (String(body.code || "").trim() !== state.pairingCode) throw new Error("The pairing code is incorrect or expired.");
-      const access = authorizeProcessing(requestedOrigin);
+      const access = authorizeProcessing(requestedOrigin, Date.now(), state.sessions.size + 1);
       if (!access.ok) {
         if (access.code === "origin_not_trusted") return json(response, 403, { error: "This website origin is not trusted by the local agent.", code: access.code, authorization: publicAuthorization(access.state) }, request, origin || request.headers.origin || null);
         if (access.code === "legal_consent_required") return legalConsentRequired(response, request, origin || request.headers.origin || null, access.state);
@@ -470,7 +538,7 @@ async function handle(request, response) {
       const { token, session } = issueSession(requestedOrigin, body.clientLabel);
       state.pairingCode = String(randomInt(100000, 1000000));
       console.log(`Browser paired for ${requestedOrigin} (${session.clientLabel}). A new pairing code is ready.`);
-      return json(response, 200, { token, sessionId: session.id, expiresAt: session.expiresAt, protocolVersion: PROTOCOL_VERSION, autoPaired: false }, request, origin || request.headers.origin || null);
+      return json(response, 200, { token, sessionId: session.id, expiresAt: session.expiresAt, protocolVersion: PROTOCOL_VERSION, autoPaired: false, authorization: publicAuthorization(access.state) }, request, origin || request.headers.origin || null);
     } catch (error) {
       return json(response, 401, { error: error instanceof Error ? error.message : "Pairing failed." }, request, origin || request.headers.origin || null);
     }
@@ -484,7 +552,7 @@ async function handle(request, response) {
     try {
       const body = await readJson(request);
       const requestedOrigin = validateWebsiteOrigin(body.origin || request.headers.origin, request.headers.origin);
-      const access = authorizeProcessing(requestedOrigin);
+      const access = authorizeProcessing(requestedOrigin, Date.now(), state.sessions.size + 1);
       if (!access.ok) {
         if (access.code === "origin_not_trusted") return json(response, 403, { error: "This website origin is not trusted by the local agent.", code: access.code, authorization: publicAuthorization(access.state) }, request, origin);
         if (access.code === "legal_consent_required") return legalConsentRequired(response, request, origin, access.state);
@@ -516,6 +584,15 @@ async function handle(request, response) {
       return json(response, 200, { ...value, agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION }, request, origin);
     } catch {
       return json(response, 200, { status: "starting", agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, image: {}, video: {} }, request, origin);
+    }
+  }
+
+  if (url.pathname === "/v1/results/open" && request.method === "POST") {
+    try {
+      const directory = await openResultsDirectory();
+      return json(response, 200, { ok: true, path: directory }, request, origin);
+    } catch (error) {
+      return json(response, 500, { error: error instanceof Error ? error.message : "The Results folder could not be opened." }, request, origin);
     }
   }
 
@@ -571,9 +648,10 @@ async function handle(request, response) {
     const jobDir = path.join(paths.jobs, id);
     await fsp.mkdir(jobDir, { recursive: true });
     try {
-      await acceptMultipartJob(request, { id, jobDir });
+      const result = await acceptMultipartJob(request, { id, jobDir });
       processQueue().catch((error) => console.error("Local agent queue failed", error));
-      return json(response, 202, { jobId: id, status: "queued" }, request, origin);
+      const ids = result?.ids || [id];
+      return json(response, 202, { ...(ids.length === 1 ? { jobId: ids[0] } : { jobIds: ids }), status: "queued" }, request, origin);
     } catch (error) {
       await fsp.rm(jobDir, { recursive: true, force: true });
       return json(response, 400, { error: error instanceof Error ? error.message : "Upload failed." }, request, origin);
@@ -657,6 +735,19 @@ export function logoutAdmin() {
   return authorization;
 }
 
+export function logoutActivation() {
+  const authorization = logoutActivationAgent();
+  revokeAllSessions();
+  return authorization;
+}
+
+export function loginActivation() {
+  const authorization = loginActivationAgent();
+  rebuildAllowedOrigins();
+  revokeAllSessions();
+  return authorization;
+}
+
 export function activateLicense(code) {
   if (hasOnlineLicenseServer()) {
     return activateOnline(code).then((authorization) => {
@@ -701,6 +792,10 @@ export function logoutLicenseAdmin() {
 
 export function getLicenseAdminRequests() {
   return getLicenseAdminRequestsAgent();
+}
+
+export function getLicenseAdminAudit(limit) {
+  return getLicenseAdminAuditAgent(limit);
 }
 
 export function approveLicenseRequest(requestId) {

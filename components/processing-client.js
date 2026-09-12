@@ -241,7 +241,7 @@ export function uploadWithProgress(form, mode, onProgress) {
     xhr.onload = () => {
       let payload = {};
       try { payload = JSON.parse(xhr.responseText); } catch { /* no-op */ }
-      if (xhr.status >= 200 && xhr.status < 300 && payload.jobId) resolve(payload);
+      if (xhr.status >= 200 && xhr.status < 300 && (payload.jobId || (Array.isArray(payload.jobIds) && payload.jobIds.length))) resolve(payload);
       else reject(new Error(payload.error || (xhr.status === 401 || xhr.status === 402 ? "Admin login or activation is required in the Local agent dashboard." : "The upload failed.")));
     };
     xhr.send(form);
@@ -285,6 +285,11 @@ export async function endAllLocalSessions() {
 
 export async function deleteLocalHistory(id) {
   return fetchJson(`${agentBaseUrl()}/v1/history/${encodeURIComponent(id)}`, requestOptions("local", { method: "DELETE" }));
+}
+
+export async function openLocalResultsFolder() {
+  await ensureLocalAgentSession();
+  return fetchJson(`${agentBaseUrl()}/v1/results/open`, requestOptions("local", { method: "POST" }));
 }
 
 export async function deleteDownloadedFile(folderPath, filename) {

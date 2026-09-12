@@ -14,10 +14,18 @@ jobs:
         include:
           - os: macos-latest
             platform: mac
+            artifact: mac
           - os: windows-latest
             platform: win
+            artifact: win
           - os: ubuntu-latest
             platform: linux
+            linux-target: AppImage
+            artifact: linux-appimage
+          - os: ubuntu-latest
+            platform: linux
+            linux-target: deb
+            artifact: linux-deb
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -25,6 +33,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Cache Electron packaging downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-builder-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json', 'electron-builder.yml') }}
+          restore-keys: |
+            electron-builder-${{ runner.os }}-${{ runner.arch }}-node22-
       - name: Cache bundled Untrunc
         if: matrix.platform != 'win'
         id: untrunc-cache
@@ -48,7 +69,8 @@ jobs:
         if: matrix.platform == 'win'
         shell: pwsh
         run: ./scripts/prepare-untrunc-windows.ps1
-      - run: npm ci --legacy-peer-deps
+      - name: Install packaging dependencies
+        run: npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund
       - name: Check macOS signing credentials
         if: matrix.platform == 'mac'
         env:
@@ -96,9 +118,12 @@ jobs:
             unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
             npm run agent:package -- --mac --publish never
           fi
-      - name: Package non-macOS installer
-        if: matrix.platform != 'mac'
-        run: npm run agent:package -- --${{ matrix.platform }} --publish never
+      - name: Package Linux installer target
+        if: matrix.platform == 'linux'
+        run: npm run agent:package -- --linux ${{ matrix.linux-target }} --publish never
+      - name: Package Windows installer
+        if: matrix.platform == 'win'
+        run: npm run agent:package -- --win --publish never
       - name: Stage installer files
         shell: bash
         run: |
@@ -109,12 +134,14 @@ jobs:
             -name '*.zip' -o \
             -name '*.exe' -o \
             -name '*.AppImage' -o \
-            -name '*.deb' \
+            -name '*.deb' -o \
+            -name 'latest*.yml' -o \
+            -name '*.blockmap' \
           \) -exec cp {} upload/ \;
           test -n "$(find upload -maxdepth 1 -type f -print -quit)"
       - uses: actions/upload-artifact@v4
         with:
-          name: media-toolbox-agent-${{ matrix.platform }}
+          name: media-toolbox-agent-${{ matrix.artifact }}
           path: upload/*
           if-no-files-found: error
 

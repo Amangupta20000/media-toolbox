@@ -22,6 +22,7 @@ const imageFormats = [
 ];
 
 const imageAccept = ".jpg,.jpeg,.png,.heic,.heif,.tif,.tiff,.gif,.bmp";
+const maxImageFiles = 5;
 
 const imageMethods = [
   ["auto", "Auto", "Use the best available worker path", "recommended"],
@@ -32,15 +33,15 @@ const imageMethods = [
 export function ToolPage({ tool }) {
   const isImage = tool === "image-converter";
   const [source, setSource] = useState(null);
+  const [imageFiles, setImageFiles] = useState([]);
+  const [imageSettings, setImageSettings] = useState([]);
   const [reference, setReference] = useState(null);
-  const [format, setFormat] = useState("original");
   const [method, setMethod] = useState("auto");
-  const [maxSizeKb, setMaxSizeKb] = useState("");
-  const [jpegConfirmed, setJpegConfirmed] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [jobId, setJobId] = useState(null);
   const [jobMode, setJobMode] = useState("server");
   const [job, setJob] = useState(null);
+  const [batchJobs, setBatchJobs] = useState(null);
   const [error, setError] = useState("");
   const [capabilities, setCapabilities] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -71,14 +72,15 @@ export function ToolPage({ tool }) {
 
   useEffect(() => {
     setPreviewError(false);
-    if (!isImage || !source) {
+    const previewSource = isImage ? imageFiles[0] : null;
+    if (!previewSource) {
       setPreviewUrl("");
       return undefined;
     }
-    const objectUrl = URL.createObjectURL(source);
+    const objectUrl = URL.createObjectURL(previewSource);
     setPreviewUrl(objectUrl);
     return () => URL.revokeObjectURL(objectUrl);
-  }, [isImage, source]);
+  }, [isImage, imageFiles]);
 
   useEffect(() => {
     if (!jobId) return undefined;
@@ -97,8 +99,31 @@ export function ToolPage({ tool }) {
     return () => { active = false; };
   }, [jobId, jobMode]);
 
-  const busy = Boolean(jobId && job && (job.status === "queued" || job.status === "processing"));
-  const canSubmit = Boolean(source) && !busy && !uploadProgress;
+  useEffect(() => {
+    if (!batchJobs?.length) return undefined;
+    let active = true;
+    let timer;
+    const poll = async () => {
+      const updated = await Promise.all(batchJobs.map(async (entry) => {
+        if (["completed", "failed", "cancelled"].includes(entry.status)) return entry;
+        try {
+          return await getProcessingJob(jobMode, entry.id);
+        } catch (pollError) {
+          return { ...entry, status: "failed", error: pollError instanceof Error ? pollError.message : "Unable to read job status." };
+        }
+      }));
+      if (!active) return;
+      const changed = updated.some((entry, index) => entry !== batchJobs[index]);
+      if (changed) setBatchJobs(updated);
+      if (updated.some((entry) => entry.status === "queued" || entry.status === "processing")) timer = window.setTimeout(poll, 1000);
+    };
+    poll();
+    return () => { active = false; if (timer) window.clearTimeout(timer); };
+  }, [batchJobs, jobMode]);
+
+  const batchBusy = Boolean(batchJobs?.some((entry) => entry.status === "queued" || entry.status === "processing"));
+  const busy = Boolean(jobId && job && (job.status === "queued" || job.status === "processing")) || batchBusy;
+  const canSubmit = Boolean(isImage ? imageFiles.length : source) && !busy && !uploadProgress;
   const title = isImage ? "Image conversion" : "Video repair";
   const eyebrow = isImage ? "Format & size" : "Recovery & salvage";
   const description = isImage ? "Convert image data between formats while keeping the original pixel dimensions intact." : "Give damaged or unsupported footage a layered recovery pass without touching the original.";
@@ -107,33 +132,51 @@ export function ToolPage({ tool }) {
   const sipsReady = capabilities?.image?.sips === true;
   const serverReferenceReady = capabilities?.video?.defaultReference === true;
 
-  const reset = () => {
-    if (jobId && job && (job.status === "queued" || job.status === "processing")) deleteProcessingJob(jobMode, jobId).catch(() => undefined);
-    setSource(null); setReference(null); setFormat("original"); setMethod("auto"); setMaxSizeKb(""); setJpegConfirmed(false); setUploadProgress(0); setJobId(null); setJob(null); setError(""); setPreviewUrl(""); setPreviewError(false); setKeepResult(false);
+  const defaultImageSettings = () => ({ format: "original", maxSizeKb: "", jpegConfirmed: false });
+
+  const updateImageSetting = (index, key, value) => {
+    setImageSettings((current) => current.map((setting, settingIndex) => settingIndex === index ? { ...setting, [key]: value, ...(key === "format" && value !== "jpeg" ? { jpegConfirmed: false } : {}) } : setting));
+  };
+
+  const handleImageFiles = (candidates, replace = false) => {
+    const incoming = Array.from(candidates || []);
+    if (!incoming.length) return;
+    const invalid = incoming.find((file) => !isSupportedImageFile(file));
+    if (invalid) { setError(`${invalid.name || "One selected file"} is not a supported image. Choose JPG, PNG, HEIC, TIFF, GIF, or BMP.`); return; }
+    if (incoming.some((file) => file.size > 25 * 1024 * 1024)) { setError("Each image must be 25 MB or smaller."); return; }
+    const existing = replace ? [] : imageFiles;
+    const additions = incoming.filter((file) => !existing.some((current) => current.name === file.name && current.size === file.size && current.lastModified === file.lastModified));
+    const next = [...existing, ...additions];
+    if (next.length > maxImageFiles) { setError(`Choose up to ${maxImageFiles} images per request.`); return; }
+    setImageFiles(next);
+    setImageSettings((current) => {
+      const base = replace ? [] : current.slice(0, existing.length);
+      return [...base, ...additions.map(defaultImageSettings)];
+    });
+    setPreviewUrl("");
+    setPreviewError(false);
+    setError("");
+  };
+
+  const removeImageFile = (index) => {
+    setImageFiles((current) => current.filter((_, fileIndex) => fileIndex !== index));
+    setImageSettings((current) => current.filter((_, settingIndex) => settingIndex !== index));
+    setError("");
   };
 
   const handleSourceFile = (file) => {
-    if (isImage && !isSupportedImageFile(file)) {
-      setSource(null);
-      setPreviewUrl("");
-      setPreviewError(false);
-      setError("Choose a supported image file (JPG, PNG, HEIC, TIFF, GIF, or BMP).");
-      return;
-    }
-    if (isImage && file.size > 25 * 1024 * 1024) {
-      setSource(null);
-      setPreviewUrl("");
-      setPreviewError(false);
-      setError("The image must be 25 MB or smaller.");
+    if (isImage) {
+      handleImageFiles([file], true);
       return;
     }
     setSource(file);
-    setPreviewUrl("");
-    setPreviewError(false);
-    setFormat("original");
-    setMaxSizeKb("");
-    setJpegConfirmed(false);
     setError("");
+  };
+
+  const reset = () => {
+    if (jobId && job && (job.status === "queued" || job.status === "processing")) deleteProcessingJob(jobMode, jobId).catch(() => undefined);
+    if (batchJobs) batchJobs.filter((entry) => entry.status === "queued" || entry.status === "processing").forEach((entry) => deleteProcessingJob(jobMode, entry.id).catch(() => undefined));
+    setSource(null); setImageFiles([]); setImageSettings([]); setReference(null); setMethod("auto"); setUploadProgress(0); setJobId(null); setJob(null); setBatchJobs(null); setError(""); setPreviewUrl(""); setPreviewError(false); setKeepResult(false);
   };
 
   useEffect(() => {
@@ -145,11 +188,11 @@ export function ToolPage({ tool }) {
       const file = clipboardImageFile(event.clipboardData);
       if (!file) return;
       event.preventDefault();
-      handleSourceFile(file);
+      handleImageFiles([file]);
     };
     window.addEventListener("paste", handlePaste);
     return () => window.removeEventListener("paste", handlePaste);
-  }, [isImage, busy, uploadProgress, handleSourceFile]);
+  }, [isImage, busy, uploadProgress, handleImageFiles]);
 
   useEffect(() => {
     const pending = takeHistoryEdit(tool);
@@ -168,18 +211,18 @@ export function ToolPage({ tool }) {
 
   const submit = async () => {
     setError("");
-    if (!source) { setError(`Choose a ${isImage ? "source image" : "video"} first.`); return; }
+    if (!(isImage ? imageFiles.length : source)) { setError(`Choose a ${isImage ? "source image" : "video"} first.`); return; }
     if (!isProcessingLocationReady(locations, processingMode)) { setError(processingMode === "local" ? "Admin login or activation is required in the Local agent dashboard." : "Server processing is unavailable. Choose Local agent after authorizing it."); return; }
-    if (isImage && maxSizeKb && (!/^\d+$/.test(maxSizeKb) || Number(maxSizeKb) <= 0)) { setError("Enter a positive whole number of KB."); return; }
-    if (isImage && format === "jpeg" && !jpegConfirmed) { setError("Confirm the JPEG transparency warning before continuing."); return; }
+    if (isImage && imageFiles.length > maxImageFiles) { setError(`Choose up to ${maxImageFiles} images per request.`); return; }
+    if (isImage && imageSettings.some((setting) => setting.maxSizeKb && (!/^\d+$/.test(setting.maxSizeKb) || Number(setting.maxSizeKb) <= 0))) { setError("Enter a positive whole number of KB for every image with a size target."); return; }
+    if (isImage && imageSettings.some((setting) => setting.format === "jpeg" && !setting.jpegConfirmed)) { setError("Confirm the JPEG transparency warning for every JPG output."); return; }
     const form = new FormData();
     form.append("tool", tool);
-      form.append("source", source, source.name);
+    if (isImage) imageFiles.forEach((file) => form.append("source", file, file.name));
+    else form.append("source", source, source.name);
     if (isImage) {
-      form.append("format", format);
+      form.append("imageOptions", JSON.stringify(imageFiles.map((file, index) => ({ format: imageSettings[index]?.format || "original", method, maxSizeKb: imageSettings[index]?.maxSizeKb || "", jpegConfirmed: Boolean(imageSettings[index]?.jpegConfirmed) }))));
       form.append("method", method);
-      if (maxSizeKb) form.append("maxSizeKb", maxSizeKb);
-      form.append("jpegConfirmed", String(jpegConfirmed));
     } else if (reference) form.append("reference", reference, reference.name);
     if (processingMode === "local") form.append("retention", keepResult ? "keep" : "delete");
     try {
@@ -187,8 +230,13 @@ export function ToolPage({ tool }) {
       const response = await uploadWithProgress(form, processingMode, setUploadProgress);
       setUploadProgress(0);
       setJobMode(processingMode);
-      setJobId(response.jobId);
-      setJob({ id: response.jobId, status: "queued", progress: 0, stage: "Queued", message: "Waiting for the worker.", logs: [], warnings: [], error: null, result: null });
+      const ids = Array.isArray(response.jobIds) ? response.jobIds : [response.jobId];
+      if (isImage && ids.length > 1) {
+        setBatchJobs(ids.map((id) => ({ id, status: "queued", progress: 0, stage: "Queued", message: "Waiting for the worker.", logs: [], warnings: [], error: null, result: null })));
+      } else {
+        setJobId(ids[0]);
+        setJob({ id: ids[0], status: "queued", progress: 0, stage: "Queued", message: "Waiting for the worker.", logs: [], warnings: [], error: null, result: null });
+      }
     } catch (submitError) {
       setUploadProgress(0);
       setError(submitError instanceof Error ? submitError.message : "The upload failed.");
@@ -201,16 +249,60 @@ export function ToolPage({ tool }) {
     {activeView === "history" ? <ToolHistory tool={tool} /> : <>
     <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />
     <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${capabilities?.status === "ready" ? "ready" : ""}`} /><span>{capabilities?.status === "ready" ? `${processingMode === "local" ? "Local agent" : "Server"} worker online` : "Connecting to processing worker"}</span></div>{isImage ? <span>{heicReady ? (capabilities?.image?.heic ? "HEIC enabled" : "HEIC enabled via local fallback") : capabilities?.status === "ready" ? "HEIC unavailable" : "HEIC capability checking"}</span> : <span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery + fallback" : "Reference recovery · upload a reference") : capabilities?.status === "ready" ? "FFmpeg recovery enabled · reference recovery unavailable" : "Video capabilities checking"}</span>}</div>
-    {job ? <JobStatusCard job={job} isImage={isImage} mode={jobMode} keepResult={keepResult} onReset={reset} /> : <div className="workspace-grid">
-      <section className="tool-card primary-card"><div className="card-heading"><div><span className="card-index">01</span><h2>{isImage ? "Add an image" : "Add a damaged video"}</h2></div><span className="required-label">Required</span></div><FileDropzone file={source} onFile={isImage ? handleSourceFile : (file) => { setSource(file); setError(""); }} onClear={() => { setSource(null); setPreviewUrl(""); setPreviewError(false); }} variant={isImage ? "image" : "video"} accept={isImage ? imageAccept : "video/*,.mkv,.webm,.avi,.3gp"} label={isImage ? "Drop or paste an image here" : "Drop a video here"} hint={isImage ? "or click to browse from your device" : "or click to browse from your device"} required={isImage} disabled={Boolean(uploadProgress)} />{isImage && source && previewUrl && <div className="image-preview-card"><div className="preview-heading"><span>Browser preview</span><small>Local only · not uploaded</small></div><div className="image-preview-frame">{previewError ? <div className="preview-unavailable"><AlertTriangle size={18} /><span>This browser cannot preview this image format, but the file can still be processed.</span></div> : <img src={previewUrl} alt={`Preview of ${source.name}`} onError={() => setPreviewError(true)} />}</div></div>}<div className="limit-row"><span>Maximum file size</span><strong>{isImage ? "25 MB" : "2 GB"}</strong></div>{processingMode === "local" && <label className="keep-result-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label>}</section>
-    {isImage ? <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Choose output</h2></div><span className="optional-label">Optional target</span></div><p className="card-description">Original keeps the selected file type, so a PNG remains a PNG. A size target aims for the requested KB without changing pixel dimensions.</p><div className="format-grid">{imageFormats.map(([value, label, detail]) => <button type="button" key={value} className={`format-option ${format === value ? "selected" : ""}`} onClick={() => { setFormat(value); if (value !== "jpeg") setJpegConfirmed(false); }}><span className="format-radio" /><strong>{label}</strong><small>{detail}</small></button>)}</div><label className="field-label">Processing method <span>Worker engine</span></label><div className="method-list">{imageMethods.map(([value, label, detail, tag]) => { const unavailable = (value === "imagemagick" && capabilities?.status === "ready" && !imageMagickReady) || (value === "sips" && capabilities?.status === "ready" && !sipsReady); return <button type="button" key={value} className={`method-option ${method === value ? "selected" : ""} ${unavailable ? "unavailable" : ""}`} disabled={unavailable} onClick={() => setMethod(value)}><span className="method-copy"><strong>{label}</strong><small>{detail}</small></span><span className="method-tag">{unavailable ? "Unavailable" : tag}</span></button>; })}</div><label className="field-label" htmlFor="max-size">Target size <span>KB</span></label><div className="input-with-suffix"><input id="max-size" type="text" inputMode="numeric" value={maxSizeKb} onChange={(event) => setMaxSizeKb(event.target.value.replace(/[^0-9]/g, ""))} placeholder="Leave blank for normal quality" /><span>KB target</span></div>{format === "jpeg" && <label className="warning-check"><input type="checkbox" checked={jpegConfirmed} onChange={(event) => setJpegConfirmed(event.target.checked)} /><span><AlertTriangle size={16} /><span>JPEG flattens transparent pixels. I understand.</span></span></label>}</section> : <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Reference video</h2></div><span className={serverReferenceReady ? "optional-label" : "required-label"}>{serverReferenceReady ? "Optional server fallback" : "Upload for damaged MP4"}</span></div><p className="card-description">A healthy recording from the same device or app can rebuild missing MP4 metadata when it was recorded with the same settings.</p><FileDropzone file={reference} onFile={setReference} onClear={() => setReference(null)} variant="video" accept="video/*,.mkv,.webm,.avi,.3gp" label="Drop a reference video" hint={serverReferenceReady ? "or continue without one" : "required when MP4 metadata is missing"} disabled={Boolean(uploadProgress)} /><div className="info-note"><Info size={16} /><span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery is available. If you do not upload one, the configured server reference will be tried." : "No server-side reference is configured. Upload a healthy recording from the same device or app for missing MP4 metadata; readable containers can still be repaired without one.") : "FFmpeg can repair readable containers. Missing MP4 metadata requires Untrunc and a matching healthy reference."}</span></div></section>}
+    {job ? <JobStatusCard job={job} isImage={isImage} mode={jobMode} keepResult={keepResult} onReset={reset} /> : batchJobs ? <BatchJobStatusCard jobs={batchJobs} mode={jobMode} onReset={reset} /> : <div className="workspace-grid">
+      <section className="tool-card primary-card"><div className="card-heading"><div><span className="card-index">01</span><h2>{isImage ? "Add up to 5 images" : "Add a damaged video"}</h2></div><span className="required-label">Required</span></div><FileDropzone files={isImage ? imageFiles : undefined} file={isImage ? undefined : source} onFiles={isImage ? handleImageFiles : undefined} onFile={isImage ? undefined : (file) => { setSource(file); setError(""); }} onRemoveFile={isImage ? removeImageFile : undefined} onClear={() => { setSource(null); setImageFiles([]); setImageSettings([]); setPreviewUrl(""); setPreviewError(false); }} multiple={isImage} variant={isImage ? "image" : "video"} accept={isImage ? imageAccept : "video/*,.mkv,.webm,.avi,.3gp"} label={isImage ? "Drop up to 5 images here" : "Drop a video here"} hint={isImage ? "or click to browse · paste an image directly" : "or click to browse from your device"} required={isImage} disabled={Boolean(uploadProgress)} />{isImage && imageFiles[0] && previewUrl && <div className="image-preview-card"><div className="preview-heading"><span>First image preview</span><small>Local only · not uploaded</small></div><div className="image-preview-frame">{previewError ? <div className="preview-unavailable"><AlertTriangle size={18} /><span>This browser cannot preview this image format, but the file can still be processed.</span></div> : <img src={previewUrl} alt={`Preview of ${imageFiles[0].name}`} onError={() => setPreviewError(true)} />}</div></div>}<div className="limit-row"><span>Maximum file size</span><strong>{isImage ? "25 MB each · 5 per request" : "2 GB"}</strong></div>{processingMode === "local" && <label className="keep-result-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label>}</section>
+    {isImage ? <ImageSettingsCard files={imageFiles} settings={imageSettings} method={method} capabilities={capabilities} imageMagickReady={imageMagickReady} sipsReady={sipsReady} onChange={updateImageSetting} onMethodChange={setMethod} /> : <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Reference video</h2></div><span className={serverReferenceReady ? "optional-label" : "required-label"}>{serverReferenceReady ? "Optional server fallback" : "Upload for damaged MP4"}</span></div><p className="card-description">A healthy recording from the same device or app can rebuild missing MP4 metadata when it was recorded with the same settings.</p><FileDropzone file={reference} onFile={setReference} onClear={() => setReference(null)} variant="video" accept="video/*,.mkv,.webm,.avi,.3gp" label="Drop a reference video" hint={serverReferenceReady ? "or continue without one" : "required when MP4 metadata is missing"} disabled={Boolean(uploadProgress)} /><div className="info-note"><Info size={16} /><span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery is available. If you do not upload one, the configured server reference will be tried." : "No server-side reference is configured. Upload a healthy recording from the same device or app; readable containers can still be repaired without one.") : "FFmpeg can repair readable containers. Missing MP4 metadata requires Untrunc and a matching healthy reference."}</span></div></section>}
       <section className="tool-card action-card"><div className="action-copy"><div className="action-icon"><Zap size={19} /></div><div><h2>Ready when you are</h2><p>{isImage ? "Your output will be created as a new file." : "The worker will try the safest recovery method first."}</p></div></div><button className="primary-button" onClick={submit} disabled={!canSubmit}>{uploadProgress ? <><LoaderCircle className="spin" size={18} /> Uploading {uploadProgress}%</> : <><Sparkles size={18} /> {isImage ? "Convert image" : "Repair video"}</>}</button></section>
     </div>}
     {!job && !isImage && <VideoRecoverySummary hasServerReference={serverReferenceReady} hasUntrunc={capabilities?.video?.untrunc} />}
     {error && <div className="error-banner"><AlertTriangle size={18} /><span>{error}</span></div>}
-    {!job && <div className="trust-row"><div><CheckCircle2 size={16} /> No resizing by default</div><div><Clock3 size={16} /> Temporary processing only</div><div><ShieldCheck size={16} /> Private worker pipeline</div></div>}
+    {!job && !batchJobs && <div className="trust-row"><div><CheckCircle2 size={16} /> No resizing by default</div><div><Clock3 size={16} /> Temporary processing only</div><div><ShieldCheck size={16} /> Private worker pipeline</div></div>}
     </>}
   </AppShell>;
+}
+
+function ImageSettingsCard({ files, settings, method, capabilities, imageMagickReady, sipsReady, onChange, onMethodChange }) {
+  return <section className="tool-card settings-card image-batch-settings-card">
+    <div className="card-heading"><div><span className="card-index">02</span><h2>{files.length ? "Set output per image" : "Choose output"}</h2></div><span className="optional-label">Per-image target</span></div>
+    <p className="card-description">Choose a different extension and KB target for every selected image. Pixel dimensions stay unchanged.</p>
+    {!files.length ? <div className="batch-settings-empty"><Info size={18} /><span>Add images above to configure each output.</span></div> : <div className="image-batch-settings-list">
+      {files.map((file, index) => {
+        const setting = settings[index] || { format: "original", maxSizeKb: "", jpegConfirmed: false };
+        return <article className="image-batch-setting" key={`${file.name}-${file.size}-${index}`}>
+          <div className="image-batch-setting-heading"><strong title={file.name}>{index + 1}. {file.name}</strong><span>{formatBytes(file.size)}</span></div>
+          <div className="image-batch-setting-fields">
+            <label className="batch-field"><span className="batch-field-label">Extension</span><select className="batch-format-select" value={setting.format} onChange={(event) => onChange(index, "format", event.target.value)}>{imageFormats.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+            <label className="batch-field"><span className="batch-field-label">Target size <small>KB</small></span><div className="input-with-suffix"><input type="text" inputMode="numeric" value={setting.maxSizeKb} onChange={(event) => onChange(index, "maxSizeKb", event.target.value.replace(/[^0-9]/g, ""))} placeholder="Optional" aria-label={`Target size for ${file.name}`} /><span>KB</span></div></label>
+          </div>
+          {setting.format === "jpeg" && <label className="warning-check"><input type="checkbox" checked={Boolean(setting.jpegConfirmed)} onChange={(event) => onChange(index, "jpegConfirmed", event.target.checked)} /><span><AlertTriangle size={16} /><span>JPEG flattens transparent pixels.</span></span></label>}
+        </article>;
+      })}
+    </div>}
+    {files.length > 0 && <><label className="field-label">Processing method <span>Worker engine for all images</span></label><div className="method-list">{imageMethods.map(([value, label, detail, tag]) => { const unavailable = (value === "imagemagick" && capabilities?.status === "ready" && !imageMagickReady) || (value === "sips" && capabilities?.status === "ready" && !sipsReady); return <button type="button" key={value} className={`method-option ${method === value ? "selected" : ""} ${unavailable ? "unavailable" : ""}`} disabled={unavailable} onClick={() => onMethodChange(value)}><span className="method-copy"><strong>{label}</strong><small>{detail}</small></span><span className="method-tag">{unavailable ? "Unavailable" : tag}</span></button>; })}</div></>}
+  </section>;
+}
+
+function BatchJobStatusCard({ jobs, mode, onReset }) {
+  const completed = jobs.filter((entry) => entry.status === "completed").length;
+  const failed = jobs.filter((entry) => entry.status === "failed").length;
+  const finished = completed + failed === jobs.length;
+  return <section className={`job-card batch-job-card ${failed ? "failed" : finished ? "success" : ""}`}>
+    <div className="job-topline"><span className="job-status-pill">{finished ? (failed ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />) : <LoaderCircle className="spin" size={15} />}{finished ? (failed ? "Batch finished with errors" : "Batch complete") : "Batch processing"}</span><span className="job-id">{completed}/{jobs.length} complete</span></div>
+    <div className="job-icon">{finished && !failed ? <CheckCircle2 size={30} /> : <LoaderCircle className={finished ? "" : "spin"} size={30} />}</div>
+    <h2>{finished ? (failed ? "Some images need attention" : "Your images are ready") : "Converting your images"}</h2>
+    <p className="job-message">Each image is processed independently with the extension and size target you selected.</p>
+    <div className="batch-job-list">{jobs.map((entry, index) => {
+      const done = entry.status === "completed" && entry.result;
+      const itemFailed = entry.status === "failed";
+      const progress = Math.max(0, Math.min(100, Number(entry.progress) || 0));
+      return <article className={`batch-job-row ${done ? "complete" : itemFailed ? "failed" : ""}`} key={entry.id}>
+        <div className="batch-job-row-status">{done ? <CheckCircle2 size={17} /> : itemFailed ? <AlertTriangle size={17} /> : <LoaderCircle className="spin" size={17} />}<span>{index + 1}</span></div>
+        <div className="batch-job-row-copy"><strong title={entry.result?.filename || entry.message}>{entry.result?.filename || `Image ${index + 1}`}</strong><span>{done ? `${formatBytes(entry.result.bytes)} · ready` : itemFailed ? entry.error || "Conversion failed." : `${entry.stage || "Queued"} · ${progress}%`}</span></div>
+        {done && <a className="secondary-button" href={entry.result.downloadUrl} download={entry.result.filename}><Download size={16} /> Download</a>}
+      </article>;
+    })}</div>
+    <div className="job-actions"><button className="secondary-button" onClick={onReset}><RotateCcw size={17} /> {finished ? "Convert more images" : "Cancel batch"}</button></div>
+  </section>;
 }
 
 function VideoRecoverySummary({ hasServerReference, hasUntrunc }) {

@@ -46,7 +46,7 @@ function readPdfUpload(request) {
     parser.on("finish", () => {
       if (settled) return;
       if (!fileSeen) return fail(new Error("Add a PDF to inspect."));
-      if (truncated) return fail(new Error("The PDF is larger than the 50 MB limit."));
+      if (truncated) return fail(new Error("The PDF is larger than the 15 MB limit."));
       settled = true;
       resolve({ filename, bytes: Buffer.concat(chunks) });
     });

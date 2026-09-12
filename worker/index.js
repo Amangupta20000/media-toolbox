@@ -480,6 +480,7 @@ async function processImage(job) {
     filename: outputName,
     bytes: outputBytes,
     inputBytes: await bytes(job.source_path),
+    durationMs: null,
     width: outputMetadata.width,
     height: outputMetadata.height,
     quality: selectedQuality,
@@ -524,8 +525,9 @@ async function drawPdfImages(pdf, outputPage, operation, workDir, index) {
   const pageHeight = Number(operation.height) || outputPage.getHeight();
   for (const [imageIndex, imageOperation] of images.entries()) {
     const placement = imageOperation.placement || imageOperation.image;
-    if (!placement || ![placement.x, placement.y, placement.width, placement.height].every((value) => Number.isFinite(Number(value))) || placement.x < 0 || placement.y < 0 || placement.width <= 0 || placement.height <= 0 || placement.x + placement.width > pageWidth + 0.01 || placement.y + placement.height > pageHeight + 0.01) {
-      throw new Error(`Image ${imageIndex + 1} has invalid placement on PDF page.`);
+    const values = [placement?.x, placement?.y, placement?.width, placement?.height].map(Number);
+    if (!placement || !values.every(Number.isFinite) || values[2] <= 0 || values[3] <= 0 || values[0] < -100000 || values[1] < -100000 || values[0] + values[2] > 100000 || values[1] + values[3] > 100000) {
+      throw new Error(`Image ${imageIndex + 1} has an invalid placement on PDF page.`);
     }
     const image = await embedPdfImage(pdf, { imagePath: imageOperation.path, imageName: imageOperation.name, imageMime: imageOperation.mime }, workDir, `${index}-${imageIndex}`);
     outputPage.drawImage(image, {
@@ -543,8 +545,20 @@ async function processPdfEditor(job) {
   if (!Array.isArray(manifest.pdfs) || manifest.pdfs.length < 1 || !Array.isArray(manifest.pages) || manifest.pages.length < 1) throw new Error("The PDF editor project has no pages.");
 
   update(job.id, 5, "Reading PDFs", `Opening ${manifest.pdfs.length} PDF${manifest.pdfs.length === 1 ? "" : "s"}.`);
+  const referencedPdfIndices = new Set(
+    manifest.pages
+      .filter((operation) => operation?.kind === "source")
+      .map((operation) => Number(operation.pdfIndex)),
+  );
   const sourceDocuments = [];
-  for (const source of manifest.pdfs) {
+  for (const [index, source] of manifest.pdfs.entries()) {
+    // Password-protected pages are flattened in the browser before a Local or
+    // Server job is submitted. Do not try to open those original encrypted
+    // files here when none of their pages are copied directly.
+    if (!referencedPdfIndices.has(index)) {
+      sourceDocuments.push(null);
+      continue;
+    }
     try {
       sourceDocuments.push(await PDFDocument.load(await fsp.readFile(source.path)));
     } catch {
@@ -563,6 +577,7 @@ async function processPdfEditor(job) {
       if (!sourceDocument || !Number.isInteger(operation.pageIndex) || operation.pageIndex < 0 || operation.pageIndex >= sourceDocument.getPageCount()) throw new Error(`Source page ${index + 1} is no longer available.`);
       const [copiedPage] = await outputDocument.copyPages(sourceDocument, [operation.pageIndex]);
       outputDocument.addPage(copiedPage);
+      if ([0, 90, 180, 270].includes(Number(operation.rotation))) copiedPage.setRotation(degrees(Number(operation.rotation)));
       if ((Array.isArray(operation.images) && operation.images.length) || operation.imagePath) await drawPdfImages(outputDocument, copiedPage, operation, workDir, index);
       update(job.id, pageProgress, "Arranging pages", `Added page ${index + 1} of ${manifest.pages.length}.`);
       continue;
@@ -764,6 +779,7 @@ async function processVideo(job) {
     filename: outputName,
     bytes: outputBytes,
     inputBytes: await bytes(job.source_path),
+    durationMs: sourceDurationMs,
     method,
   };
   appendJobLog(job.id, `Created ${outputName} successfully.`, "complete");

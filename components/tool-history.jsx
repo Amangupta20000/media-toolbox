@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { AlertTriangle, Download, Eye, FileText, Film, Image as ImageIcon, Pencil, RefreshCw, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Download, Eye, FileText, Film, FolderOpen, Image as ImageIcon, Pencil, RefreshCw, Trash2, X } from "lucide-react";
 import { formatBytes } from "./file-dropzone.jsx";
 import { rememberHistoryEdit } from "./history-edit.js";
-import { deleteDownloadedFile, deleteLocalHistory, deleteServerHistory, getLocalHistory, getServerHistory, probeLocalAgent, probeServer } from "./processing-client.js";
+import { deleteDownloadedFile, deleteLocalHistory, deleteServerHistory, getLocalHistory, getServerHistory, openLocalResultsFolder, probeLocalAgent, probeServer } from "./processing-client.js";
 
 const toolNames = {
   "image-converter": "Image conversion",
@@ -29,6 +29,13 @@ export function ToolViewTabs({ value, onChange }) {
 function historyDate(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "Unknown date" : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+function formatDuration(value) {
+  const seconds = Math.round(Number(value) / 1000);
+  if (!Number.isFinite(seconds) || seconds <= 0) return "—";
+  if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
 
 async function loadLocalHistory(tool) {
@@ -72,6 +79,12 @@ export function ToolHistory({ tool }) {
   const [message, setMessage] = useState("");
   const [deletingId, setDeletingId] = useState("");
   const [previewItem, setPreviewItem] = useState(null);
+  const [openingResults, setOpeningResults] = useState(false);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sizeFilter, setSizeFilter] = useState("all");
+  const [durationFilter, setDurationFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("newest");
   const Icon = toolIcons[tool] || FileText;
 
   const loadHistory = async () => {
@@ -90,7 +103,29 @@ export function ToolHistory({ tool }) {
   const items = [
     ...(local.status === "ready" ? local.items : []).map((item) => ({ ...item, storage: "local" })),
     ...(server.status === "ready" ? server.items : []).map((item) => ({ ...item, storage: "server" })),
-  ].sort((left, right) => Number(right.updatedAt || right.createdAt || 0) - Number(left.updatedAt || left.createdAt || 0));
+  ];
+
+  const filteredItems = useMemo(() => {
+    const search = query.trim().toLowerCase();
+    const filtered = items.filter((item) => {
+      const result = item.result || {};
+      const bytes = Number(result.bytes || 0);
+      const duration = Number(result.durationMs || 0);
+      const haystack = `${result.filename || ""} ${item.location || ""} ${item.storage || ""}`.toLowerCase();
+      const sizeMatches = sizeFilter === "all" || (sizeFilter === "small" && bytes < 1024 * 1024) || (sizeFilter === "medium" && bytes >= 1024 * 1024 && bytes < 10 * 1024 * 1024) || (sizeFilter === "large" && bytes >= 10 * 1024 * 1024);
+      const durationMatches = durationFilter === "all" || (durationFilter === "short" && duration > 0 && duration < 60 * 1000) || (durationFilter === "medium" && duration >= 60 * 1000 && duration < 10 * 60 * 1000) || (durationFilter === "long" && duration >= 10 * 60 * 1000);
+      return (!search || haystack.includes(search)) && (statusFilter === "all" || item.status === statusFilter) && sizeMatches && durationMatches;
+    });
+    return filtered.sort((left, right) => {
+      const leftResult = left.result || {};
+      const rightResult = right.result || {};
+      if (sortBy === "oldest") return Number(left.updatedAt || left.createdAt || 0) - Number(right.updatedAt || right.createdAt || 0);
+      if (sortBy === "name") return String(leftResult.filename || "").localeCompare(String(rightResult.filename || ""));
+      if (sortBy === "size") return Number(rightResult.bytes || 0) - Number(leftResult.bytes || 0);
+      if (sortBy === "duration") return Number(rightResult.durationMs || 0) - Number(leftResult.durationMs || 0);
+      return Number(right.updatedAt || right.createdAt || 0) - Number(left.updatedAt || left.createdAt || 0);
+    });
+  }, [items, query, statusFilter, sizeFilter, durationFilter, sortBy]);
 
   const removeItem = async (item) => {
     const resultName = item.result?.filename || "this result";
@@ -130,6 +165,19 @@ export function ToolHistory({ tool }) {
   const localReady = local.status === "ready";
   const serverReady = server.status === "ready";
 
+  const openResultsFolder = async () => {
+    setOpeningResults(true);
+    setMessage("");
+    try {
+      const value = await openLocalResultsFolder();
+      setMessage(`Opened the Results folder${value.path ? `: ${value.path}` : "."}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The Results folder could not be opened.");
+    } finally {
+      setOpeningResults(false);
+    }
+  };
+
   const editItem = (item) => {
     const result = item.result || {};
     if (!result.downloadUrl) {
@@ -143,18 +191,20 @@ export function ToolHistory({ tool }) {
   return <section className="history-panel" aria-labelledby={`${tool}-history-title`}>
     <div className="history-panel-heading">
       <div><span className="section-kicker"><span className="kicker-line" /> Saved results</span><h2 id={`${tool}-history-title`}><Icon size={21} /> {toolNames[tool] || "Tool"} history</h2><p>Download or remove results kept by the Local agent or the server.</p></div>
-      <button className="secondary-button" type="button" onClick={loadHistory} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={16} /> Refresh</button>
+      <div className="history-heading-actions">{localReady && <button className="secondary-button" type="button" onClick={openResultsFolder} disabled={openingResults}><FolderOpen size={16} /> {openingResults ? "Opening…" : "Open Results folder"}</button>}<button className="secondary-button" type="button" onClick={loadHistory} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={16} /> Refresh</button></div>
     </div>
     {loading && <div className="history-empty"><RefreshCw className="spin" size={24} /><strong>Loading history</strong><span>Checking saved results on this device and the server.</span></div>}
     {!loading && !localReady && !serverReady && <div className="history-empty"><AlertTriangle size={22} /><strong>History is unavailable</strong><span>{local.message || server.message || "Connect to the server or authorize the Local agent to view saved results."}</span><Link className="secondary-button" href="/local-agent">Open Local agent setup</Link></div>}
     {!loading && local.status !== "ready" && <div className="history-source-note"><strong>{local.status === "unsupported" ? "Local history unavailable" : "Local agent"}</strong><span>{local.message || "Pair the Local agent to view files saved on this device."}</span><Link href="/local-agent">Open setup</Link></div>}
     {!loading && server.status !== "ready" && <div className="history-source-note"><strong>Server history unavailable</strong><span>{server.message || "The server did not respond."}</span></div>}
     {!loading && (localReady || serverReady) && !items.length && <div className="history-empty"><Icon size={25} /><strong>No saved results yet</strong><span>Local results appear only when “Keep final result on this device” is selected. Server results remain available until they are deleted or cleaned up.</span></div>}
-    {!loading && items.length > 0 && <div className="history-list">{items.map((item) => {
+    {!loading && (localReady || serverReady) && items.length > 0 && <div className="history-filters" aria-label="History filters"><label>Search<input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filename or location" /></label><label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="completed">Completed</option></select></label><label>File size<select value={sizeFilter} onChange={(event) => setSizeFilter(event.target.value)}><option value="all">Any size</option><option value="small">Under 1 MB</option><option value="medium">1–10 MB</option><option value="large">10 MB or more</option></select></label><label>Duration<select value={durationFilter} onChange={(event) => setDurationFilter(event.target.value)}><option value="all">Any duration</option><option value="short">Under 1 minute</option><option value="medium">1–10 minutes</option><option value="long">10 minutes or more</option></select></label><label>Sort<select value={sortBy} onChange={(event) => setSortBy(event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name</option><option value="size">Largest file</option><option value="duration">Longest duration</option></select></label></div>}
+    {!loading && (localReady || serverReady) && items.length > 0 && !filteredItems.length && <div className="history-empty history-filter-empty"><Icon size={25} /><strong>No matching results</strong><span>Change the search or filters to see saved results.</span></div>}
+    {!loading && filteredItems.length > 0 && <div className="history-list">{filteredItems.map((item) => {
       const result = item.result || {};
       return <article className="history-item" key={`${item.storage}-${item.id}`}>
         <div className="history-item-icon"><Icon size={19} /></div>
-        <div className="history-item-copy"><strong title={result.filename}>{result.filename || "Saved result"}</strong><span>{historyDate(item.updatedAt || item.createdAt)} · {formatBytes(result.bytes || 0)}</span><small>{item.location || (item.storage === "local" ? "Local agent Results folder" : "Server temporary storage")}</small></div>
+        <div className="history-item-copy"><strong title={result.filename}>{result.filename || "Saved result"}</strong><span>{historyDate(item.updatedAt || item.createdAt)} · {formatBytes(result.bytes || 0)} · {item.storage === "local" ? "Local" : "Server"}</span><small><span className="history-status-badge">{item.status || "completed"}</span>{tool === "video-repair" && ` · Duration ${formatDuration(result.durationMs)}`} · {item.location || (item.storage === "local" ? "Local agent Results folder" : "Server temporary storage")}</small></div>
         <div className="history-item-actions"><button className="icon-button history-preview-button" type="button" onClick={() => setPreviewItem(item)} aria-label={`Preview ${result.filename || "saved result"}`} title="Preview"><Eye size={17} /></button><a className="secondary-button" href={result.downloadUrl} download={result.filename}><Download size={16} /> Download</a><button className="icon-button history-delete-button" type="button" onClick={() => removeItem(item)} disabled={deletingId === item.id} aria-label={item.storage === "local" ? `Delete ${result.filename || "saved result"} from this device` : `Delete ${result.filename || "saved result"} from Downloads and server history`} title={item.storage === "local" ? "Delete from device" : "Delete from Downloads and server history"}><Trash2 size={17} /></button></div>
       </article>;
     })}</div>}

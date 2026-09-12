@@ -11,8 +11,9 @@ export default async function handler(request, response) {
   const jobDir = path.join(paths.jobs, id);
   await fsPromises.mkdir(jobDir, { recursive: true });
   try {
-    await acceptMultipartJob(request, { id, jobDir });
-    return response.status(202).json({ jobId: id, status: "queued" });
+    const result = await acceptMultipartJob(request, { id, jobDir });
+    const ids = result?.ids || [id];
+    return response.status(202).json({ ...(ids.length === 1 ? { jobId: ids[0] } : { jobIds: ids }), status: "queued" });
   } catch (error) {
     await fsPromises.rm(jobDir, { recursive: true, force: true });
     return response.status(400).json({ error: error instanceof Error ? error.message : "Upload failed." });

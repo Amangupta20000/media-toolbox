@@ -17,6 +17,7 @@ process.env.UNTRUNC_REFERENCE_PATH = "";
 
 const db = await import("../lib/db.js");
 const worker = await import("../worker/index.js");
+const { createJobFromMultipart } = await import("../lib/job-intake.js");
 
 after(async () => {
   await fs.rm(testRoot, { recursive: true, force: true });
@@ -209,6 +210,106 @@ test("image converter preserves pixels and reports JPEG transparency flattening"
   assert.equal(await sha256(sourcePath), sourceHash);
 });
 
+test("image intake accepts five images with independent output settings", async () => {
+  const imageTool = await firstAvailable(["magick", "convert"]);
+  if (!imageTool) return;
+  const convertCommand = imageTool === "magick" ? "magick" : "convert";
+  const jobDir = path.join(testRoot, "image-batch-intake");
+  await fs.mkdir(jobDir, { recursive: true });
+  const firstSource = path.join(jobDir, "first.png");
+  const secondSource = path.join(jobDir, "second.jpg");
+  await command(convertCommand, ["-size", "160x100", "xc:tomato", firstSource]);
+  await command(convertCommand, ["-size", "120x80", "xc:royalblue", secondSource]);
+
+  const result = await createJobFromMultipart({
+    id: crypto.randomUUID(),
+    jobDir,
+    fields: {
+      tool: "image-converter",
+      method: "imagemagick",
+      imageOptions: JSON.stringify([
+        { format: "jpeg", maxSizeKb: 64, jpegConfirmed: true },
+        { format: "png", maxSizeKb: "", jpegConfirmed: false },
+      ]),
+    },
+    files: [
+      { field: "source", name: "first.png", mime: "image/png", path: firstSource, size: (await fs.stat(firstSource)).size },
+      { field: "source", name: "second.jpg", mime: "image/jpeg", path: secondSource, size: (await fs.stat(secondSource)).size },
+    ],
+  });
+
+  assert.equal(result.ids.length, 2);
+  const firstJob = db.getJob(result.ids[0]);
+  const secondJob = db.getJob(result.ids[1]);
+  const firstOptions = JSON.parse(firstJob.options_json);
+  const secondOptions = JSON.parse(secondJob.options_json);
+  assert.equal(firstOptions.format, "jpeg");
+  assert.equal(firstOptions.maxSizeKb, 64);
+  assert.equal(firstOptions.jpegConfirmed, true);
+  assert.equal(secondOptions.format, "png");
+  assert.equal(secondOptions.maxSizeKb, undefined);
+  assert.notEqual(firstJob.source_path, secondJob.source_path);
+
+  await worker.processJob(firstJob);
+  await worker.processJob(secondJob);
+  const firstCompleted = db.getJob(result.ids[0]);
+  const secondCompleted = db.getJob(result.ids[1]);
+  assert.equal(firstCompleted.status, "completed");
+  assert.equal(secondCompleted.status, "completed");
+  assert.equal(JSON.parse(firstCompleted.result_json).outputFormat, "jpeg");
+  assert.equal(JSON.parse(secondCompleted.result_json).outputFormat, "png");
+
+  result.ids.forEach((id) => db.deleteJob(id));
+  await fs.rm(jobDir, { recursive: true, force: true });
+});
+
+test("image intake rejects more than five source images", async () => {
+  await assert.rejects(
+    () => createJobFromMultipart({
+      id: crypto.randomUUID(),
+      jobDir: testRoot,
+      fields: { tool: "image-converter", imageOptions: "[]" },
+      files: Array.from({ length: 6 }, (_, index) => ({ field: "source", name: `image-${index}.png`, mime: "image/png", path: path.join(testRoot, `image-${index}.png`), size: 1 })),
+    }),
+    /up to 5 images/i,
+  );
+});
+
+test("image jobs API returns one queued job ID per uploaded image", async () => {
+  const imageTool = await firstAvailable(["magick", "convert"]);
+  if (!imageTool) return;
+  const convertCommand = imageTool === "magick" ? "magick" : "convert";
+  const firstSource = path.join(testRoot, "api-batch-first.png");
+  const secondSource = path.join(testRoot, "api-batch-second.png");
+  await command(convertCommand, ["-size", "40x40", "xc:gold", firstSource]);
+  await command(convertCommand, ["-size", "50x30", "xc:purple", secondSource]);
+  const upload = multipartBody([
+    { name: "tool", data: "image-converter" },
+    { name: "method", data: "imagemagick" },
+    { name: "imageOptions", data: JSON.stringify([{ format: "png", jpegConfirmed: false }, { format: "jpeg", jpegConfirmed: true }]) },
+    { name: "source", filename: "api-batch-first.png", type: "image/png", data: await fs.readFile(firstSource) },
+    { name: "source", filename: "api-batch-second.png", type: "image/png", data: await fs.readFile(secondSource) },
+  ]);
+  const request = new PassThrough();
+  request.method = "POST";
+  request.headers = { "content-type": `multipart/form-data; boundary=${upload.boundary}` };
+  const response = mockJsonResponse();
+  const api = await import("../pages/api/jobs/index.js");
+  const requestPromise = api.default(request, response);
+  request.end(upload.body);
+  await requestPromise;
+
+  assert.equal(response.statusCode, 202);
+  assert.equal(response.payload.status, "queued");
+  assert.equal(response.payload.jobIds.length, 2);
+  const jobs = response.payload.jobIds.map((id) => db.getJob(id));
+  assert.equal(jobs.every((job) => job?.tool === "image-converter" && job.status === "queued"), true);
+  assert.deepEqual(jobs.map((job) => JSON.parse(job.options_json).format), ["png", "jpeg"]);
+  const jobDirectories = new Set(jobs.map((job) => path.dirname(path.dirname(job.source_path))));
+  for (const job of jobs) db.deleteJob(job.id);
+  for (const directory of jobDirectories) await fs.rm(directory, { recursive: true, force: true });
+});
+
 test("PDF editor reorders pages, creates a blank page with an image, and preserves the source", async (t) => {
   const sourcePath = path.join(testRoot, "single-source.pdf");
   await createPdf(sourcePath, "Single", [[300, 400], [500, 600]]);
@@ -266,12 +367,12 @@ test("PDF editor embeds multiple images on one blank page", async (t) => {
   await fs.writeFile(manifestPath, JSON.stringify({
     pdfs: [{ path: sourcePath, name: "multi-image-source.pdf", size: (await fs.stat(sourcePath)).size }],
     pages: [
-      { kind: "blank", width: 420, height: 560, rotation: 0, images: [
-        { path: imageOnePath, name: "inserted-one.png", mime: "image/png", placement: { x: 40, y: 60, width: 160, height: 80 } },
+      { kind: "blank", width: 420, height: 560, rotation: 270, images: [
+        { path: imageOnePath, name: "inserted-one.png", mime: "image/png", placement: { x: -25, y: 500, width: 160, height: 80 } },
         { path: imageTwoPath, name: "inserted-two.png", mime: "image/png", placement: { x: 220, y: 300, width: 100, height: 140 } },
       ] },
-      { kind: "source", pdfIndex: 0, pageIndex: 0, width: 420, height: 560, rotation: 0, images: [
-        { path: imageOnePath, name: "inserted-one.png", mime: "image/png", placement: { x: 120, y: 180, width: 160, height: 80 } },
+      { kind: "source", pdfIndex: 0, pageIndex: 0, width: 420, height: 560, rotation: 90, images: [
+        { path: imageOnePath, name: "inserted-one.png", mime: "image/png", placement: { x: 360, y: -20, width: 160, height: 80 } },
       ] },
     ],
   }));
@@ -284,6 +385,8 @@ test("PDF editor embeds multiple images on one blank page", async (t) => {
   assert.equal(completed.status, "completed");
   assert.equal(output.getPageCount(), 2);
   assert.equal(result.pageCount, 2);
+  assert.equal(output.getPage(0).getRotation().angle, 270);
+  assert.equal(output.getPage(1).getRotation().angle, 90);
 });
 
 test("PDF editor merges five PDFs in manifest order and keeps every source unchanged", async () => {
@@ -350,6 +453,16 @@ test("PDF editor rejects a sixth PDF and unsupported inserted images at upload v
   await invalidPromise;
   assert.equal(invalidResponse.statusCode, 400);
   assert.match(invalidResponse.payload.error, /not a supported image/i);
+
+  await assert.rejects(
+    () => createJobFromMultipart({
+      id: crypto.randomUUID(),
+      jobDir: testRoot,
+      fields: { tool: "pdf-editor", operations: JSON.stringify([{ kind: "source", pdfIndex: 0, pageIndex: 0 }]) },
+      files: [{ field: "pdf", name: "oversized.pdf", mime: "application/pdf", path: sourcePath, size: 15 * 1024 * 1024 + 1 }],
+    }),
+    /15 MB PDF limit/i,
+  );
 });
 
 test("PDF browser fallback inspection returns page metadata and rejects invalid files", async () => {
