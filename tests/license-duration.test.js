@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { activationDurationOptions, isAllowedActivationDuration } from "../lib/license-token.js";
+import { activationDurationOptions, isAllowedActivationDuration } from "../lib/token.js";
 
 test("activation duration allowlist contains only 10m, 30m, 2h, 6h, and 1d", () => {
   assert.deepEqual(activationDurationOptions().map(({ value, durationMs }) => ({ value, durationMs })), [

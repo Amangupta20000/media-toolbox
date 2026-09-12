@@ -160,8 +160,10 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   const dashboardCss = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard.css"), "utf8");
   const dashboardRenderer = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard-renderer.js"), "utf8");
   const dashboardPreload = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "preload.cjs"), "utf8");
+  const agentAuth = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "auth.js"), "utf8");
   const electronMain = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "electron-main.cjs"), "utf8");
   const agentPackage = JSON.parse(await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "package.json"), "utf8"));
+  const rootPackage = JSON.parse(await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8"));
   const builderConfig = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "electron-builder.yml"), "utf8");
   const updateConfig = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "build", "app-update.yml"), "utf8");
   const releaseWorkflow = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".github", "workflows", "agent-release.yml"), "utf8");
@@ -238,8 +240,9 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(releaseWorkflow, /npm ci --prefer-offline --no-audit --no-fund/);
   assert.doesNotMatch(releaseWorkflow, /npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund/);
   assert.match(releaseWorkflow, /Cache rebuilt agent-only dependencies/);
-  assert.match(releaseWorkflow, /agent-deps-\$\{\{ runner\.os \}\}-\$\{\{ runner\.arch \}\}-node22-electron37-/);
+  assert.match(releaseWorkflow, /agent-deps-\$\{\{ runner\.os \}\}-\$\{\{ runner\.arch \}\}-node22-electron37\.10\.3-abi136-/);
   assert.match(releaseWorkflow, /electron-rebuild --version 37\.10\.3 --parallel/);
+  assert.match(rootPackage.scripts["agent:package"], /package-agent\.mjs/);
   assert.match(builderConfig, /nativeRebuilder: parallel/);
   assert.match(builderConfig, /npmRebuild: false/);
   assert.doesNotMatch(releaseWorkflow, /linux-target:/);
@@ -278,7 +281,9 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardHtml, /id="refresh-sessions"/);
   assert.match(dashboardRenderer, /Connected sessions refreshed\./);
   assert.match(builderConfig, /from: license-server\n    to: license-server/);
-  assert.match(builderConfig, /from: lib\/license-token\.js\n    to: lib\/license-token\.js/);
+  assert.match(agentAuth, /from "\.\/token\.js"/);
+  assert.match(builderConfig, /- agent\/\*\*\/\*/);
+  assert.match(builderConfig, /from: lib\/token\.js\n    to: lib\/token\.js/);
   assert.match(builderConfig, /from: node_modules\/better-sqlite3\n    to: node_modules\/better-sqlite3/);
   assert.match(builderConfig, /from: node_modules\/bindings\n    to: node_modules\/bindings/);
   assert.match(builderConfig, /from: node_modules\/file-uri-to-path\n    to: node_modules\/file-uri-to-path/);

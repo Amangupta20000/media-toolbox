@@ -31,6 +31,7 @@ for (const file of [
   "agent/index.js",
   "agent/server.js",
   "agent/auth.js",
+  "agent/token.js",
   "agent/tls.js",
   "agent/preload.cjs",
   "agent/dashboard.html",

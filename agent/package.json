@@ -1,6 +1,6 @@
 {
   "name": "media-toolbox-agent-runtime",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "private": true,
   "description": "Runtime and packaging dependencies for the Media Toolbox desktop agent.",
   "homepage": "https://media-toolbox-woad.vercel.app",
@@ -25,6 +25,7 @@
     "sharp": "^0.35.4"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
     "electron": "^37.2.6",
     "electron-builder": "^26.0.12"
   }

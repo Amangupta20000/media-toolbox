@@ -17,6 +17,9 @@ files:
   # separate Terminal or Node installation. It is only exposed through the
   # fixed Electron IPC action and still binds to loopback.
   - lib/**/*
+  # Keep this shared runtime module explicit because agent/auth.js imports it
+  # from inside app.asar at startup.
+  - lib/token.js
   - worker/**/*
   - vendor/untrunc/**/*
   - components/processing-client.js
@@ -133,8 +136,8 @@ extraResources:
     to: license-server
   # The external licensing server imports this shared token module by its
   # relative ../lib path. Keep that one shared module beside it as well.
-  - from: lib/license-token.js
-    to: lib/license-token.js
+  - from: lib/token.js
+    to: lib/token.js
   # The external licensing server runs from Resources/license-server rather
   # than app.asar. Keep its native SQLite package and its runtime CommonJS
   # dependencies in a real Resources/node_modules tree so Node's ESM package

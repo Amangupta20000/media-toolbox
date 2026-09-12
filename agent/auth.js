@@ -5,7 +5,7 @@ import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual, verif
 import { fileURLToPath } from "node:url";
 import { config, paths } from "../lib/config.js";
 import { createAgentAuth, getAgentAuth, hasUsedAgentLicense, recordUsedAgentLicense, updateAgentAuth } from "../lib/db.js";
-import { activationDurationOptions, isAllowedActivationDuration, verifyLicenseToken } from "../lib/license-token.js";
+import { activationDurationOptions, isAllowedActivationDuration, verifyLicenseToken } from "./token.js";
 
 export const ADMIN_USERNAME = "Admin";
 export const ADMIN_PASSWORD = "Aman";

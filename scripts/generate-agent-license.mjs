@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { generateKeyPair as createKeyPair, randomUUID, sign } from "node:crypto";
-import { activationDurationOptions } from "../lib/license-token.js";
+import { activationDurationOptions } from "../lib/token.js";
 
 const keyDirectory = path.join(os.homedir(), ".config", "media-toolbox");
 const defaultPrivateKeyPath = path.join(keyDirectory, "agent-license-private.pem");

@@ -1,6 +1,6 @@
 import http from "node:http";
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
-import { activationDurationOptions, createSignedLicenseToken, isAllowedActivationDuration, licenseCodeHash, verifyLicenseToken, ACTIVATION_DURATION_MS } from "../lib/license-token.js";
+import { activationDurationOptions, createSignedLicenseToken, isAllowedActivationDuration, licenseCodeHash, verifyLicenseToken, ACTIVATION_DURATION_MS } from "../lib/token.js";
 import { DEFAULT_ADMIN_PASSWORD, licenseConfig } from "./config.js";
 import { createLicenseStore } from "./store.js";
 import { loadPrivateKey, publicKeyFor, encryptText, decryptText } from "./secrets.js";

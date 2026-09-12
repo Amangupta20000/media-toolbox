@@ -21,7 +21,7 @@
     "worker": "node worker/index.js",
     "agent:dev": "node agent/index.js",
     "agent": "electron agent/electron-main.cjs",
-    "agent:package": "electron-builder --config electron-builder.yml",
+    "agent:package": "node scripts/package-agent.mjs",
     "agent:update-keygen": "node scripts/generate-agent-runtime-update-key.mjs",
     "agent:license-keygen": "node scripts/generate-agent-license.mjs --keygen",
     "agent:license": "node scripts/generate-agent-license.mjs",
