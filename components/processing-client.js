@@ -129,32 +129,32 @@ function storeAgentSession(value) {
   if (value.sessionId) window.localStorage.setItem(SESSION_ID_KEY, value.sessionId);
 }
 
+export async function ensureLocalAgentSession() {
+  const token = storedAgentToken();
+  if (token) return token;
+  const { payload: session } = await fetchLocalJson("/v1/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ origin: window.location.origin, clientLabel: browserSessionLabel() }),
+  });
+  storeAgentSession(session);
+  return storedAgentToken();
+}
+
 export async function probeLocalAgent() {
   const { payload: health, base } = await fetchLocalJson("/v1/health");
   let token = storedAgentToken();
-  if (!token) {
-    try {
-      const { payload: session } = await fetchLocalJson("/v1/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ origin: window.location.origin, clientLabel: browserSessionLabel() }),
-      });
-      storeAgentSession(session);
-      token = storedAgentToken();
-    } catch (error) {
-      return { available: true, connected: false, health, capabilities: null, authorization: error?.authorization || health?.authorization, baseUrl: base, error: error?.message || "The local agent session could not be created.", code: error?.code || "" };
-    }
-  }
-  if (!token) return { available: true, connected: false, health, capabilities: null, authorization: health?.authorization, baseUrl: base };
+  const readyWithoutSession = Boolean(health.processingAvailable || health.trialAvailable);
+  if (!token) return { available: true, connected: false, ready: readyWithoutSession, health, capabilities: null, authorization: health?.authorization, baseUrl: base };
   try {
     const { payload: capabilities } = await fetchLocalJson("/v1/capabilities", { headers: { Authorization: `Bearer ${token}` } });
-    return { available: true, connected: true, health, capabilities, authorization: health?.authorization, baseUrl: base };
+    return { available: true, connected: true, ready: true, health, capabilities, authorization: health?.authorization, baseUrl: base };
   } catch (error) {
     const sessionRejected = error?.status === 401 || error?.status === 402 || (error?.status === 403 && /origin is not trusted|not paired/i.test(error.message || ""));
     if (sessionRejected) {
       clearAgentPairing();
     }
-    return { available: true, connected: false, health, capabilities: null, authorization: error?.authorization || health?.authorization, baseUrl: base, error: error?.message || "The local agent capabilities could not be read.", sessionRejected };
+    return { available: true, connected: false, ready: readyWithoutSession, health, capabilities: null, authorization: error?.authorization || health?.authorization, baseUrl: base, error: error?.message || "The local agent capabilities could not be read.", sessionRejected };
   }
 }
 
@@ -193,7 +193,7 @@ function endpoint(mode, path) {
 }
 
 export function uploadWithProgress(form, mode, onProgress) {
-  return new Promise((resolve, reject) => {
+  const startUpload = () => new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", endpoint(mode, "/jobs"));
     if (mode === "local") xhr.setRequestHeader("Authorization", `Bearer ${storedAgentToken()}`);
@@ -207,6 +207,10 @@ export function uploadWithProgress(form, mode, onProgress) {
     };
     xhr.send(form);
   });
+  return (async () => {
+    if (mode === "local") await ensureLocalAgentSession();
+    return startUpload();
+  })();
 }
 
 export async function getProcessingJob(mode, id) {
@@ -265,7 +269,7 @@ export function processingCapabilities(locations, mode) {
 }
 
 export function isProcessingLocationReady(locations, mode) {
-  return Boolean(locations?.[mode]?.connected);
+  return Boolean(locations?.[mode]?.connected || locations?.[mode]?.ready);
 }
 
 export function resultUrlForMode(mode, result, kind = "download") {

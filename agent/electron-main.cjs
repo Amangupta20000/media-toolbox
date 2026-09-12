@@ -43,6 +43,10 @@ if (!app.requestSingleInstanceLock()) {
       const value = agent.loginAdmin(String(username || ""), String(password || ""));
       return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
     });
+    ipcMain.handle("agent:accept-legal", () => {
+      const value = agent.acceptLegal();
+      return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
+    });
     ipcMain.handle("agent:logout", () => {
       agent.logoutAdmin();
       return agent.getManagementState();

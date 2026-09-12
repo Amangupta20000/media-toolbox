@@ -9,6 +9,7 @@ import { createAgentAuth, getAgentAuth, hasUsedAgentLicense, recordUsedAgentLice
 export const ADMIN_USERNAME = "Admin";
 export const TRIAL_DURATION_MS = 5 * 60 * 1000;
 export const ACTIVATION_DURATION_MS = 10 * 60 * 1000;
+export const LEGAL_VERSION = "1.0.0";
 
 const DEFAULT_ORIGINS = [
   "https://media-toolbox-woad.vercel.app",
@@ -95,7 +96,17 @@ function clearExpiredAuthorization(record, now) {
   return record;
 }
 
-function authorizationMode(record, now) {
+function hasLegalConsent(record) {
+  return Boolean(
+    record.privacy_accepted_at &&
+    record.terms_accepted_at &&
+    record.privacy_version === LEGAL_VERSION &&
+    record.terms_version === LEGAL_VERSION,
+  );
+}
+
+function authorizationMode(record, now, legalAccepted = hasLegalConsent(record)) {
+  if (!legalAccepted) return "locked";
   if (record.admin_unlocked) return "admin";
   if (record.activation_expires_at && record.activation_expires_at > now) return "activation";
   if (record.trial_started_at && record.trial_started_at + TRIAL_DURATION_MS > now) return "trial";
@@ -105,29 +116,57 @@ function authorizationMode(record, now) {
 export function getAuthorizationState(now = Date.now()) {
   let record = ensureAgentAuth();
   record = clearExpiredAuthorization(record, now);
-  const mode = authorizationMode(record, now);
+  const legalAccepted = hasLegalConsent(record);
+  const mode = authorizationMode(record, now, legalAccepted);
   const trialExpiresAt = record.trial_started_at ? record.trial_started_at + TRIAL_DURATION_MS : null;
   const activeActivation = mode === "activation";
   const trustedOrigins = activeActivation
     ? (JSON.parse(record.activation_origins_json || "[]").filter(Boolean))
     : defaultTrustedOrigins();
   const expiresAt = mode === "trial" ? trialExpiresAt : activeActivation ? record.activation_expires_at : null;
+  const trialAvailable = !record.trial_started_at && !record.trial_consumed;
   return {
     mode,
     authorized: mode !== "locked",
-    reason: mode === "locked" ? (record.trial_consumed || record.trial_started_at ? "trial_expired" : "authorization_required") : "authorized",
+    reason: mode === "locked" ? (!legalAccepted ? "legal_consent_required" : record.trial_consumed || record.trial_started_at ? "trial_expired" : "authorization_required") : "authorized",
+    legalAccepted,
+    legalVersion: legalAccepted ? LEGAL_VERSION : null,
+    legalAcceptedAt: legalAccepted ? Math.min(record.privacy_accepted_at, record.terms_accepted_at) : null,
     deviceId: record.device_id,
     username: record.username,
     adminUnlocked: Boolean(record.admin_unlocked),
     trustedOrigins,
     trialStartedAt: record.trial_started_at || null,
     trialExpiresAt,
+    trialAvailable,
     activationId: activeActivation ? record.activation_id : null,
     activationStartedAt: activeActivation ? record.activation_started_at : null,
     activationExpiresAt: activeActivation ? record.activation_expires_at : null,
     expiresAt,
     remainingMs: expiresAt ? Math.max(0, expiresAt - now) : null,
   };
+}
+
+export function acceptLegalConsent(now = Date.now()) {
+  // The desktop dashboard can be opened before the first health request, so
+  // initialize the persistent auth row before recording consent.
+  ensureAgentAuth();
+  updateAgentAuth({
+    privacyAcceptedAt: now,
+    privacyVersion: LEGAL_VERSION,
+    termsAcceptedAt: now,
+    termsVersion: LEGAL_VERSION,
+  });
+  return getAuthorizationState(now);
+}
+
+function requireLegalConsent() {
+  const state = getAuthorizationState();
+  if (state.legalAccepted) return state;
+  const error = new Error("Accept the Privacy Policy and Terms & Conditions in the local agent dashboard before continuing.");
+  error.code = "legal_consent_required";
+  error.authorization = state;
+  throw error;
 }
 
 export function isTrustedOrigin(origin, state = getAuthorizationState()) {
@@ -138,10 +177,11 @@ export function isTrustedOrigin(origin, state = getAuthorizationState()) {
 export function authorizeProcessing(origin, now = Date.now()) {
   let state = getAuthorizationState(now);
   if (!isTrustedOrigin(origin, state)) return { ok: false, code: "origin_not_trusted", state };
+  if (!state.legalAccepted) return { ok: false, code: "legal_consent_required", state };
   if (state.authorized) return { ok: true, state };
 
   const record = ensureAgentAuth();
-  if (!record.trial_started_at) {
+  if (!record.trial_started_at && !record.trial_consumed) {
     updateAgentAuth({ trialStartedAt: now, trialConsumed: 1 });
     state = getAuthorizationState(now);
     return { ok: true, state };
@@ -150,6 +190,7 @@ export function authorizeProcessing(origin, now = Date.now()) {
 }
 
 export function loginAdmin(username, password) {
+  requireLegalConsent();
   const record = ensureAgentAuth();
   const valid = String(username || "") === record.username && passwordMatches(password, record.password_salt, record.password_hash);
   if (!valid) throw new Error("The Admin username or password is incorrect.");
@@ -186,9 +227,13 @@ function parseActivationCode(code) {
 }
 
 export function activate(code, now = Date.now()) {
+  requireLegalConsent();
   const record = ensureAgentAuth();
   const payload = parseActivationCode(code);
-  if (payload.v !== 1 || typeof payload.licenseId !== "string" || typeof payload.deviceId !== "string") throw new Error("The activation code format is invalid.");
+  if (payload.v !== 1 || typeof payload.licenseId !== "string") throw new Error("The activation code format is invalid.");
+  // The local used-license table prevents replay on this installation. The
+  // device binding prevents the same signed code being copied elsewhere.
+  if (typeof payload.deviceId !== "string" || !payload.deviceId.trim()) throw new Error("This activation code is not bound to a device.");
   if (payload.deviceId !== record.device_id) throw new Error("This activation code belongs to a different device.");
   if (payload.durationMs !== ACTIVATION_DURATION_MS) throw new Error("This activation code does not contain a 10-minute license.");
   if (!Array.isArray(payload.origins) || !normalizeOrigins(payload.origins).length) throw new Error("The activation code has no valid trusted website origins.");

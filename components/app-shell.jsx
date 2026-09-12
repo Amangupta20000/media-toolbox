@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { Bot, Film, FileText, Image as ImageIcon, Menu, Moon, PanelLeftClose, PanelLeftOpen, ShieldCheck, Sparkles, Sun } from "lucide-react";
+import { Bot, Clock3, Film, FileText, Image as ImageIcon, Menu, Moon, PanelLeftClose, PanelLeftOpen, ShieldCheck, Sparkles, Sun } from "lucide-react";
 import { probeLocalAgent } from "./processing-client.js";
 
 const navigation = [
@@ -15,12 +15,34 @@ const navigation = [
 
 const comingSoonNavigation = { href: "/coming-soon", label: "Coming soon", detail: "More tools in progress", icon: Sparkles };
 
+function accessTimerFor(authorization, now, trialAvailable = false) {
+  if (!authorization) return null;
+  if (authorization.mode === "admin") return { label: "Access", value: "Unlimited", state: "admin" };
+
+  if (authorization.mode === "trial" || authorization.mode === "activation") {
+    const expiresAt = Number(authorization.expiresAt || 0);
+    const remainingMs = expiresAt
+      ? Math.max(0, expiresAt - now)
+      : Math.max(0, Number(authorization.remainingMs || 0));
+    if (!remainingMs) return { label: authorization.mode === "trial" ? "Trial" : "Access", value: "Expired", state: "expired" };
+
+    const totalSeconds = Math.ceil(remainingMs / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = String(totalSeconds % 60).padStart(2, "0");
+    return { label: authorization.mode === "trial" ? "Trial" : "Access", value: `${minutes}:${seconds}`, state: authorization.mode };
+  }
+
+  if (authorization.legalAccepted && (authorization.trialAvailable || trialAvailable)) return { label: "Trial", value: "Ready", state: "available" };
+  return { label: "Access", value: "Locked", state: "locked" };
+}
+
 export function AppShell({ children }) {
   const { pathname } = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [theme, setTheme] = useState("light");
-  const [localAgentConnected, setLocalAgentConnected] = useState(false);
+  const [localAgentStatus, setLocalAgentStatus] = useState({ available: false, connected: false });
+  const [timerNow, setTimerNow] = useState(() => Date.now());
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("media-toolbox-theme");
@@ -32,11 +54,11 @@ export function AppShell({ children }) {
   useEffect(() => {
     let active = true;
     const handleAgentStatus = (event) => {
-      if (active) setLocalAgentConnected(Boolean(event.detail?.connected));
+      if (active) setLocalAgentStatus(event.detail || { available: false, connected: false });
     };
     window.addEventListener("media-toolbox-agent-status", handleAgentStatus);
 
-    const check = () => probeLocalAgent().then((value) => { if (active) setLocalAgentConnected(Boolean(value.connected)); }).catch(() => { if (active) setLocalAgentConnected(false); });
+    const check = () => probeLocalAgent().then((value) => { if (active) setLocalAgentStatus(value); }).catch(() => { if (active) setLocalAgentStatus({ available: false, connected: false }); });
     check();
 
     // The local-agent page owns its pairing checks. This shell only does one
@@ -46,6 +68,15 @@ export function AppShell({ children }) {
       window.removeEventListener("media-toolbox-agent-status", handleAgentStatus);
     };
   }, [pathname]);
+
+  const authorization = localAgentStatus.authorization || localAgentStatus.health?.authorization;
+  const accessTimer = accessTimerFor(authorization, timerNow, localAgentStatus.health?.trialAvailable);
+
+  useEffect(() => {
+    if (!authorization?.expiresAt) return undefined;
+    const timer = window.setInterval(() => setTimerNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [authorization?.expiresAt]);
 
   const toggleTheme = () => {
     setTheme((currentTheme) => {
@@ -93,7 +124,7 @@ export function AppShell({ children }) {
       <header className="topbar">
         <button className="mobile-menu-button" aria-label="Open tools" onClick={() => setMobileOpen(true)}><Menu size={21} /></button>
         <div className="topbar-context"><span className="eyebrow">Workspace</span><span className="topbar-title">Secure media utilities</span></div>
-        <div className="topbar-actions"><button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}<span>{theme === "dark" ? "Light mode" : "Dark mode"}</span></button><Link href="/local-agent" className="topbar-status"><span className={`status-pulse ${localAgentConnected ? "connected" : ""}`} /> {localAgentConnected ? "Agent connected" : "Agent setup"}</Link></div>
+        <div className="topbar-actions"><button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}<span>{theme === "dark" ? "Light mode" : "Dark mode"}</span></button><Link href="/local-agent" className={`topbar-status ${localAgentStatus.connected ? "connected" : ""}`} aria-label={localAgentStatus.connected ? "Open connected local agent" : "Open local agent setup"}><span className={`status-pulse ${localAgentStatus.connected ? "connected" : ""}`} /><span>{localAgentStatus.connected ? "Agent connected" : "Agent setup"}</span></Link>{accessTimer && <div className={`agent-access-timer ${accessTimer.state}`} title={`${accessTimer.label}: ${accessTimer.value}`} aria-label={`${accessTimer.label} ${accessTimer.value}`}><Clock3 size={15} /><span className="timer-label">{accessTimer.label}</span><strong>{accessTimer.value}</strong></div>}</div>
       </header>
       <div className="content-wrap">{children}</div>
     </main>

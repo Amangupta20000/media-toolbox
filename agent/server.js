@@ -11,7 +11,7 @@ import { config, paths } from "../lib/config.js";
 import { acceptMultipartJob } from "../lib/job-intake.js";
 import { firstAvailable, runCommand } from "../lib/command.js";
 import { processJob, writeCapabilities } from "../worker/index.js";
-import { activate as activateAgent, authorizeProcessing, ensureAgentAuth, getAuthorizationState, getDeviceId as getDeviceIdFromAuth, loginAdmin as loginAdminAgent, logoutAdmin as logoutAdminAgent } from "./auth.js";
+import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, authorizeProcessing, ensureAgentAuth, getAuthorizationState, getDeviceId as getDeviceIdFromAuth, loginAdmin as loginAdminAgent, logoutAdmin as logoutAdminAgent } from "./auth.js";
 
 const AGENT_VERSION = process.env.AGENT_VERSION || "0.2.1";
 const PROTOCOL_VERSION = 1;
@@ -56,6 +56,14 @@ function authorizationRequired(response, request, origin, authorization = getAut
   return json(response, 402, {
     error: "Admin login or activation required.",
     code: "activation_required",
+    authorization: publicAuthorization(authorization),
+  }, request, origin);
+}
+
+function legalConsentRequired(response, request, origin, authorization = getAuthorizationState()) {
+  return json(response, 402, {
+    error: "Accept the Privacy Policy and Terms & Conditions in the local agent dashboard before continuing.",
+    code: "legal_consent_required",
     authorization: publicAuthorization(authorization),
   }, request, origin);
 }
@@ -444,6 +452,7 @@ async function handle(request, response) {
       sessionCount,
       trustedOrigin,
       processingAvailable: authorization.authorized && trustedOrigin,
+      trialAvailable: Boolean(authorization.legalAccepted && authorization.trialAvailable && trustedOrigin),
       authorization: publicAuthorization(authorization),
     }, request, origin || request.headers.origin || null);
   }
@@ -455,6 +464,7 @@ async function handle(request, response) {
       const access = authorizeProcessing(requestedOrigin);
       if (!access.ok) {
         if (access.code === "origin_not_trusted") return json(response, 403, { error: "This website origin is not trusted by the local agent.", code: access.code, authorization: publicAuthorization(access.state) }, request, origin || request.headers.origin || null);
+        if (access.code === "legal_consent_required") return legalConsentRequired(response, request, origin || request.headers.origin || null, access.state);
         return authorizationRequired(response, request, origin || request.headers.origin || null, access.state);
       }
       const { token, session } = issueSession(requestedOrigin, body.clientLabel);
@@ -477,6 +487,7 @@ async function handle(request, response) {
       const access = authorizeProcessing(requestedOrigin);
       if (!access.ok) {
         if (access.code === "origin_not_trusted") return json(response, 403, { error: "This website origin is not trusted by the local agent.", code: access.code, authorization: publicAuthorization(access.state) }, request, origin);
+        if (access.code === "legal_consent_required") return legalConsentRequired(response, request, origin, access.state);
         return authorizationRequired(response, request, origin, access.state);
       }
       const { token, session } = issueSession(requestedOrigin, body.clientLabel);
@@ -488,6 +499,7 @@ async function handle(request, response) {
 
   if (!authorization.authorized) {
     const hasToken = Boolean(tokenFrom(request, url));
+    if (authorization.reason === "legal_consent_required") return legalConsentRequired(response, request, origin, authorization);
     return hasToken
       ? authorizationRequired(response, request, origin, authorization)
       : json(response, 401, { error: "Create a local agent session before accessing this resource.", code: "session_required", authorization: publicAuthorization(authorization) }, request, origin);
@@ -623,6 +635,12 @@ export function getAgentState() {
 
 export function loginAdmin(username, password) {
   const authorization = loginAdminAgent(username, password);
+  rebuildAllowedOrigins();
+  return authorization;
+}
+
+export function acceptLegal() {
+  const authorization = acceptLegalConsentAgent();
   rebuildAllowedOrigins();
   return authorization;
 }

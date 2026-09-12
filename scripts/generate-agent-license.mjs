@@ -51,13 +51,12 @@ async function keygen() {
 }
 
 async function createLicense() {
-  const deviceId = arg("--device-id");
   const duration = arg("--duration", "10m");
+  const deviceId = arg("--device-id").trim();
   const origins = arg("--origins").split(",").map((value) => value.trim()).filter(Boolean);
   const privatePath = path.resolve(arg("--private-key", process.env.AGENT_LICENSE_PRIVATE_KEY_FILE || defaultPrivateKeyPath));
-  if (!deviceId) throw new Error("Usage: npm run agent:license -- --device-id <device-id> --duration 10m --origins <origin1,origin2>");
   if (duration !== "10m") throw new Error("Only --duration 10m is supported.");
-  if (!origins.length) throw new Error("Provide at least one trusted origin with --origins.");
+  if (!deviceId || !origins.length) throw new Error("Usage: npm run agent:license -- --device-id <device-id> --duration 10m --origins <origin1,origin2>");
   const privateKey = await fs.readFile(privatePath, "utf8");
   const payload = {
     v: 1,

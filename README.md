@@ -23,7 +23,9 @@ Private image conversion, video repair, and PDF editing tools. The website runs 
 
 The Local agent is an optional desktop application for macOS, Windows, and Linux. It runs the same worker functions as the server, listens only on `127.0.0.1:4789`, starts at login after installation, and processes one job at a time. Packaged agents use a per-install HTTPS certificate on the loopback endpoint so an HTTPS production website can connect in Safari without a mixed-content block; the installer adds that certificate to the user's trust store where the platform supports it. A trusted browser can upload to it without sending the source files to the server. The agent never accepts shell commands or arbitrary filesystem paths from the website; its download-delete action accepts only a named regular file inside the user's Downloads folder.
 
-The Local agent dashboard owns local processing authorization. Every installation provisions the fixed Admin account (`Admin` / `12345`), keeps the Admin unlock across restarts until logout, and provides one persistent five-minute trial. An owner can generate a device-bound, signed ten-minute activation code with the license commands below. The website never collects these credentials or codes.
+The Local agent dashboard owns local processing authorization. Every installation provisions the fixed Admin account (`Admin` / `12345`), keeps the Admin unlock across restarts until logout, and provides one persistent five-minute trial. The trial starts only when the first local processing session is requested; opening the website or checking agent health does not consume it. An owner can generate a signed, origin-scoped ten-minute activation code bound to one installation's Device ID. The same code cannot be reused on another installation or replayed after it has been consumed. The website never collects these credentials or codes.
+
+On first use, the desktop dashboard requires acceptance of the bundled Privacy Policy and Terms & Conditions before Admin login, activation, or the trial can start. This consent is stored locally with the agent's authorization record and is not sent to the website. Processing requests made before acceptance are rejected until the user accepts both documents in the dashboard.
 
 Start the development agent in a second terminal:
 
@@ -61,7 +63,17 @@ The command-line equivalent is:
 gh variable set AGENT_LICENSE_PUBLIC_KEY --repo Amangupta20000/media-toolbox < ~/.config/media-toolbox/agent-license-public.pem
 ```
 
-The release workflow reads that public variable and embeds it in every packaged agent. It does not read or need the private key. For local development, set `AGENT_LICENSE_PUBLIC_KEY_FILE` to the public PEM path if it is not in `~/.config/media-toolbox/`. The device ID needed for `agent:license` is shown in the desktop agent dashboard.
+The release workflow reads that public variable and embeds it in every packaged agent. It does not read or need the private key. For local development, set `AGENT_LICENSE_PUBLIC_KEY_FILE` to the public PEM path if it is not in `~/.config/media-toolbox/`. The desktop dashboard shows the Device ID required for activation-code generation. Keep it private and send it to the owner through a private channel; it is not a password, and the website does not receive it.
+
+### Owner and user activation flow
+
+1. The user installs and opens the Local agent. The dashboard shows the agent's trusted website origin, authorization state, and Device ID.
+2. The user copies the Device ID and sends it to the owner through a private channel.
+3. The owner runs `npm run agent:license -- --device-id <device-id> --duration 10m --origins <origin1,origin2>` on the owner computer. The command prints one signed `MT1-...` activation code.
+4. The owner sends that code to the user through a private channel such as email or chat. The user enters it only in the Local agent desktop dashboard.
+5. The agent verifies the signature locally, checks the device binding, trusted origin, and one-use license ID, then authorizes local processing for ten minutes. The website receives only a short-lived local browser session token.
+
+There is no central licensing server in this design. The private signing key stays with the owner, while the code contains the recipient installation's Device ID. Therefore one code is valid for one installation only and is rejected if copied to another installation or submitted again after use. If a code is exposed before use, generate a new code and do not share the exposed one.
 
 For a Vercel frontend that uses the Local agent, set only `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_AGENT_URL` (`http://127.0.0.1:4789` for local HTTP development; secure production pages automatically use `https://127.0.0.1:4789`), `NEXT_PUBLIC_AGENT_RELEASES_URL`, and `NEXT_PUBLIC_MACOS_AGENT_SIGNED`. Do not set `NEXT_PUBLIC_AGENT_URL` to a cloud URL: the browser must reach the agent on the same computer. Users must install the latest agent release for Safari production access. The Vercel filesystem is ephemeral and Vercel does not run the separate worker process, so server processing and server history require a persistent backend deployment such as the Docker deployment described below.
 

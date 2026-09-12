@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import test, { after, before } from "node:test";
 import { firstAvailable, runCommand } from "../lib/command.js";
 
@@ -30,7 +32,8 @@ after(async () => {
 const url = (pathName) => `http://127.0.0.1:${port}${pathName}`;
 const encodeLicensePart = (value) => Buffer.from(value).toString("base64").replace(/=+$/g, "");
 const makeActivationCode = ({ deviceId = agent.getDeviceId(), origins = ["http://localhost:3000", "http://127.0.0.1:3000"], issuedAt = Date.now(), durationMs = 10 * 60 * 1000 } = {}) => {
-  const payload = { v: 1, licenseId: randomUUID(), deviceId, origins, issuedAt, durationMs };
+  const payload = { v: 1, licenseId: randomUUID(), origins, issuedAt, durationMs };
+  if (deviceId) payload.deviceId = deviceId;
   const payloadText = encodeLicensePart(JSON.stringify(payload));
   const signature = encodeLicensePart(sign(null, Buffer.from(payloadText), licenseKeys.privateKey));
   return `MT1-${`${payloadText}.${signature}`.match(/.{1,4}/g).join("-")}`;
@@ -41,6 +44,34 @@ test("agent starts a persistent five-minute trial without login or activation", 
   const initialState = await initialHealth.json();
   assert.equal(initialState.authorization.mode, "locked");
   assert.equal(initialState.authorization.authorized, false);
+  assert.equal(initialState.authorization.legalAccepted, false);
+  assert.equal(initialState.authorization.reason, "legal_consent_required");
+  assert.equal(initialState.authorization.trialAvailable, true);
+  assert.equal(initialState.authorization.trialStartedAt, null);
+  assert.equal(initialState.trialAvailable, false);
+  assert.throws(() => agent.loginAdmin("Admin", "12345"), /Privacy Policy|Terms/i);
+
+  const blockedSession = await fetch(url("/v1/session"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
+    body: JSON.stringify({ origin: "http://localhost:3000", clientLabel: "Before consent" }),
+  });
+  assert.equal(blockedSession.status, 402);
+  assert.equal((await blockedSession.json()).code, "legal_consent_required");
+
+  const accepted = agent.acceptLegal();
+  assert.equal(accepted.legalAccepted, true);
+  assert.equal(accepted.legalVersion, "1.0.0");
+  assert.equal(accepted.mode, "locked");
+
+  // Repeated health checks are discovery only. They must never consume the
+  // installation trial or create a browser session.
+  const secondHealth = await fetch(url("/v1/health"), { headers: { Origin: "http://localhost:3000" } });
+  const secondState = await secondHealth.json();
+  assert.equal(secondState.authorization.legalAccepted, true);
+  assert.equal(secondState.authorization.trialStartedAt, null);
+  assert.equal(secondState.trialAvailable, true);
+  assert.equal(secondState.sessionCount, 0);
 
   const noSessionCapabilities = await fetch(url("/v1/capabilities"), { headers: { Origin: "http://localhost:3000" } });
   assert.equal(noSessionCapabilities.status, 401);
@@ -129,13 +160,39 @@ test("agent persists Admin authorization across restarts and rejects bad credent
 
 test("agent accepts only a signed, device-bound, one-use activation code", () => {
   assert.throws(() => agent.activateLicense(makeActivationCode({ deviceId: "different-device" })), /different device/i);
+  assert.throws(() => agent.activateLicense(makeActivationCode({ deviceId: null })), /not bound to a device/i);
   const code = makeActivationCode();
   const compactCode = code.slice(4).replace(/-/g, "");
+  const payload = JSON.parse(Buffer.from(compactCode.slice(0, compactCode.indexOf(".")), "base64url").toString("utf8"));
+  assert.equal(payload.deviceId, agent.getDeviceId());
   const signatureStart = compactCode.indexOf(".") + 1;
   const signatureChar = compactCode[signatureStart];
   const tamperedCompact = `${compactCode.slice(0, signatureStart)}${signatureChar === "A" ? "B" : "A"}${compactCode.slice(signatureStart + 1)}`;
   const tampered = `MT1-${tamperedCompact.match(/.{1,4}/g).join("-")}`;
   assert.throws(() => agent.activateLicense(tampered), /signature is invalid/i);
+
+  // The used-license table is local to an installation, so this regression
+  // uses a fresh process and data directory to prove device binding prevents
+  // the same signed token being accepted somewhere else.
+  const otherRoot = path.join(testRoot, "other-installation");
+  const childScript = `import { acceptLegalConsent, activate } from "./agent/auth.js";
+acceptLegalConsent();
+try { activate(process.env.ACTIVATION_CODE); process.exit(0); }
+catch (error) { console.error(error.message); process.exit(1); }`;
+  const child = spawnSync(process.execPath, ["--input-type=module", "--eval", childScript], {
+    cwd: path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
+    env: {
+      ...process.env,
+      DATA_DIR: path.join(otherRoot, "data"),
+      MEDIA_TOOLBOX_DOWNLOADS_DIR: path.join(otherRoot, "Downloads"),
+      AGENT_LICENSE_PUBLIC_KEY: licenseKeys.publicKey,
+      ACTIVATION_CODE: code,
+    },
+    encoding: "utf8",
+  });
+  assert.notEqual(child.status, 0, `A device-bound activation code was accepted by a second installation: ${child.stdout}${child.stderr}`);
+  assert.match(`${child.stdout}\n${child.stderr}`, /different device/i);
+
   agent.activateLicense(code);
   assert.equal(agent.getAgentState().authorization.mode, "activation");
   assert.throws(() => agent.activateLicense(code), /already been used/i);

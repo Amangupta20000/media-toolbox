@@ -26,9 +26,14 @@
     pill.textContent = state.running ? "Agent running" : "Agent stopped";
     pill.classList.toggle("ready", Boolean(state.running));
     el("authorization-title").textContent = labels[mode] || "Locked";
-    el("authorization-message").textContent = mode === "locked" ? "Admin login or a valid activation code is required for processing." : mode === "trial" ? "Your one-time trial is active on this installation." : mode === "activation" ? "This device is authorized by a signed license." : "Unlimited local processing is unlocked until logout.";
+    el("authorization-message").textContent = !authorization.legalAccepted ? "Accept the Privacy Policy and Terms & Conditions below before starting processing or logging in." : mode === "locked" ? (authorization.trialAvailable ? "A five-minute trial is available and starts on the first local processing session." : "Admin login or a valid activation code is required for processing.") : mode === "trial" ? "Your one-time trial is active on this installation." : mode === "activation" ? "This installation is authorized by a signed license." : "Unlimited local processing is unlocked until logout.";
     el("countdown").textContent = mode === "admin" ? "Unlimited" : formatRemaining(authorization.remainingMs);
     const badge = el("mode-badge"); badge.textContent = labels[mode] || "Locked"; badge.className = `badge ${mode}`;
+    const legalAccepted = Boolean(authorization.legalAccepted);
+    el("legal-consent").classList.toggle("hidden", legalAccepted);
+    if (legalAccepted) el("legal-consent-checkbox").checked = false;
+    el("accept-legal-button").disabled = legalAccepted || !el("legal-consent-checkbox").checked;
+    document.querySelectorAll("#login-form input, #login-form button, #activation-form textarea, #activation-form button").forEach((control) => { control.disabled = !legalAccepted; });
     el("admin-access").classList.toggle("hidden", mode === "admin");
     el("logout-access").classList.toggle("hidden", mode !== "admin");
     el("device-id").textContent = authorization.deviceId || "—";
@@ -56,6 +61,20 @@
 
   async function refresh() { try { render(await api.getState()); } catch (error) { showNotice(error.message || "The agent dashboard could not read its state."); } }
 
+  el("legal-consent-checkbox").addEventListener("change", (event) => { el("accept-legal-button").disabled = !event.currentTarget.checked; });
+  el("legal-consent-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = el("accept-legal-button");
+    button.disabled = true;
+    showNotice("");
+    try {
+      render(await api.acceptLegal());
+      showNotice("Privacy Policy and Terms & Conditions accepted. You can now start processing or log in.");
+    } catch (error) {
+      showNotice(error.message || "The legal documents could not be accepted.");
+      button.disabled = false;
+    }
+  });
   el("login-form").addEventListener("submit", async (event) => { event.preventDefault(); showNotice(""); const button = event.currentTarget.querySelector("button"); button.disabled = true; try { render(await api.login(el("username").value, el("password").value)); el("password").value = ""; } catch (error) { showNotice(error.message || "Admin login failed."); } finally { button.disabled = false; } });
   el("logout-button").addEventListener("click", async () => { try { render(await api.logout()); } catch (error) { showNotice(error.message || "Logout failed."); } });
   el("activation-form").addEventListener("submit", async (event) => { event.preventDefault(); showNotice(""); const button = event.currentTarget.querySelector("button"); button.disabled = true; try { render(await api.activate(el("activation-code").value)); el("activation-code").value = ""; } catch (error) { showNotice(error.message || "Activation failed."); } finally { button.disabled = false; } });
