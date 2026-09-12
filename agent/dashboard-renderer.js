@@ -179,6 +179,8 @@
       ? "Waiting for the licensing SSD. The server will start automatically when the configured storage path becomes available."
       : starting
       ? "Starting the licensing server automatically. The dashboard will update when it is ready."
+      : healthy && !value.managed
+      ? "The licensing service is reachable, but it was started outside this agent. Stop that process first, then start it here so this dashboard can manage it."
       : healthy
       ? `The licensing service is reachable at ${value.url || "http://127.0.0.1:4900"}. Tailscale Funnel can forward to it using its saved configuration.`
       : value.error || (mounted ? "The licensing service is not running. Click Start licensing server after the SSD is mounted." : "Connect the Sandisk Exf licensing SSD, then click Start licensing server.");
@@ -193,8 +195,16 @@
     if (commandElement) commandElement.textContent = command;
     startButton.disabled = healthy || starting || !ownerMachine || !mounted || value.available === false;
     startButton.textContent = healthy ? "Licensing server running" : starting ? "Starting licensing server" : ownerMachine ? "Start licensing server" : "Available on owner machine";
-    stopButton.classList.toggle("hidden", !value.managed);
-    stopButton.disabled = !value.managed;
+    const serverRunning = healthy || Boolean(value.managed) || starting;
+    const managedByAgent = Boolean(value.managed);
+    // Keep the control visible while an owner server is running so the
+    // dashboard never looks as if Stop is missing. An externally started
+    // process is deliberately not killable from here; only the child spawned
+    // by this agent can be stopped safely.
+    stopButton.classList.toggle("hidden", !ownerMachine || !serverRunning);
+    stopButton.disabled = !managedByAgent;
+    stopButton.textContent = managedByAgent ? "Stop server" : "Stop unavailable";
+    stopButton.title = managedByAgent ? "Stop the licensing server managed by this agent." : "This licensing server was started outside this agent. Stop that process first.";
   }
 
   function shellQuote(value) {
@@ -333,12 +343,13 @@
   function renderLicenseOwnerPanel(state) {
     const panel = el("license-owner-panel");
     if (!panel) return;
-    const authenticated = Boolean(state.licenseAdmin?.authenticated);
-    panel.classList.toggle("hidden", !authenticated);
+    const adminAuthenticated = state.authorization?.mode === "admin";
+    const licenseAdminAuthenticated = Boolean(state.licenseAdmin?.authenticated);
+    panel.classList.toggle("hidden", !adminAuthenticated);
     const auditPanel = el("license-audit-panel");
-    if (auditPanel) auditPanel.classList.toggle("hidden", !authenticated);
-    if (!authenticated) return;
-    el("license-owner-status").textContent = "Owner session active";
+    if (auditPanel) auditPanel.classList.toggle("hidden", !adminAuthenticated);
+    if (!adminAuthenticated) return;
+    el("license-owner-status").textContent = licenseAdminAuthenticated ? "Owner session active" : state.licenseAdminError ? "Licensing server unavailable" : "Licensing server login required";
     renderLicenseOwnerRequests(state.licenseRequests || []);
     renderLicenseAudit(state.licenseAudit || [], state.licenseAuditStoragePath || "");
   }

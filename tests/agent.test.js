@@ -167,6 +167,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   const releaseWorkflow = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".github", "workflows", "agent-release.yml"), "utf8");
   assert.match(dashboardHtml, /id="start-trial-button"/);
   assert.doesNotMatch(dashboardHtml, /Device details/);
+  assert.doesNotMatch(dashboardHtml, /class="panel device-panel"|id="trusted-origins"|id="agent-version"|id="protocol"/);
   assert.doesNotMatch(dashboardHtml, /id="device-id"/);
   assert.match(dashboardHtml, /id="locked-help" class="locked-help hidden"/);
   assert.match(dashboardHtml, /id="admin-control-button"/);
@@ -232,7 +233,11 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(releaseWorkflow, /working-directory: \.agent-build/);
   assert.match(releaseWorkflow, /npm ci --prefer-offline --no-audit --no-fund/);
   assert.doesNotMatch(releaseWorkflow, /npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund/);
+  assert.match(releaseWorkflow, /Cache rebuilt agent-only dependencies/);
+  assert.match(releaseWorkflow, /agent-deps-\$\{\{ runner\.os \}\}-\$\{\{ runner\.arch \}\}-node22-electron37-/);
+  assert.match(releaseWorkflow, /electron-rebuild --version 37\.10\.3 --parallel/);
   assert.match(builderConfig, /nativeRebuilder: parallel/);
+  assert.match(builderConfig, /npmRebuild: false/);
   assert.doesNotMatch(releaseWorkflow, /linux-target:/);
   assert.match(releaseWorkflow, /--linux AppImage deb --publish never/);
   assert.match(releaseWorkflow, /find \.agent-build\/release -maxdepth 1/);
@@ -250,6 +255,14 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardRenderer, /LICENSE_DATA_DIR=\$\{shellQuote\(dataDir\)\} npm run license-server/);
   assert.match(dashboardRenderer, /copy-license-server-command/);
   assert.match(dashboardRenderer, /value\.ownerConfigured === true/);
+  assert.match(dashboardRenderer, /panel\.classList\.toggle\("hidden", !adminAuthenticated\)/);
+  assert.match(dashboardRenderer, /state\.authorization\?\.mode === "admin"/);
+  assert.match(dashboardRenderer, /stopButton\.textContent = managedByAgent \? "Stop server" : "Stop unavailable"/);
+  assert.match(dashboardRenderer, /started outside this agent/);
+  assert.match(electronMain, /installedRuntimeDirectory/);
+  assert.match(electronMain, /dashboardDirectory/);
+  assert.match(electronMain, /preload: path\.join\(dashboardDirectory, "preload\.cjs"\)/);
+  assert.match(electronMain, /loadFile\(path\.join\(dashboardDirectory, "dashboard\.html"\)\)/);
   assert.match(dashboardRenderer, /block\.classList\.toggle\("hidden", mode === "activation"\)/);
   assert.match(dashboardHtml, /id="activation-session-access"/);
   assert.match(dashboardRenderer, /activationReloginAvailable/);
@@ -260,7 +273,8 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardRenderer, /activationSessionLimitReached/);
   assert.match(dashboardHtml, /id="refresh-sessions"/);
   assert.match(dashboardRenderer, /Connected sessions refreshed\./);
-  assert.match(builderConfig, /license-server\/\*\*\/\*/);
+  assert.match(builderConfig, /from: license-server\n    to: license-server/);
+  assert.match(builderConfig, /from: lib\/license-token\.js\n    to: lib\/license-token\.js/);
   assert.equal((dashboardHtml.match(/data-license-duration=/g) || []).length, 5);
   assert.match(dashboardHtml, /id="license-owner-panel"/);
   assert.match(dashboardHtml, /id="license-audit-panel"/);
@@ -386,8 +400,10 @@ test("packaged licensing server manager uses a real cwd and can restart after st
   });
   const first = await manager.start();
   assert.equal(first.started, true);
+  assert.equal(spawned[0].args[0], path.join(resourcesPath, "license-server", "index.js"));
   assert.equal(spawned[0].options.cwd, resourcesPath);
   assert.equal(spawned[0].options.env.ELECTRON_RUN_AS_NODE, "1");
+  assert.equal(spawned[0].options.env.NODE_PATH, path.join(resourcesPath, "app.asar", "node_modules"));
   await manager.stop();
   const second = await manager.start();
   assert.equal(second.started, true);

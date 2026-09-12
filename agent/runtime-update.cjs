@@ -9,6 +9,8 @@ const RUNTIME_MANIFEST_FILE = "runtime-manifest.json";
 const RUNTIME_MANIFEST_PREFIX = "agent-runtime-manifest-";
 const RUNTIME_MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
 const RUNTIME_MAX_FILES_BYTES = 1024 * 1024 * 1024;
+const RUNTIME_CHECK_TIMEOUT_MS = 15000;
+const RUNTIME_CHECK_RETRIES = 2;
 
 function safeVersion(value) {
   const normalized = String(value || "").trim().replace(/^v/i, "");
@@ -279,6 +281,38 @@ function responseError(response, label) {
   return new Error(`${label} returned HTTP ${response?.status || "an unknown error"}.`);
 }
 
+async function fetchWithTimeout(fetchImpl, input, options = {}, timeoutMs = RUNTIME_CHECK_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const upstreamSignal = options.signal;
+  const abortFromUpstream = () => controller.abort(upstreamSignal.reason);
+  if (upstreamSignal?.aborted) abortFromUpstream();
+  else upstreamSignal?.addEventListener?.("abort", abortFromUpstream, { once: true });
+  const timer = setTimeout(() => controller.abort(new Error("The runtime update request timed out.")), timeoutMs);
+  try {
+    return await fetchImpl(input, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+    upstreamSignal?.removeEventListener?.("abort", abortFromUpstream);
+  }
+}
+
+async function fetchManifestWithRetry(fetchImpl, manifestUrl, options = {}, { timeoutMs = RUNTIME_CHECK_TIMEOUT_MS, retries = RUNTIME_CHECK_RETRIES } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await fetchWithTimeout(fetchImpl, manifestUrl, options, timeoutMs);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= retries) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(1000, 250 * (attempt + 1))));
+    }
+  }
+  if (lastError?.name === "AbortError" || /timed out/i.test(lastError?.message || "")) {
+    throw new Error(`The runtime update check timed out after ${retries + 1} attempts. Confirm this device can reach GitHub Releases, then try again.`);
+  }
+  throw lastError;
+}
+
 function createRuntimeUpdater({
   userDataPath,
   moduleDirectory = __dirname,
@@ -289,6 +323,8 @@ function createRuntimeUpdater({
   fetchImpl = globalThis.fetch,
   onState = () => {},
   env = process.env,
+  checkTimeoutMs = RUNTIME_CHECK_TIMEOUT_MS,
+  checkRetries = RUNTIME_CHECK_RETRIES,
 } = {}) {
   const publicKey = readPublicKey({ moduleDirectory, env });
   const state = {
@@ -332,7 +368,7 @@ function createRuntimeUpdater({
     if (typeof fetchImpl !== "function") return publish({ status: "error", error: "This agent cannot download runtime updates.", checkedAt: new Date().toISOString() });
     publish({ status: "checking", error: "", checkedAt: new Date().toISOString(), progress: 0 });
     try {
-      const response = await fetchImpl(manifestUrl, { cache: "no-store", headers: { Accept: "application/json" } });
+      const response = await fetchManifestWithRetry(fetchImpl, manifestUrl, { cache: "no-store", headers: { Accept: "application/json" } }, { timeoutMs: checkTimeoutMs, retries: checkRetries });
       const responseFailure = responseError(response, "The runtime update manifest");
       if (responseFailure) throw responseFailure;
       const nextManifest = await response.json();

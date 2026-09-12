@@ -17,6 +17,7 @@ if (!app.requestSingleInstanceLock()) {
   let dashboardWindow;
   let licenseServerManager;
   let runtimeUpdater;
+  let installedRuntimeDirectory = "";
   const latestReleaseUrl = "https://github.com/Amangupta20000/media-toolbox/releases/latest";
   const updateState = {
     kind: "electron",
@@ -130,6 +131,10 @@ if (!app.requestSingleInstanceLock()) {
       dashboardWindow.focus();
       return dashboardWindow;
     }
+    const runtimeAgentDirectory = installedRuntimeDirectory ? path.join(installedRuntimeDirectory, "agent") : "";
+    const dashboardDirectory = runtimeAgentDirectory && fs.existsSync(path.join(runtimeAgentDirectory, "dashboard.html"))
+      ? runtimeAgentDirectory
+      : __dirname;
     dashboardWindow = new BrowserWindow({
       width: 1040,
       height: 800,
@@ -141,11 +146,11 @@ if (!app.requestSingleInstanceLock()) {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
-        preload: path.join(__dirname, "preload.cjs"),
+        preload: path.join(dashboardDirectory, "preload.cjs"),
       },
     });
     dashboardWindow.on("closed", () => { dashboardWindow = null; });
-    dashboardWindow.loadFile(path.join(__dirname, "dashboard.html"));
+    dashboardWindow.loadFile(path.join(dashboardDirectory, "dashboard.html"));
     dashboardWindow.once("ready-to-show", () => { dashboardWindow?.show(); dashboardWindow?.focus(); });
     return dashboardWindow;
   }
@@ -347,6 +352,7 @@ if (!app.requestSingleInstanceLock()) {
       onState: (value) => publishUpdateState(value),
     });
     const installedRuntime = await readInstalledRuntime({ userDataPath: app.getPath("userData"), moduleDirectory: __dirname });
+    installedRuntimeDirectory = installedRuntime?.directory || "";
     if (installedRuntime) {
       process.env.AGENT_VERSION = installedRuntime.manifest.version;
       agent = await import(`${pathToFileURL(path.join(installedRuntime.directory, "agent", "server.js")).href}?runtime=${encodeURIComponent(installedRuntime.manifest.version)}`);

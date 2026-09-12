@@ -16,7 +16,6 @@ files:
   # The owner dashboard can start the SSD licensing service without a
   # separate Terminal or Node installation. It is only exposed through the
   # fixed Electron IPC action and still binds to loopback.
-  - license-server/**/*
   - lib/**/*
   - worker/**/*
   - vendor/untrunc/**/*
@@ -120,14 +119,22 @@ asarUnpack:
   - node_modules/sharp/**
   - node_modules/@img/**
   - vendor/untrunc/**
-# Native modules are independent here (the agent currently rebuilds better-sqlite3
-# and any platform-specific optional modules), so let electron-rebuild compile
-# them concurrently on CI runners.
+# Native modules are rebuilt explicitly by the release workflow on a cache miss.
+# Keeping packaging itself from rebuilding them allows CI to reuse the complete
+# Electron-compatible dependency tree on later releases.
 nativeRebuilder: parallel
-npmRebuild: true
+npmRebuild: false
 extraResources:
   - from: build/app-update.yml
     to: app-update.yml
+  # Spawned child processes cannot use scripts inside app.asar. Keep the
+  # licensing runtime in the real Electron Resources directory.
+  - from: license-server
+    to: license-server
+  # The external licensing server imports this shared token module by its
+  # relative ../lib path. Keep that one shared module beside it as well.
+  - from: lib/license-token.js
+    to: lib/license-token.js
 mac:
   target:
     - dmg

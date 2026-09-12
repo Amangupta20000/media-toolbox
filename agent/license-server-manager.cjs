@@ -92,7 +92,13 @@ function createLicenseServerManager({
   let autoStartRun = null;
   let startRun = null;
   let manuallyStopped = false;
-  const entryPath = path.join(moduleDirectory, "..", "license-server", "index.js");
+  // A packaged Electron app cannot spawn a script through an app.asar path:
+  // the archive is readable by Electron but app.asar itself is not a real
+  // directory to the child process. The builder copies this runtime to the
+  // real Resources directory, so use that path for packaged agents.
+  const entryPath = resourcesPath
+    ? path.join(resourcesPath, "license-server", "index.js")
+    : path.join(moduleDirectory, "..", "license-server", "index.js");
   const url = `http://${host}:${port}`;
   let ownerMarkerPath = "";
   try {
@@ -234,7 +240,14 @@ function createLicenseServerManager({
     const command = useElectronRuntime ? electronExecutable : nodeExecutable;
     if (!command) throw new Error("Node 22 was not found. Open a new Terminal after installing Node 22, then try again.");
     const args = [entryPath];
-    if (useElectronRuntime) environment.ELECTRON_RUN_AS_NODE = "1";
+    if (useElectronRuntime) {
+      environment.ELECTRON_RUN_AS_NODE = "1";
+      // The licensing server is external to app.asar, while its packaged
+      // dependencies remain in the agent's dependency tree. Make that tree
+      // discoverable without copying the dependencies a second time.
+      const packagedNodeModules = path.join(resourcesPath, "app.asar", "node_modules");
+      environment.NODE_PATH = [packagedNodeModules, process.env.NODE_PATH].filter(Boolean).join(path.delimiter);
+    }
 
     const nextChild = spawnImpl(command, args, {
       cwd: spawnWorkingDirectory(),

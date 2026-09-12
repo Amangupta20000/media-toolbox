@@ -27,7 +27,22 @@ async function copy(relativeSource, relativeDestination = relativeSource) {
   await fs.cp(source, destination, { recursive: true, force: true });
 }
 
-for (const file of ["agent/index.js", "agent/server.js", "agent/auth.js", "agent/tls.js", "agent/license-public-key.pem", "agent/license-server-url.txt", "agent/runtime-update-public-key.pem"]) {
+for (const file of [
+  "agent/index.js",
+  "agent/server.js",
+  "agent/auth.js",
+  "agent/tls.js",
+  "agent/preload.cjs",
+  "agent/dashboard.html",
+  "agent/dashboard.css",
+  "agent/dashboard-legal.css",
+  "agent/dashboard-renderer.js",
+  "agent/legal/privacy-policy.html",
+  "agent/legal/terms.html",
+  "agent/license-public-key.pem",
+  "agent/license-server-url.txt",
+  "agent/runtime-update-public-key.pem",
+]) {
   try { await copy(file); } catch (error) { if (!["agent/license-public-key.pem", "agent/license-server-url.txt"].includes(file) || error?.code !== "ENOENT") throw error; }
 }
 for (const directory of ["lib", "worker", "vendor/untrunc"]) await copy(directory);

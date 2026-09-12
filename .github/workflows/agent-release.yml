@@ -113,9 +113,22 @@ jobs:
           test -s .agent-build/agent/license-public-key.pem
           test -s .agent-build/agent/license-server-url.txt
           grep -Eq '^https://[^[:space:]]+$' .agent-build/agent/license-server-url.txt
+      - name: Cache rebuilt agent-only dependencies
+        id: agent-deps-cache
+        uses: actions/cache@v4
+        with:
+          path: .agent-build/node_modules
+          key: agent-deps-${{ runner.os }}-${{ runner.arch }}-node22-electron37-${{ hashFiles('agent/package-lock.json') }}
+          restore-keys: |
+            agent-deps-${{ runner.os }}-${{ runner.arch }}-node22-electron37-
       - name: Install agent-only packaging dependencies
+        if: steps.agent-deps-cache.outputs.cache-hit != 'true'
         working-directory: .agent-build
         run: npm ci --prefer-offline --no-audit --no-fund
+      - name: Rebuild native agent dependencies
+        if: steps.agent-deps-cache.outputs.cache-hit != 'true'
+        working-directory: .agent-build
+        run: npx --no-install electron-rebuild --version 37.10.3 --parallel
       - name: Package macOS installer
         if: matrix.platform == 'mac'
         working-directory: .agent-build

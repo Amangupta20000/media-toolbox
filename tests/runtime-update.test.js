@@ -182,6 +182,58 @@ test("runtime updater version comparison and missing-key behavior are determinis
   assert.equal((await updater.check()).status, "unavailable");
 });
 
+test("runtime updater retries manifest checks and reports a bounded timeout", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-runtime-update-timeout-"));
+  const fixture = makeFixture("1.0.30");
+  let attempts = 0;
+  try {
+    const updater = createRuntimeUpdater({
+      userDataPath: root,
+      latestReleaseUrl: "https://updates.example.test/releases/latest",
+      env: { AGENT_RUNTIME_UPDATE_PUBLIC_KEY: fixture.keys.publicKey },
+      fetchImpl: async () => {
+        attempts += 1;
+        if (attempts < 2) throw new Error("network timeout");
+        return responseFor(JSON.stringify(fixture.manifest));
+      },
+      getCurrentVersion: () => "1.0.29",
+      checkTimeoutMs: 50,
+      checkRetries: 1,
+    });
+    assert.equal((await updater.check()).status, "available");
+    assert.equal(attempts, 2);
+
+    const timedOut = createRuntimeUpdater({
+      userDataPath: root,
+      latestReleaseUrl: "https://updates.example.test/releases/latest",
+      env: { AGENT_RUNTIME_UPDATE_PUBLIC_KEY: fixture.keys.publicKey },
+      fetchImpl: (_input, options) => new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
+      }),
+      checkTimeoutMs: 5,
+      checkRetries: 1,
+    });
+    const state = await timedOut.check();
+    assert.equal(state.status, "error");
+    assert.match(state.error, /timed out after 2 attempts/i);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("runtime package includes the verified dashboard shell used after an unsigned Mac update", async () => {
+  const source = await fs.readFile(new URL("../scripts/package-agent-runtime.mjs", import.meta.url), "utf8");
+  for (const file of [
+    "agent/preload.cjs",
+    "agent/dashboard.html",
+    "agent/dashboard.css",
+    "agent/dashboard-legal.css",
+    "agent/dashboard-renderer.js",
+    "agent/legal/privacy-policy.html",
+    "agent/legal/terms.html",
+  ]) assert.match(source, new RegExp(JSON.stringify(file).replaceAll(".", "\\.")));
+});
+
 test("runtime package dependency discovery supports Windows npm shims", async () => {
   const source = await fs.readFile(new URL("../scripts/package-agent-runtime.mjs", import.meta.url), "utf8");
   assert.match(source, /const npmCommand = process\.platform === "win32" \? "npm\.cmd" : "npm"/);
