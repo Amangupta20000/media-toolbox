@@ -126,6 +126,7 @@ export class LicenseService {
   }
 
   async requestLicense(request, body) {
+    this.store.cleanup(this.now());
     const origin = normalizeOrigin(body.origin || request.headers.origin);
     if (!origin || !this.config.publicOrigins.includes(origin)) throw new Error("A trusted website origin is required.");
     if (request.headers.origin && request.headers.origin !== origin) throw new Error("The request origin does not match the browser origin.");
@@ -140,6 +141,7 @@ export class LicenseService {
 
   async requestStatus(request, id, token) {
     if (!token) throw new Error("A request token is required.");
+    this.store.cleanup(this.now());
     const row = this.store.getRequestForToken(id, token);
     if (!row) throw new Error("License request not found or token is invalid.");
     if (row.status === "pending" && row.expires_at <= this.now()) {
@@ -221,6 +223,7 @@ export class LicenseService {
       }
       if (url.pathname === "/v1/admin/license-requests" && request.method === "GET") {
         this.requireAdmin(request);
+        this.store.cleanup(this.now());
         return json(response, 200, { items: this.store.listRequests().map((row) => publicRequest(row)) }, origin);
       }
       if (url.pathname === "/v1/admin/github/agent-license-server-url" && request.method === "POST") {
@@ -249,6 +252,16 @@ let active;
 export async function createLicenseServer(options = {}) {
   const service = options.service || new LicenseService({ config: options.config || licenseConfig, store: options.store || await createLicenseStore(options.dataDir || (options.config || licenseConfig).dataDir), privateKey: options.privateKey, now: options.now });
   const server = http.createServer((request, response) => service.handle(request, response).catch((error) => json(response, 500, { error: error.message || "The licensing server could not complete the request." })));
+  const cleanupIntervalMs = Number(options.cleanupIntervalMs ?? service.config.licenseRequestCleanupIntervalMs ?? 60 * 1000);
+  if (cleanupIntervalMs > 0) {
+    const cleanup = () => {
+      try { service.store.cleanup(service.now()); } catch (error) { console.error("Media Toolbox licensing request cleanup failed:", error); }
+    };
+    cleanup();
+    const cleanupTimer = setInterval(cleanup, cleanupIntervalMs);
+    cleanupTimer.unref?.();
+    server.once("close", () => clearInterval(cleanupTimer));
+  }
   server.service = service;
   return server;
 }

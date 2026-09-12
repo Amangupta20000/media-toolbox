@@ -11,6 +11,12 @@ function token() {
   return randomBytes(32).toString("base64url");
 }
 
+export const LICENSE_REQUEST_RETENTION_MS = Object.freeze({
+  redeemed: 60 * 60 * 1000,
+  declined: 30 * 60 * 1000,
+  approved: 24 * 60 * 60 * 1000,
+});
+
 export class LicenseStore {
   constructor(dataDir) {
     this.dataDir = dataDir;
@@ -165,8 +171,14 @@ export class LicenseStore {
   }
 
   cleanup(now) {
-    this.database.prepare("DELETE FROM admin_sessions WHERE expires_at <= ?").run(now);
-    this.database.prepare("UPDATE license_requests SET status = 'expired', updated_at = ? WHERE status = 'pending' AND expires_at <= ?").run(now, now);
+    return this.database.transaction(() => {
+      const expiredAdminSessions = this.database.prepare("DELETE FROM admin_sessions WHERE expires_at <= ?").run(now).changes;
+      const expiredPendingRequests = this.database.prepare("UPDATE license_requests SET status = 'expired', updated_at = ? WHERE status = 'pending' AND expires_at <= ?").run(now, now).changes;
+      const deletedRedeemedRequests = this.database.prepare("DELETE FROM license_requests WHERE status = 'redeemed' AND redeemed_at IS NOT NULL AND redeemed_at <= ?").run(now - LICENSE_REQUEST_RETENTION_MS.redeemed).changes;
+      const deletedDeclinedRequests = this.database.prepare("DELETE FROM license_requests WHERE status = 'declined' AND updated_at <= ?").run(now - LICENSE_REQUEST_RETENTION_MS.declined).changes;
+      const deletedApprovedRequests = this.database.prepare("DELETE FROM license_requests WHERE status = 'approved' AND updated_at <= ?").run(now - LICENSE_REQUEST_RETENTION_MS.approved).changes;
+      return { expiredAdminSessions, expiredPendingRequests, deletedRedeemedRequests, deletedDeclinedRequests, deletedApprovedRequests };
+    })();
   }
 
   audit(event, requestId, origin, details = {}) {

@@ -28,6 +28,7 @@ export const licenseConfig = {
   adminPassword: process.env.LICENSE_ADMIN_PASSWORD || "12345",
   adminSessionTtlMs: 8 * 60 * 60 * 1000,
   requestTtlMs: 24 * 60 * 60 * 1000,
+  licenseRequestCleanupIntervalMs: 60 * 1000,
   activationDurationMs: 10 * 60 * 1000,
   maxBodyBytes: 32 * 1024,
   ssdDirectory: DEFAULT_SSD_DIRECTORY,

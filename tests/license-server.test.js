@@ -136,6 +136,69 @@ test("production licensing storage rejects a non-SSD directory", async () => {
   if (previousAllow === undefined) delete process.env.LICENSE_ALLOW_NON_SSD; else process.env.LICENSE_ALLOW_NON_SSD = previousAllow;
 });
 
+test("license requests are automatically removed according to their status retention window", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-license-cleanup-test-"));
+  const { LicenseStore, LICENSE_REQUEST_RETENTION_MS } = await import("../license-server/store.js");
+  const store = new LicenseStore(root);
+  const now = 1_800_000_000_000;
+  const day = 24 * 60 * 60 * 1000;
+  const create = (label, createdAt = now - day, expiresAt = createdAt + 7 * day) => store.createRequest({
+    origin: "http://localhost:3000",
+    requesterLabel: label,
+    durationMs: 600000,
+    now: createdAt,
+    expiresAt,
+  });
+  const approve = (request, approvedAt, licenseId) => store.approve(request.id, {
+    licenseId,
+    codeHash: `hash-${licenseId}`,
+    encryptedCode: { ciphertext: "ciphertext", iv: "iv", tag: "tag" },
+    now: approvedAt,
+  });
+  const redeem = (request, approvedAt, redeemedAt, licenseId) => {
+    approve(request, approvedAt, licenseId);
+    return store.consume({ licenseId, codeHash: `hash-${licenseId}`, deviceId: `device-${licenseId}`, origin: "http://localhost:3000", now: redeemedAt });
+  };
+
+  const oldRedeemed = create("old redeemed", now - 2 * 60 * 60 * 1000);
+  redeem(oldRedeemed, now - 90 * 60 * 1000, now - LICENSE_REQUEST_RETENTION_MS.redeemed - 1, "old-redeemed");
+  const recentRedeemed = create("recent redeemed", now - 2 * 60 * 60 * 1000);
+  redeem(recentRedeemed, now - 90 * 60 * 1000, now - LICENSE_REQUEST_RETENTION_MS.redeemed + 1, "recent-redeemed");
+
+  const oldDeclined = create("old declined", now - 60 * 60 * 1000);
+  store.decline(oldDeclined.id, { now: now - LICENSE_REQUEST_RETENTION_MS.declined - 1 });
+  const recentDeclined = create("recent declined", now - 60 * 60 * 1000);
+  store.decline(recentDeclined.id, { now: now - LICENSE_REQUEST_RETENTION_MS.declined + 1 });
+
+  const oldApproved = create("old approved", now - 2 * day);
+  approve(oldApproved, now - LICENSE_REQUEST_RETENTION_MS.approved - 1, "old-approved");
+  const recentApproved = create("recent approved", now - 2 * day);
+  approve(recentApproved, now - LICENSE_REQUEST_RETENTION_MS.approved + 1, "recent-approved");
+
+  const expiredPending = create("expired pending", now - 2 * day, now - 60 * 60 * 1000);
+  const counts = store.cleanup(now);
+
+  assert.deepEqual(counts, {
+    expiredAdminSessions: 0,
+    expiredPendingRequests: 1,
+    deletedRedeemedRequests: 1,
+    deletedDeclinedRequests: 1,
+    deletedApprovedRequests: 1,
+  });
+  assert.equal(store.getRequest(oldRedeemed.id), null);
+  assert.equal(store.getRequest(oldDeclined.id), null);
+  assert.equal(store.getRequest(oldApproved.id), null);
+  assert.equal(store.getRequest(recentRedeemed.id).status, "redeemed");
+  assert.equal(store.getRequest(recentDeclined.id).status, "declined");
+  assert.equal(store.getRequest(recentApproved.id).status, "approved");
+  assert.equal(store.getRequest(expiredPending.id).status, "expired");
+  assert.ok(store.database.prepare("SELECT 1 FROM license_consumptions WHERE license_id = ?").get("old-redeemed"));
+  assert.equal(store.listRequests().some((row) => row.id === oldRedeemed.id || row.id === oldDeclined.id || row.id === oldApproved.id), false);
+
+  store.close();
+  await fs.rm(root, { recursive: true, force: true });
+});
+
 test("authenticated owner can create or update the agent URL GitHub variable without exposing the token", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-github-variable-test-"));
   const serverConfig = {
