@@ -242,11 +242,17 @@ function createLicenseServerManager({
     const args = [entryPath];
     if (useElectronRuntime) {
       environment.ELECTRON_RUN_AS_NODE = "1";
-      // The licensing server is external to app.asar, while its packaged
-      // dependencies remain in the agent's dependency tree. Make that tree
-      // discoverable without copying the dependencies a second time.
-      const packagedNodeModules = path.join(resourcesPath, "app.asar", "node_modules");
-      environment.NODE_PATH = [packagedNodeModules, process.env.NODE_PATH].filter(Boolean).join(path.delimiter);
+      // The licensing server is external to app.asar. Its native SQLite
+      // package is copied to Resources/node_modules for Node's ESM resolver;
+      // retain the unpacked app dependency path too for CommonJS modules and
+      // older package layouts.
+      const packagedNodeModules = path.join(resourcesPath, "node_modules");
+      const unpackedNodeModules = path.join(resourcesPath, "app.asar.unpacked", "node_modules");
+      environment.NODE_PATH = [
+        packagedNodeModules,
+        unpackedNodeModules,
+        process.env.NODE_PATH,
+      ].filter(Boolean).join(path.delimiter);
     }
 
     const nextChild = spawnImpl(command, args, {

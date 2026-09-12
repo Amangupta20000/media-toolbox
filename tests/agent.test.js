@@ -166,6 +166,8 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   const updateConfig = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "build", "app-update.yml"), "utf8");
   const releaseWorkflow = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".github", "workflows", "agent-release.yml"), "utf8");
   assert.match(dashboardHtml, /id="start-trial-button"/);
+  assert.doesNotMatch(dashboardHtml, /Authorize processing/);
+  assert.doesNotMatch(dashboardHtml, /class="divider"/);
   assert.doesNotMatch(dashboardHtml, /Device details/);
   assert.doesNotMatch(dashboardHtml, /class="panel device-panel"|id="trusted-origins"|id="agent-version"|id="protocol"/);
   assert.doesNotMatch(dashboardHtml, /id="device-id"/);
@@ -181,6 +183,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardHtml, /Copy this command only when using a source checkout/);
   assert.doesNotMatch(dashboardHtml, /bottom-left/);
   assert.match(dashboardCss, /\.dashboard-actions\{position:fixed;left:0;right:0;bottom:0/);
+  assert.match(dashboardCss, /\.authorization-panel\{grid-column:1 \/ -1\}/);
   assert.match(dashboardCss, /\.admin-action\{background:#102c3d;border:1px solid/);
   assert.match(dashboardPreload, /agent:start-license-server/);
   assert.match(dashboardPreload, /agent:get-license-server-state/);
@@ -214,6 +217,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(electronMain, /setLicenseServerFetchImplementation/);
   assert.match(electronMain, /checkForRuntimeUpdates/);
   assert.match(electronMain, /readInstalledRuntime/);
+  assert.match(electronMain, /compareVersions\(app\.getVersion\(\), installedRuntime\.manifest\.version\)/);
   assert.match(electronMain, /pathToFileURL/);
   assert.match(dashboardRenderer, /check-updates-bottom/);
   assert.match(builderConfig, /provider: github/);
@@ -275,6 +279,9 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardRenderer, /Connected sessions refreshed\./);
   assert.match(builderConfig, /from: license-server\n    to: license-server/);
   assert.match(builderConfig, /from: lib\/license-token\.js\n    to: lib\/license-token\.js/);
+  assert.match(builderConfig, /from: node_modules\/better-sqlite3\n    to: node_modules\/better-sqlite3/);
+  assert.match(builderConfig, /from: node_modules\/bindings\n    to: node_modules\/bindings/);
+  assert.match(builderConfig, /from: node_modules\/file-uri-to-path\n    to: node_modules\/file-uri-to-path/);
   assert.equal((dashboardHtml.match(/data-license-duration=/g) || []).length, 5);
   assert.match(dashboardHtml, /id="license-owner-panel"/);
   assert.match(dashboardHtml, /id="license-audit-panel"/);
@@ -403,7 +410,13 @@ test("packaged licensing server manager uses a real cwd and can restart after st
   assert.equal(spawned[0].args[0], path.join(resourcesPath, "license-server", "index.js"));
   assert.equal(spawned[0].options.cwd, resourcesPath);
   assert.equal(spawned[0].options.env.ELECTRON_RUN_AS_NODE, "1");
-  assert.equal(spawned[0].options.env.NODE_PATH, path.join(resourcesPath, "app.asar", "node_modules"));
+  assert.equal(
+    spawned[0].options.env.NODE_PATH,
+    [
+      path.join(resourcesPath, "node_modules"),
+      path.join(resourcesPath, "app.asar.unpacked", "node_modules"),
+    ].join(path.delimiter),
+  );
   await manager.stop();
   const second = await manager.start();
   assert.equal(second.started, true);

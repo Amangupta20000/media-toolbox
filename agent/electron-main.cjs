@@ -5,7 +5,7 @@ const { execFileSync, spawnSync } = require("node:child_process");
 const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, shell, Tray } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { createLicenseServerManager, findNode22Executable } = require("./license-server-manager.cjs");
-const { createRuntimeUpdater, readInstalledRuntime } = require("./runtime-update.cjs");
+const { compareVersions, createRuntimeUpdater, readInstalledRuntime } = require("./runtime-update.cjs");
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -352,12 +352,14 @@ if (!app.requestSingleInstanceLock()) {
       onState: (value) => publishUpdateState(value),
     });
     const installedRuntime = await readInstalledRuntime({ userDataPath: app.getPath("userData"), moduleDirectory: __dirname });
-    installedRuntimeDirectory = installedRuntime?.directory || "";
-    if (installedRuntime) {
+    const bundledRuntimeIsCurrentOrNewer = !installedRuntime || compareVersions(app.getVersion(), installedRuntime.manifest.version) >= 0;
+    installedRuntimeDirectory = bundledRuntimeIsCurrentOrNewer ? "" : installedRuntime.directory;
+    if (installedRuntime && !bundledRuntimeIsCurrentOrNewer) {
       process.env.AGENT_VERSION = installedRuntime.manifest.version;
       agent = await import(`${pathToFileURL(path.join(installedRuntime.directory, "agent", "server.js")).href}?runtime=${encodeURIComponent(installedRuntime.manifest.version)}`);
       console.log(`Using verified local agent runtime ${installedRuntime.manifest.version}`);
     } else {
+      if (installedRuntime) console.log(`Using bundled agent runtime ${app.getVersion()} instead of older saved runtime ${installedRuntime.manifest.version}`);
       agent = await import("./server.js");
     }
     if (typeof net?.fetch === "function" && typeof agent.setLicenseServerFetchImplementation === "function") {

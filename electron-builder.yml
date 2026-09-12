@@ -135,6 +135,26 @@ extraResources:
   # relative ../lib path. Keep that one shared module beside it as well.
   - from: lib/license-token.js
     to: lib/license-token.js
+  # The external licensing server runs from Resources/license-server rather
+  # than app.asar. Keep its native SQLite package and its runtime CommonJS
+  # dependencies in a real Resources/node_modules tree so Node's ESM package
+  # resolver can find them from store.js.
+  - from: node_modules/better-sqlite3
+    to: node_modules/better-sqlite3
+    filter:
+      - lib/**/*
+      - build/Release/better_sqlite3.node
+      - package.json
+  - from: node_modules/bindings
+    to: node_modules/bindings
+    filter:
+      - bindings.js
+      - package.json
+  - from: node_modules/file-uri-to-path
+    to: node_modules/file-uri-to-path
+    filter:
+      - index.js
+      - package.json
 mac:
   target:
     - dmg

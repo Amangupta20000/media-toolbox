@@ -14,6 +14,7 @@ const {
   manifestPayload,
   readInstalledRuntime,
   verifyRuntimeManifest,
+  extractZipArchive,
 } = require("../agent/runtime-update.cjs");
 
 function crc32(buffer) {
@@ -180,6 +181,35 @@ test("runtime updater version comparison and missing-key behavior are determinis
   assert.equal(compareVersions("1.0.0-beta", "1.0.0"), -1);
   const updater = createRuntimeUpdater({ userDataPath: await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-runtime-update-no-key-")), latestReleaseUrl: "https://updates.example.test/releases/latest", env: {}, getCurrentVersion: () => "1.0.26" });
   assert.equal((await updater.check()).status, "unavailable");
+});
+
+test("full installer version takes precedence over an older saved runtime", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-runtime-update-stale-runtime-"));
+  const stale = makeFixture("1.0.30");
+  const latest = makeFixture("1.1.0");
+  const staleArchive = path.join(root, "stale-runtime.zip");
+  const activeDirectory = path.join(root, "agent-runtime");
+  try {
+    await fs.writeFile(staleArchive, stale.archive);
+    await extractZipArchive(staleArchive, activeDirectory);
+    const staleManifest = { ...stale.manifest };
+    staleManifest.signature = sign(null, Buffer.from(manifestPayload(staleManifest)), latest.keys.privateKey).toString("base64");
+    await fs.writeFile(path.join(activeDirectory, "runtime-manifest.json"), `${JSON.stringify(staleManifest)}\n`);
+    const updater = createRuntimeUpdater({
+      userDataPath: root,
+      latestReleaseUrl: "https://updates.example.test/releases/latest",
+      env: { AGENT_RUNTIME_UPDATE_PUBLIC_KEY: latest.keys.publicKey },
+      fetchImpl: async () => responseFor(JSON.stringify(latest.manifest)),
+      getCurrentVersion: () => "1.1.0",
+    });
+    const state = await updater.check();
+    assert.equal(state.status, "up-to-date");
+    assert.equal(state.version, "1.1.0");
+    assert.equal(state.currentVersion, "1.1.0");
+    assert.equal(state.runtimeVersion, "1.1.0");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });
 
 test("runtime updater retries manifest checks and reports a bounded timeout", async () => {

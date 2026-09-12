@@ -349,8 +349,16 @@ function createRuntimeUpdater({
 
   async function currentInstalledVersion() {
     const installed = await readInstalledRuntime({ userDataPath, moduleDirectory, env });
-    state.runtimeVersion = installed?.manifest?.version || null;
-    return installed?.manifest?.version || state.currentVersion;
+    const installedVersion = installed?.manifest?.version || "";
+    // A full installer can be newer than a runtime-only update left in the
+    // app-data directory. Treat the newest verified code as authoritative so
+    // reinstalling the app does not make the updater offer that same release
+    // again.
+    const effectiveVersion = compareVersions(installedVersion, state.currentVersion) > 0
+      ? safeVersion(installedVersion)
+      : state.currentVersion;
+    state.runtimeVersion = effectiveVersion;
+    return effectiveVersion;
   }
 
   async function readPending() {
