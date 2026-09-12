@@ -126,6 +126,8 @@ jobs:
         if: matrix.platform == 'win'
         working-directory: .agent-build
         run: npx --no-install electron-builder --config electron-builder.yml --win --publish never
+      - name: Normalize updater artifact names
+        run: node scripts/normalize-agent-artifacts.mjs .agent-build/release
       - name: Stage installer files
         shell: bash
         run: |
