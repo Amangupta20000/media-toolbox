@@ -172,6 +172,9 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardHtml, /id="check-license-server"/);
   assert.match(dashboardHtml, /id="license-server-panel" class="panel license-server-panel hidden"/);
   assert.match(dashboardHtml, /id="license-server-notice"/);
+  assert.match(dashboardHtml, /id="license-server-command"/);
+  assert.match(dashboardHtml, /id="copy-license-server-command"/);
+  assert.match(dashboardHtml, /Copy this command only when using a source checkout/);
   assert.doesNotMatch(dashboardHtml, /bottom-left/);
   assert.match(dashboardCss, /\.dashboard-actions\{position:fixed;left:0;right:0;bottom:0/);
   assert.match(dashboardCss, /\.admin-action\{background:#102c3d;border:1px solid/);
@@ -194,7 +197,13 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardRenderer, /open-release/);
   assert.match(dashboardRenderer, /Update manually from GitHub Releases/);
   assert.match(electronMain, /hasDeveloperIdSignature/);
-  assert.match(electronMain, /status: process\.platform === "darwin" && app\.isPackaged \? "manual"/);
+  assert.match(electronMain, /net\.fetch/);
+  assert.match(electronMain, /checkPublicLicenseServer/);
+  assert.match(electronMain, /globalThis\.fetch = net\.fetch\.bind\(net\)/);
+  assert.match(electronMain, /setLicenseServerFetchImplementation/);
+  assert.match(electronMain, /checkForRuntimeUpdates/);
+  assert.match(electronMain, /readInstalledRuntime/);
+  assert.match(electronMain, /pathToFileURL/);
   assert.match(dashboardRenderer, /check-updates-bottom/);
   assert.match(builderConfig, /provider: github/);
   assert.match(builderConfig, /to: app-update\.yml/);
@@ -217,12 +226,19 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.doesNotMatch(releaseWorkflow, /linux-target:/);
   assert.match(releaseWorkflow, /--linux AppImage deb --publish never/);
   assert.match(releaseWorkflow, /find \.agent-build\/release -maxdepth 1/);
+  assert.match(releaseWorkflow, /Embed runtime update public key/);
+  assert.match(releaseWorkflow, /Package signed agent runtime update/);
+  assert.match(releaseWorkflow, /AGENT_RUNTIME_UPDATE_PUBLIC_KEY/);
+  assert.match(releaseWorkflow, /AGENT_RUNTIME_UPDATE_PRIVATE_KEY/);
+  assert.match(releaseWorkflow, /agent-runtime-manifest-\*\.json/);
   assert.match(releaseWorkflow, /name: media-toolbox-agent-\$\{\{ matrix\.artifact \}\}/);
   assert.deepEqual(Object.keys(agentPackage.dependencies).sort(), ["@ffmpeg-installer/ffmpeg", "@ffprobe-installer/ffprobe", "better-sqlite3", "busboy", "electron-updater", "pdf-lib", "selfsigned", "sharp"]);
   assert.equal(agentPackage.dependencies.next, undefined);
   assert.equal(agentPackage.dependencies.react, undefined);
   assert.equal(agentPackage.dependencies["pdfjs-dist"], undefined);
   assert.match(dashboardRenderer, /setLicenseServerNotice/);
+  assert.match(dashboardRenderer, /LICENSE_DATA_DIR=\$\{shellQuote\(dataDir\)\} npm run license-server/);
+  assert.match(dashboardRenderer, /copy-license-server-command/);
   assert.match(dashboardRenderer, /value\.ownerConfigured === true/);
   assert.match(dashboardRenderer, /block\.classList\.toggle\("hidden", mode === "activation"\)/);
   assert.match(dashboardHtml, /id="activation-session-access"/);
@@ -504,6 +520,32 @@ test("online licensing configuration supports a local-first fallback", async () 
     assert.equal(config.localServerUrl, "http://127.0.0.1:4900");
     assert.equal(config.serverUrl, "https://media-toolbox-license.tailf9a730.ts.net");
   } finally {
+    if (previousServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_URL;
+    else process.env.AGENT_LICENSE_SERVER_URL = previousServerUrl;
+    if (previousLocalServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
+    else process.env.AGENT_LICENSE_SERVER_LOCAL_URL = previousLocalServerUrl;
+  }
+});
+
+test("licensing requests can use Electron's browser-compatible network client", async () => {
+  const auth = await import("../agent/auth.js");
+  const previousServerUrl = process.env.AGENT_LICENSE_SERVER_URL;
+  const previousLocalServerUrl = process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
+  let calls = 0;
+  try {
+    process.env.AGENT_LICENSE_SERVER_URL = "https://media-toolbox-license.tailf9a730.ts.net";
+    delete process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
+    auth.setLicenseServerFetchImplementation(async (requestUrl, options) => {
+      calls += 1;
+      assert.equal(requestUrl, "https://media-toolbox-license.tailf9a730.ts.net/v1/license-requests/request-1");
+      assert.equal(options.headers["X-Request-Token"], "request-token");
+      return new Response(JSON.stringify({ status: "pending" }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const result = await auth.getActivationRequestStatus("request-1", "request-token");
+    assert.deepEqual(result, { status: "pending" });
+    assert.equal(calls, 1);
+  } finally {
+    auth.setLicenseServerFetchImplementation(globalThis.fetch.bind(globalThis));
     if (previousServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_URL;
     else process.env.AGENT_LICENSE_SERVER_URL = previousServerUrl;
     if (previousLocalServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_LOCAL_URL;

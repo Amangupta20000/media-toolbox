@@ -93,6 +93,17 @@ jobs:
           AGENT_LICENSE_SERVER_URL: ${{ vars.AGENT_LICENSE_SERVER_URL }}
         shell: bash
         run: node scripts/stage-agent-license-server-url.mjs
+      - name: Embed runtime update public key
+        env:
+          AGENT_RUNTIME_UPDATE_PUBLIC_KEY: ${{ vars.AGENT_RUNTIME_UPDATE_PUBLIC_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${AGENT_RUNTIME_UPDATE_PUBLIC_KEY:-}" ]; then
+            node scripts/stage-agent-runtime-update-key.mjs
+          else
+            echo "::warning::AGENT_RUNTIME_UPDATE_PUBLIC_KEY is not configured; verified runtime update artifacts will not be published for this release."
+          fi
       - name: Stage agent-only packaging directory
         run: node scripts/stage-agent-package.mjs
       - name: Verify embedded licensing configuration
@@ -136,6 +147,17 @@ jobs:
         if: matrix.platform == 'win'
         working-directory: .agent-build
         run: npx --no-install electron-builder --config electron-builder.yml --win --publish never
+      - name: Package signed agent runtime update
+        env:
+          AGENT_RUNTIME_UPDATE_PRIVATE_KEY: ${{ secrets.AGENT_RUNTIME_UPDATE_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${AGENT_RUNTIME_UPDATE_PRIVATE_KEY:-}" ] && [ -s .agent-build/agent/runtime-update-public-key.pem ]; then
+            node scripts/package-agent-runtime.mjs .agent-build .agent-build/release
+          else
+            echo "::warning::AGENT_RUNTIME_UPDATE_PRIVATE_KEY or the public key is missing; verified runtime update artifacts will not be published for this release."
+          fi
       - name: Normalize updater artifact names
         run: node scripts/normalize-agent-artifacts.mjs .agent-build/release
       - name: Stage installer files
@@ -150,7 +172,8 @@ jobs:
             -name '*.AppImage' -o \
             -name '*.deb' -o \
             -name 'latest*.yml' -o \
-            -name '*.blockmap' \
+            -name '*.blockmap' -o \
+            -name 'agent-runtime-manifest-*.json' \
           \) -exec cp {} upload/ \;
           test -n "$(find upload -maxdepth 1 -type f -print -quit)"
       - uses: actions/upload-artifact@v4

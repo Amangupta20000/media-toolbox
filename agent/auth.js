@@ -26,6 +26,15 @@ const DEFAULT_ORIGINS = [
 ];
 
 let onlineLicenseAdminToken = "";
+let licenseServerFetch = typeof fetch === "function" ? fetch.bind(globalThis) : null;
+
+// Packaged Electron uses Chromium's network stack for licensing requests so
+// certificate and proxy handling matches the browser. Source/CLI execution
+// continues to use the standard Node fetch implementation.
+export function setLicenseServerFetchImplementation(fetchImplementation) {
+  if (typeof fetchImplementation !== "function") throw new Error("The licensing-server fetch implementation is invalid.");
+  licenseServerFetch = fetchImplementation;
+}
 
 function passwordHash(password, salt) {
   return scryptSync(String(password), salt, 64, { N: 16_384, r: 8, p: 1 }).toString("base64");
@@ -398,7 +407,8 @@ async function onlineLicenseFetch(pathname, options = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15_000);
     try {
-      const response = await fetch(requestUrl, {
+      if (typeof licenseServerFetch !== "function") throw new Error("This agent cannot make licensing-server requests.");
+      const response = await licenseServerFetch(requestUrl, {
         cache: "no-store",
         ...options,
         signal: controller.signal,

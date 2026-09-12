@@ -44,6 +44,16 @@ Build an installer for the current operating system with `npm run agent:package`
 
 Packaged agents check GitHub Releases shortly after startup and periodically while running. When a newer signed release is available, the desktop dashboard shows an **Agent update** notification. Click **Update now** to download it, then click **Restart and install** after the download completes. Automatic replacement is enabled for Developer ID-signed macOS builds and packaged Windows/Linux builds. Unsigned macOS builds show an **Open latest release** button instead; macOS cannot reliably validate automatic updates when each ad-hoc signature has a different executable hash. Development agents do not attempt release updates. The release workflow publishes updater metadata (`latest*.yml` and blockmaps) alongside the installers; this is handled by `.github/workflows/agent-release.yml`.
 
+Unsigned macOS builds also support a separate verified runtime update. This downloads only the Node-based processing runtime into the agent's application-data directory; it never replaces the unsigned Electron application. The dashboard verifies the runtime archive with SHA-256 and an Ed25519 signature, installs it atomically, and restarts the agent. If the runtime update signing keys are not configured, the dashboard keeps the manual GitHub Releases option.
+
+Create the runtime update key pair once outside the repository:
+
+```bash
+npm run agent:update-keygen
+```
+
+Add the generated public PEM as the GitHub Actions repository **variable** `AGENT_RUNTIME_UPDATE_PUBLIC_KEY`, and add the generated private PEM as the GitHub Actions repository **secret** `AGENT_RUNTIME_UPDATE_PRIVATE_KEY`. The workflow packages and publishes one platform/architecture-specific runtime ZIP and its signed `agent-runtime-manifest-*.json` next to each release. The private key is used only during packaging and is never embedded in the website or agent. If either value is absent, installer packaging still works but verified runtime artifacts are skipped with a warning.
+
 Generate the owner signing key pair once, outside the repository:
 
 ```bash

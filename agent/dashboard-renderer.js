@@ -27,6 +27,7 @@
     const progressBar = el("agent-update-progress-bar");
     if (!panel || !title || !message || !action || !progress || !progressBar) return;
     const status = value.status || "unavailable";
+    const runtime = value.kind === "runtime";
     const visible = ["checking", "available", "downloading", "downloaded", "error", "manual"].includes(status);
     panel.classList.toggle("hidden", !visible);
     panel.classList.toggle("update-error", status === "error" || status === "manual");
@@ -34,26 +35,26 @@
     progress.classList.toggle("hidden", status !== "downloading");
     progressBar.style.width = `${Math.max(0, Math.min(100, Number(value.progress) || 0))}%`;
     if (status === "checking") {
-      title.textContent = "Checking for agent updates";
-      message.textContent = "Checking the latest signed release…";
+      title.textContent = runtime ? "Checking for verified processing updates" : "Checking for agent updates";
+      message.textContent = runtime ? "Checking the latest signed runtime package…" : "Checking the latest signed release…";
       action.textContent = "Checking…";
       action.dataset.action = "";
       action.disabled = true;
     } else if (status === "available") {
-      title.textContent = `Agent update available${value.version ? ` · v${value.version}` : ""}`;
-      message.textContent = "Download the signed update. The agent will remain available until you choose to restart and install it.";
+      title.textContent = runtime ? `Verified processing update available${value.version ? ` · v${value.version}` : ""}` : `Agent update available${value.version ? ` · v${value.version}` : ""}`;
+      message.textContent = runtime ? "Download the verified processing package. The Electron application will not be replaced." : "Download the signed update. The agent will remain available until you choose to restart and install it.";
       action.textContent = "Update now";
       action.dataset.action = "download";
       action.disabled = false;
     } else if (status === "downloading") {
-      title.textContent = `Downloading agent update${value.version ? ` · v${value.version}` : ""}`;
+      title.textContent = runtime ? `Downloading verified processing update${value.version ? ` · v${value.version}` : ""}` : `Downloading agent update${value.version ? ` · v${value.version}` : ""}`;
       message.textContent = `${Math.max(0, Math.min(100, Math.round(Number(value.progress) || 0)))}% downloaded. Keep the dashboard open until the download completes.`;
       action.textContent = "Downloading…";
       action.dataset.action = "";
       action.disabled = true;
     } else if (status === "downloaded") {
-      title.textContent = `Agent update ready${value.version ? ` · v${value.version}` : ""}`;
-      message.textContent = "The update is downloaded and will be verified before installation. Restart the agent to finish.";
+      title.textContent = runtime ? `Verified processing update ready${value.version ? ` · v${value.version}` : ""}` : `Agent update ready${value.version ? ` · v${value.version}` : ""}`;
+      message.textContent = runtime ? "The runtime package passed SHA-256 and Ed25519 verification. Restart the agent to activate it." : "The update is downloaded and will be verified before installation. Restart the agent to finish.";
       action.textContent = "Restart and install";
       action.dataset.action = "install";
       action.disabled = false;
@@ -176,10 +177,18 @@
     el("license-server-storage").textContent = value.dataDir || "/Volumes/Sandisk Exf/MediaToolboxLicensing";
     el("license-server-public-url").textContent = value.publicUrl || "Configured by Tailscale Funnel";
     el("license-server-public-status").textContent = !publicConfigured ? "Not configured" : publicHealthy === true ? "Connected" : publicHealthy === false ? "Unavailable" : "Checking";
+    const dataDir = value.dataDir || "/Volumes/Sandisk Exf/MediaToolboxLicensing";
+    const command = `LICENSE_DATA_DIR=${shellQuote(dataDir)} npm run license-server`;
+    const commandElement = el("license-server-command");
+    if (commandElement) commandElement.textContent = command;
     startButton.disabled = healthy || !ownerMachine || !mounted || value.available === false;
     startButton.textContent = healthy ? "Licensing server running" : ownerMachine ? "Start licensing server" : "Available on owner machine";
     stopButton.classList.toggle("hidden", !value.managed);
     stopButton.disabled = !value.managed;
+  }
+
+  function shellQuote(value) {
+    return `'${String(value || "").replace(/'/g, "'\\''")}'`;
   }
 
   async function refreshLicenseServer() {
@@ -507,6 +516,17 @@
     } catch (error) {
       setLicenseServerNotice(error.message || "The licensing server could not be started.", "error");
       await refreshLicenseServer();
+    }
+  });
+  el("copy-license-server-command").addEventListener("click", async () => {
+    const command = el("license-server-command")?.textContent || "";
+    if (!command) return;
+    try {
+      if (api.copyText) await api.copyText(command);
+      else await navigator.clipboard.writeText(command);
+      setLicenseServerNotice("Start command copied. Run it from the MediaToolbox project folder if the packaged start button cannot be used.", "success");
+    } catch (error) {
+      setLicenseServerNotice(error.message || "The start command could not be copied.", "error");
     }
   });
   el("stop-license-server").addEventListener("click", async () => {

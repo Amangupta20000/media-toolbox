@@ -1,9 +1,11 @@
 const path = require("node:path");
 const fs = require("node:fs");
+const { pathToFileURL } = require("node:url");
 const { execFileSync, spawnSync } = require("node:child_process");
-const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, Tray } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, shell, Tray } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { createLicenseServerManager, findNode22Executable } = require("./license-server-manager.cjs");
+const { createRuntimeUpdater, readInstalledRuntime } = require("./runtime-update.cjs");
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -14,8 +16,10 @@ if (!app.requestSingleInstanceLock()) {
   let pairingWatch;
   let dashboardWindow;
   let licenseServerManager;
+  let runtimeUpdater;
   const latestReleaseUrl = "https://github.com/Amangupta20000/media-toolbox/releases/latest";
   const updateState = {
+    kind: "electron",
     status: "unavailable",
     currentVersion: app.getVersion(),
     checkedAt: null,
@@ -44,6 +48,10 @@ if (!app.requestSingleInstanceLock()) {
     return "Updates are checked by packaged agent releases.";
   }
 
+  function isUnsignedMacPackage() {
+    return process.platform === "darwin" && app.isPackaged && !hasDeveloperIdSignature();
+  }
+
   function publishUpdateState(nextState = {}) {
     Object.assign(updateState, nextState, { currentVersion: app.getVersion() });
     if (dashboardWindow && !dashboardWindow.isDestroyed()) dashboardWindow.webContents.send("agent:update-state", { ...updateState });
@@ -56,21 +64,31 @@ if (!app.requestSingleInstanceLock()) {
 
   function setupAutoUpdater() {
     if (!canUseAutoUpdater()) {
-      publishUpdateState({ status: process.platform === "darwin" && app.isPackaged ? "manual" : "unavailable", error: updateUnavailableMessage() });
+      if (isUnsignedMacPackage()) return;
+      publishUpdateState({ kind: "electron", status: "unavailable", error: updateUnavailableMessage() });
       return;
     }
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = true;
-    autoUpdater.on("checking-for-update", () => publishUpdateState({ status: "checking", error: "", checkedAt: new Date().toISOString() }));
-    autoUpdater.on("update-available", (info) => publishUpdateState({ status: "available", version: info.version, releaseDate: info.releaseDate || null, releaseNotes: info.releaseNotes || null, progress: 0, error: "", checkedAt: new Date().toISOString() }));
-    autoUpdater.on("update-not-available", (info) => publishUpdateState({ status: "up-to-date", version: info.version || app.getVersion(), releaseDate: info.releaseDate || null, releaseNotes: info.releaseNotes || null, progress: 0, error: "", checkedAt: new Date().toISOString() }));
-    autoUpdater.on("download-progress", (progress) => publishUpdateState({ status: "downloading", progress: Math.max(0, Math.min(100, Math.round(progress.percent || 0))), error: "" }));
-    autoUpdater.on("update-downloaded", (info) => publishUpdateState({ status: "downloaded", version: info.version, releaseDate: info.releaseDate || null, releaseNotes: info.releaseNotes || null, progress: 100, error: "" }));
-    autoUpdater.on("error", (error) => publishUpdateState({ status: "error", error: error instanceof Error ? error.message : String(error || "The update check failed."), checkedAt: new Date().toISOString() }));
+    autoUpdater.on("checking-for-update", () => publishUpdateState({ kind: "electron", status: "checking", error: "", checkedAt: new Date().toISOString() }));
+    autoUpdater.on("update-available", (info) => publishUpdateState({ kind: "electron", status: "available", version: info.version, releaseDate: info.releaseDate || null, releaseNotes: info.releaseNotes || null, progress: 0, error: "", checkedAt: new Date().toISOString() }));
+    autoUpdater.on("update-not-available", (info) => publishUpdateState({ kind: "electron", status: "up-to-date", version: info.version || app.getVersion(), releaseDate: info.releaseDate || null, releaseNotes: info.releaseNotes || null, progress: 0, error: "", checkedAt: new Date().toISOString() }));
+    autoUpdater.on("download-progress", (progress) => publishUpdateState({ kind: "electron", status: "downloading", progress: Math.max(0, Math.min(100, Math.round(progress.percent || 0))), error: "" }));
+    autoUpdater.on("update-downloaded", (info) => publishUpdateState({ kind: "electron", status: "downloaded", version: info.version, releaseDate: info.releaseDate || null, releaseNotes: info.releaseNotes || null, progress: 100, error: "" }));
+    autoUpdater.on("error", (error) => publishUpdateState({ kind: "electron", status: "error", error: error instanceof Error ? error.message : String(error || "The update check failed."), checkedAt: new Date().toISOString() }));
+  }
+
+  async function checkForRuntimeUpdates() {
+    if (!runtimeUpdater) return publishUpdateState({ kind: "runtime", status: "unavailable", error: "Verified runtime updates are not configured in this agent build.", checkedAt: new Date().toISOString() });
+    const nextState = await runtimeUpdater.check();
+    if (nextState.status === "unavailable" || (nextState.status === "error" && /HTTP 404/i.test(nextState.error || ""))) {
+      return publishUpdateState({ kind: "electron", status: "manual", error: updateUnavailableMessage(), checkedAt: new Date().toISOString() });
+    }
+    return nextState;
   }
 
   async function checkForUpdates() {
-    if (!canUseAutoUpdater()) return publishUpdateState({ status: process.platform === "darwin" && app.isPackaged ? "manual" : "unavailable", error: updateUnavailableMessage(), checkedAt: new Date().toISOString() });
+    if (!canUseAutoUpdater()) return isUnsignedMacPackage() ? checkForRuntimeUpdates() : publishUpdateState({ kind: "electron", status: "unavailable", error: updateUnavailableMessage(), checkedAt: new Date().toISOString() });
     try {
       await autoUpdater.checkForUpdates();
       return { ...updateState };
@@ -80,6 +98,10 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   async function downloadUpdate() {
+    if (updateState.kind === "runtime") {
+      if (!runtimeUpdater) throw new Error("Verified runtime updates are not configured in this agent build.");
+      return runtimeUpdater.download();
+    }
     if (!canUseAutoUpdater()) throw new Error(updateUnavailableMessage());
     if (updateState.status !== "available" && updateState.status !== "error") throw new Error("There is no update ready to download.");
     await autoUpdater.downloadUpdate();
@@ -87,6 +109,15 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   function installUpdate() {
+    if (updateState.kind === "runtime") {
+      if (!runtimeUpdater) throw new Error("Verified runtime updates are not configured in this agent build.");
+      if (updateState.status !== "downloaded") throw new Error("Download the verified runtime update before installing it.");
+      const result = runtimeUpdater.install();
+      Promise.resolve(result).then(() => setTimeout(() => { app.relaunch(); app.quit(); }, 100)).catch((error) => {
+        publishUpdateState({ kind: "runtime", status: "error", error: error instanceof Error ? error.message : String(error), checkedAt: new Date().toISOString() });
+      });
+      return result;
+    }
     if (!canUseAutoUpdater()) throw new Error(updateUnavailableMessage());
     if (updateState.status !== "downloaded") throw new Error("Download the update before installing it.");
     autoUpdater.quitAndInstall(false, true);
@@ -226,6 +257,17 @@ if (!app.requestSingleInstanceLock()) {
     }
   }
 
+  async function checkPublicLicenseServer(url) {
+    if (typeof net?.fetch !== "function") return false;
+    try {
+      const response = await net.fetch(url, { cache: "no-store" });
+      await response.arrayBuffer?.();
+      return response.status === 200;
+    } catch {
+      return false;
+    }
+  }
+
   function showPairingCode() {
     const pairingState = agent?.getAgentState() || {};
     const initialPairingCode = pairingState.pairingCode;
@@ -272,12 +314,17 @@ if (!app.requestSingleInstanceLock()) {
 
   async function start() {
     loadLocalEnvironment();
+    // Use Chromium's trusted network stack for all licensing requests in the
+    // desktop process. This also keeps an older verified runtime compatible
+    // if it does not yet expose the explicit auth fetch adapter below.
+    if (typeof net?.fetch === "function") globalThis.fetch = net.fetch.bind(net);
     licenseServerManager = createLicenseServerManager({
       app,
       moduleDirectory: __dirname,
       nodeExecutable: process.defaultApp ? findNode22Executable(app.getPath("home")) : "",
       electronExecutable: process.execPath,
       useElectronRuntime: !process.defaultApp,
+      publicHealthCheck: checkPublicLicenseServer,
     });
     // Prefer loopback only when this is the owner Mac. A released client agent
     // must not spend its first licensing request trying to contact a server on
@@ -298,7 +345,24 @@ if (!app.requestSingleInstanceLock()) {
     process.env.AGENT_PROTOCOL = "https";
     process.env.AGENT_TLS_CERT = certificate.certPath;
     process.env.AGENT_TLS_KEY = certificate.keyPath;
-    agent = await import("./server.js");
+    runtimeUpdater = createRuntimeUpdater({
+      userDataPath: app.getPath("userData"),
+      moduleDirectory: __dirname,
+      latestReleaseUrl,
+      getCurrentVersion: () => app.getVersion(),
+      onState: (value) => publishUpdateState(value),
+    });
+    const installedRuntime = await readInstalledRuntime({ userDataPath: app.getPath("userData"), moduleDirectory: __dirname });
+    if (installedRuntime) {
+      process.env.AGENT_VERSION = installedRuntime.manifest.version;
+      agent = await import(`${pathToFileURL(path.join(installedRuntime.directory, "agent", "server.js")).href}?runtime=${encodeURIComponent(installedRuntime.manifest.version)}`);
+      console.log(`Using verified local agent runtime ${installedRuntime.manifest.version}`);
+    } else {
+      agent = await import("./server.js");
+    }
+    if (typeof net?.fetch === "function" && typeof agent.setLicenseServerFetchImplementation === "function") {
+      agent.setLicenseServerFetchImplementation((input, options) => net.fetch(input, options));
+    }
     await agent.startAgentServer();
     registerDashboardIpc();
     setupAutoUpdater();
