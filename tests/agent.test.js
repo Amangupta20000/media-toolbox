@@ -183,6 +183,8 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardCss, /\.admin-action\{background:#102c3d;border:1px solid/);
   assert.match(dashboardPreload, /agent:start-license-server/);
   assert.match(dashboardPreload, /agent:get-license-server-state/);
+  assert.match(electronMain, /licenseServerManager\.watchForStorage/);
+  assert.match(electronMain, /licenseServerManager\?\.stopWatching/);
   assert.match(dashboardPreload, /agent:login-activation/);
   assert.match(dashboardPreload, /agent:logout-activation/);
   assert.match(dashboardPreload, /agent:run-diagnostics/);
@@ -347,6 +349,165 @@ test("dashboard licensing server manager starts and stops the loopback service",
   const stopped = await manager.stop();
   assert.equal(stopped.healthy, false);
   assert.equal(stopped.managed, false);
+});
+
+test("packaged licensing server manager uses a real cwd and can restart after stopping", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const temporaryMount = path.join(testRoot, "packaged-license-server-manager");
+  const resourcesPath = path.join(testRoot, "electron-resources");
+  await fs.mkdir(resourcesPath, { recursive: true });
+  let healthy = false;
+  let spawned = [];
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(resourcesPath, "app.asar", "agent"),
+    resourcesPath,
+    dataDirectory: path.join(temporaryMount, "MediaToolboxLicensing"),
+    mountPath: temporaryMount,
+    electronExecutable: "/Applications/Media Toolbox Agent.app/Contents/MacOS/Media Toolbox Agent",
+    useElectronRuntime: true,
+    existsSync: (value) => value === temporaryMount || value === resourcesPath || value.endsWith(path.join("license-server", "index.js")),
+    healthCheck: async () => healthy,
+    spawnImpl: (command, args, options) => {
+      const child = new EventEmitter();
+      child.exitCode = null;
+      child.killed = false;
+      child.kill = () => {
+        child.killed = true;
+        child.exitCode = 0;
+        healthy = false;
+        child.emit("exit", 0, "SIGTERM");
+      };
+      spawned.push({ command, args, options });
+      healthy = true;
+      return child;
+    },
+    logger: { log() {}, warn() {} },
+  });
+  const first = await manager.start();
+  assert.equal(first.started, true);
+  assert.equal(spawned[0].options.cwd, resourcesPath);
+  assert.equal(spawned[0].options.env.ELECTRON_RUN_AS_NODE, "1");
+  await manager.stop();
+  const second = await manager.start();
+  assert.equal(second.started, true);
+  assert.equal(spawned.length, 2);
+  assert.equal(spawned[1].options.cwd, resourcesPath);
+  await manager.stop();
+});
+
+test("licensing server manager starts automatically when the SSD is mounted", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const mountPath = path.join(testRoot, "auto-start-mounted-ssd");
+  const dataDirectory = path.join(mountPath, "MediaToolboxLicensing");
+  let healthy = false;
+  let spawned = 0;
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(root, "agent"),
+    dataDirectory,
+    mountPath,
+    nodeExecutable: "/node22/bin/node",
+    autoStartIntervalMs: 10,
+    existsSync: (value) => value === mountPath || value === dataDirectory || value.endsWith(path.join("license-server", "index.js")),
+    healthCheck: async () => healthy,
+    spawnImpl: () => {
+      const child = new EventEmitter();
+      child.exitCode = null;
+      child.killed = false;
+      child.kill = () => { child.killed = true; child.exitCode = 0; healthy = false; child.emit("exit", 0, "SIGTERM"); };
+      spawned += 1;
+      healthy = true;
+      return child;
+    },
+    logger: { log() {}, warn() {} },
+  });
+  try {
+    const state = await manager.watchForStorage();
+    assert.equal(state.healthy, true);
+    assert.equal(state.autoStartStatus, "running");
+    assert.equal(spawned, 1);
+  } finally {
+    manager.stopWatching();
+    await manager.stop();
+  }
+});
+
+test("licensing server manager waits for the SSD and starts after it appears", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const mountPath = path.join(testRoot, "auto-start-later-ssd");
+  const dataDirectory = path.join(mountPath, "MediaToolboxLicensing");
+  let mounted = false;
+  let healthy = false;
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(root, "agent"),
+    dataDirectory,
+    mountPath,
+    nodeExecutable: "/node22/bin/node",
+    autoStartIntervalMs: 10,
+    existsSync: (value) => (value === mountPath ? mounted : value === dataDirectory || value.endsWith(path.join("license-server", "index.js"))),
+    healthCheck: async () => healthy,
+    spawnImpl: () => {
+      const child = new EventEmitter();
+      child.exitCode = null;
+      child.killed = false;
+      child.kill = () => { child.killed = true; child.exitCode = 0; healthy = false; child.emit("exit", 0, "SIGTERM"); };
+      healthy = true;
+      return child;
+    },
+    logger: { log() {}, warn() {} },
+  });
+  try {
+    const waiting = await manager.watchForStorage();
+    assert.equal(waiting.healthy, false);
+    assert.equal(waiting.autoStartStatus, "waiting-for-ssd");
+    mounted = true;
+    for (let attempt = 0; attempt < 20 && !healthy; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(healthy, true);
+    assert.equal((await manager.getState()).autoStartStatus, "running");
+  } finally {
+    manager.stopWatching();
+    await manager.stop();
+  }
+});
+
+test("manual licensing-server stop suppresses automatic restart until explicitly started", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const mountPath = path.join(testRoot, "auto-start-manual-stop");
+  let healthy = false;
+  let spawned = 0;
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(root, "agent"),
+    mountPath,
+    nodeExecutable: "/node22/bin/node",
+    autoStartIntervalMs: 10,
+    existsSync: (value) => value === mountPath || value.endsWith(path.join("license-server", "index.js")),
+    healthCheck: async () => healthy,
+    spawnImpl: () => {
+      const child = new EventEmitter();
+      child.exitCode = null;
+      child.killed = false;
+      child.kill = () => { child.killed = true; child.exitCode = 0; healthy = false; child.emit("exit", 0, "SIGTERM"); };
+      spawned += 1;
+      healthy = true;
+      return child;
+    },
+    logger: { log() {}, warn() {} },
+  });
+  try {
+    await manager.watchForStorage();
+    await manager.stop();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(spawned, 1);
+    assert.equal((await manager.getState()).autoStartStatus, "stopped");
+    await manager.start();
+    assert.equal(spawned, 2);
+  } finally {
+    manager.stopWatching();
+    await manager.stop();
+  }
 });
 
 test("dashboard licensing server manager reports local and public health separately", async () => {

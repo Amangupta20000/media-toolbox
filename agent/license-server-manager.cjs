@@ -10,6 +10,7 @@ const DEFAULT_DATA_DIR = "/Volumes/Sandisk Exf/MediaToolboxLicensing";
 const DEFAULT_MOUNT_PATH = "/Volumes/Sandisk Exf";
 const HEALTH_TIMEOUT_MS = 1500;
 const START_TIMEOUT_MS = 15000;
+const AUTO_START_INTERVAL_MS = 5000;
 
 function isAlive(child) {
   return Boolean(child && child.exitCode === null && !child.killed);
@@ -77,6 +78,8 @@ function createLicenseServerManager({
   nodeExecutable = "",
   electronExecutable = process.execPath,
   useElectronRuntime = false,
+  resourcesPath = process.resourcesPath || "",
+  autoStartIntervalMs = AUTO_START_INTERVAL_MS,
   spawnImpl = defaultSpawn,
   existsSync = fs.existsSync,
   healthCheck = (url) => probeHealth(url),
@@ -85,6 +88,10 @@ function createLicenseServerManager({
 } = {}) {
   let child = null;
   let lastError = "";
+  let autoStartTimer = null;
+  let autoStartRun = null;
+  let startRun = null;
+  let manuallyStopped = false;
   const entryPath = path.join(moduleDirectory, "..", "license-server", "index.js");
   const url = `http://${host}:${port}`;
   let ownerMarkerPath = "";
@@ -105,6 +112,25 @@ function createLicenseServerManager({
       }
     }
     return String(process.env.LICENSE_SERVER_PUBLIC_URL || process.env.AGENT_LICENSE_SERVER_URL || process.env.NEXT_PUBLIC_LICENSE_SERVER_URL || packagedUrl).trim().replace(/\/$/, "");
+  }
+
+  function spawnWorkingDirectory() {
+    // In a packaged Electron app, moduleDirectory is inside app.asar. The
+    // archive is readable by Electron but cannot be used as a child-process
+    // cwd, which causes spawn() to fail with ENOTDIR after a manual restart.
+    // Electron's Resources directory is a real directory and is suitable for
+    // the server process. Source/Node development continues to use the
+    // repository root.
+    if (resourcesPath) {
+      try {
+        if (fs.statSync(resourcesPath).isDirectory()) return resourcesPath;
+      } catch { /* fall back to the source package directory */ }
+    }
+    const packageDirectory = path.resolve(moduleDirectory, "..");
+    try {
+      if (fs.statSync(packageDirectory).isDirectory()) return packageDirectory;
+    } catch { /* use the current directory as a final safe fallback */ }
+    return process.cwd();
   }
 
   function storageState() {
@@ -129,6 +155,15 @@ function createLicenseServerManager({
       publicEndpoint ? publicHealthCheck(`${publicEndpoint}/v1/health`) : Promise.resolve(null),
     ]);
     const storage = storageState();
+    const autoStartStatus = manuallyStopped
+      ? "stopped"
+      : healthy
+        ? "running"
+        : autoStartRun || startRun
+          ? storage.ssdMounted ? "starting" : "waiting-for-ssd"
+          : !storage.ssdMounted
+            ? "waiting-for-ssd"
+            : "waiting-to-start";
     const state = {
       available: Boolean(existsSync(entryPath)),
       healthy,
@@ -137,6 +172,8 @@ function createLicenseServerManager({
       managed: isAlive(child),
       url,
       publicUrl: publicEndpoint,
+      autoStartEnabled: true,
+      autoStartStatus,
       ...storage,
       runtime: useElectronRuntime ? "packaged Electron runtime" : (nodeExecutable ? nodeExecutable : "Node 22 required"),
       error: lastError
@@ -170,6 +207,13 @@ function createLicenseServerManager({
   }
 
   async function start() {
+    manuallyStopped = false;
+    if (startRun) return startRun;
+    startRun = startInternal().finally(() => { startRun = null; });
+    return startRun;
+  }
+
+  async function startInternal() {
     const current = await getState();
     if (current.healthy) return { ...current, started: false, message: "The licensing server is already running." };
     if (!current.ssdMounted) throw new Error("Connect the Sandisk Exf licensing SSD before starting the server.");
@@ -193,7 +237,7 @@ function createLicenseServerManager({
     if (useElectronRuntime) environment.ELECTRON_RUN_AS_NODE = "1";
 
     const nextChild = spawnImpl(command, args, {
-      cwd: path.resolve(moduleDirectory, ".."),
+      cwd: spawnWorkingDirectory(),
       env: environment,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -224,7 +268,7 @@ function createLicenseServerManager({
     }
   }
 
-  async function stop() {
+  async function stopProcess() {
     if (!child || !isAlive(child)) return getState();
     const stopping = child;
     stopping.kill?.("SIGTERM");
@@ -234,7 +278,59 @@ function createLicenseServerManager({
     return getState();
   }
 
-  return { getState, start, stop, entryPath, findNode22Executable: () => findNode22Executable(app?.getPath?.("home") || process.env.HOME || "") };
+  async function stop() {
+    manuallyStopped = true;
+    return stopProcess();
+  }
+
+  async function attemptAutoStart() {
+    if (manuallyStopped) return getState();
+    const storage = storageState();
+    if (!storage.ssdMounted || !existsSync(entryPath)) {
+      // Do not leave a running licensing process holding an SSD database open
+      // after the volume is removed. Keep auto-start enabled so reinserting
+      // the SSD starts the service again automatically.
+      if (!storage.ssdMounted && child && isAlive(child)) await stopProcess();
+      return getState();
+    }
+    try {
+      const current = await getState();
+      if (current.healthy || manuallyStopped) return current;
+      return await start();
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error || "The licensing server could not be started.");
+      logger.warn?.(`Automatic licensing-server start is waiting: ${lastError}`);
+      return getState();
+    }
+  }
+
+  function watchForStorage() {
+    if (autoStartTimer) return autoStartRun || Promise.resolve(getState());
+    const run = () => {
+      if (autoStartRun) return autoStartRun;
+      autoStartRun = attemptAutoStart().finally(() => { autoStartRun = null; });
+      return autoStartRun;
+    };
+    const firstRun = run();
+    autoStartTimer = setInterval(run, autoStartIntervalMs);
+    autoStartTimer.unref?.();
+    return firstRun;
+  }
+
+  function stopWatching() {
+    if (autoStartTimer) clearInterval(autoStartTimer);
+    autoStartTimer = null;
+  }
+
+  return {
+    getState,
+    start,
+    stop,
+    watchForStorage,
+    stopWatching,
+    entryPath,
+    findNode22Executable: () => findNode22Executable(app?.getPath?.("home") || process.env.HOME || ""),
+  };
 }
 
 module.exports = { createLicenseServerManager, findNode22Executable, probeHealth };

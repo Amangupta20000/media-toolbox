@@ -106,7 +106,7 @@ Run the service locally:
 LICENSE_DATA_DIR="/Volumes/Sandisk Exf/MediaToolboxLicensing" npm run license-server
 ```
 
-After a restart, the owner can open the installed Local Agent dashboard and click **Start licensing server**. The dashboard checks that the SSD is mounted, selects the packaged runtime (or Node 22 in development), starts the loopback service, and reports its health. No Terminal command is needed. The dashboard does not change or recreate the saved Tailscale Funnel configuration.
+After a restart, the installed Local Agent automatically checks for the licensing SSD and starts the loopback service when the configured storage path is available. If the SSD is not mounted, the dashboard shows **Waiting for licensing SSD** and retries automatically every five seconds. The dashboard still has **Start licensing server** as a manual fallback, and **Stop server** suppresses automatic retries until the service is explicitly started again. The dashboard does not change or recreate the saved Tailscale Funnel configuration.
 
 Expose only `http://127.0.0.1:4900` through Tailscale Funnel. Set the resulting stable HTTPS `*.ts.net` URL as `NEXT_PUBLIC_LICENSE_SERVER_URL` in Vercel. Set the same URL as the GitHub Actions repository variable `AGENT_LICENSE_SERVER_URL` so released agents can redeem server-issued codes. The existing public key variable remains `AGENT_LICENSE_PUBLIC_KEY`.
 
@@ -126,7 +126,7 @@ For a no-domain test or small owner-run deployment, Tailscale Funnel can expose 
 npm run license-server:funnel
 ```
 
-The command keeps the Node licensing service running on the SSD and runs `tailscale funnel --bg --https=443 http://127.0.0.1:4900`. It prints the public Tailscale URL. Tailscale must be installed, signed in, and allowed to use Funnel. Keep the SSD mounted and configure the licensing service to start after reboot. Set the printed HTTPS URL as `NEXT_PUBLIC_LICENSE_SERVER_URL` in Vercel and as the `AGENT_LICENSE_SERVER_URL` repository variable before an agent release. The owner dashboard's **Update GitHub variable** button can update the repository variable after `LICENSE_GITHUB_TOKEN` is configured on the licensing server.
+The command keeps the Node licensing service running on the SSD and runs `tailscale funnel --bg --https=443 http://127.0.0.1:4900`. It prints the public Tailscale URL. Tailscale must be installed, signed in, and allowed to use Funnel. Keep the SSD mounted; the installed agent automatically starts the licensing service after login and when the SSD is reconnected. Set the printed HTTPS URL as `NEXT_PUBLIC_LICENSE_SERVER_URL` in Vercel and as the `AGENT_LICENSE_SERVER_URL` repository variable before an agent release. The owner dashboard's **Update GitHub variable** button can update the repository variable after `LICENSE_GITHUB_TOKEN` is configured on the licensing server.
 
 Set the owner-only GitHub token on the SSD server as `LICENSE_GITHUB_TOKEN`. It needs permission to manage Actions variables for `Amangupta20000/media-toolbox`; it is never included in the website bundle, desktop agent, or GitHub variable. The dashboard only sends the HTTPS URL to the authenticated licensing server.
 

@@ -168,10 +168,17 @@
     const publicHealthy = value.publicHealthy === null || value.publicHealthy === undefined ? null : Boolean(value.publicHealthy);
     const mounted = Boolean(value.ssdMounted);
     const fullyReachable = healthy && (!publicConfigured || publicHealthy !== false);
-    badge.textContent = !ownerMachine ? "Owner machine not configured" : !mounted ? "SSD not mounted" : !healthy ? "Stopped" : fullyReachable ? "Running" : "Public endpoint unavailable";
-    badge.className = `badge ${!ownerMachine ? "warning" : !mounted || !healthy ? "error" : fullyReachable ? "ready" : "warning"}`;
+    const autoStartStatus = value.autoStartStatus || "";
+    const waitingForSsd = ownerMachine && autoStartStatus === "waiting-for-ssd";
+    const starting = ownerMachine && autoStartStatus === "starting";
+    badge.textContent = !ownerMachine ? "Owner machine not configured" : waitingForSsd ? "Waiting for licensing SSD" : starting ? "Starting" : !mounted ? "SSD not mounted" : !healthy ? "Stopped" : fullyReachable ? "Running" : "Public endpoint unavailable";
+    badge.className = `badge ${!ownerMachine ? "warning" : waitingForSsd || starting ? "warning" : !mounted || !healthy ? "error" : fullyReachable ? "ready" : "warning"}`;
     message.textContent = !ownerMachine
       ? "This Admin session can inspect the licensing endpoint, but this installation is not configured as the owner machine. Connect the licensing SSD on the owner computer to start the server."
+      : waitingForSsd
+      ? "Waiting for the licensing SSD. The server will start automatically when the configured storage path becomes available."
+      : starting
+      ? "Starting the licensing server automatically. The dashboard will update when it is ready."
       : healthy
       ? `The licensing service is reachable at ${value.url || "http://127.0.0.1:4900"}. Tailscale Funnel can forward to it using its saved configuration.`
       : value.error || (mounted ? "The licensing service is not running. Click Start licensing server after the SSD is mounted." : "Connect the Sandisk Exf licensing SSD, then click Start licensing server.");
@@ -184,8 +191,8 @@
     const command = `LICENSE_DATA_DIR=${shellQuote(dataDir)} npm run license-server`;
     const commandElement = el("license-server-command");
     if (commandElement) commandElement.textContent = command;
-    startButton.disabled = healthy || !ownerMachine || !mounted || value.available === false;
-    startButton.textContent = healthy ? "Licensing server running" : ownerMachine ? "Start licensing server" : "Available on owner machine";
+    startButton.disabled = healthy || starting || !ownerMachine || !mounted || value.available === false;
+    startButton.textContent = healthy ? "Licensing server running" : starting ? "Starting licensing server" : ownerMachine ? "Start licensing server" : "Available on owner machine";
     stopButton.classList.toggle("hidden", !value.managed);
     stopButton.disabled = !value.managed;
   }

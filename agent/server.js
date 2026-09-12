@@ -31,8 +31,12 @@ const state = {
   authorizationMode: "locked",
 };
 
+function processingSessionCount() {
+  return [...state.sessions.values()].filter((session) => session.scope !== "history").length;
+}
+
 function currentAuthorization(now = Date.now()) {
-  return getAuthorizationStateAgent(now, state.sessions.size);
+  return getAuthorizationStateAgent(now, processingSessionCount());
 }
 
 function json(response, status, payload, request, origin = null) {
@@ -117,7 +121,11 @@ function rebuildAllowedOrigins() {
 function refreshAuthorization() {
   const authorization = currentAuthorization();
   state.allowedOrigins = new Set(authorization.trustedOrigins);
-  if (!authorization.authorized && authorization.reason !== "activation_session_limit" && state.sessions.size) state.sessions.clear();
+  if (!authorization.authorized && authorization.reason !== "activation_session_limit" && state.sessions.size) {
+    for (const [token, session] of state.sessions) {
+      if (session.scope !== "history") state.sessions.delete(token);
+    }
+  }
   state.authorizationMode = authorization.mode;
   return authorization;
 }
@@ -159,12 +167,13 @@ function validateWebsiteOrigin(value, requestOrigin = "") {
   return requestedOrigin;
 }
 
-function issueSession(origin, clientLabel = "") {
+function issueSession(origin, clientLabel = "", scope = "processing") {
   const now = Date.now();
   const token = randomUUID();
   const session = {
     id: randomUUID(),
     origin,
+    scope: scope === "history" ? "history" : "processing",
     clientLabel: String(clientLabel || "Website session").replace(/\s+/g, " ").trim().slice(0, 80) || "Website session",
     createdAt: now,
     expiresAt: now + SESSION_TTL_MS,
@@ -177,12 +186,29 @@ function publicSession(session, currentToken = "") {
   return {
     id: session.id,
     origin: session.origin,
+    scope: session.scope || "processing",
     clientLabel: session.clientLabel,
     createdAt: session.createdAt,
     expiresAt: session.expiresAt,
     current: false,
     ...(currentToken ? { current: state.sessions.get(currentToken) === session } : {}),
   };
+}
+
+function authorizeHistory(origin, now = Date.now()) {
+  const authorization = getAuthorizationStateAgent(now, processingSessionCount());
+  if (!authorization.legalAccepted) return { ok: false, code: "legal_consent_required", state: authorization };
+  if (!authorization.trustedOrigins.includes(origin)) return { ok: false, code: "origin_not_trusted", state: authorization };
+  return { ok: true, state: authorization };
+}
+
+function isHistoryRequest(request, url) {
+  if (url.pathname === "/v1/history" && request.method === "GET") return true;
+  if (/^\/v1\/history\/[^/]+$/.test(url.pathname) && request.method === "DELETE") return true;
+  if (/^\/v1\/jobs\/[^/]+\/download$/.test(url.pathname) && (request.method === "GET" || request.method === "HEAD")) return true;
+  if (/^\/v1\/jobs\/[^/]+\/preview$/.test(url.pathname) && request.method === "GET") return true;
+  if (url.pathname === "/v1/results/open" && request.method === "POST") return true;
+  return false;
 }
 
 function readBody(request, limit = 16384) {
@@ -271,6 +297,11 @@ async function deleteDownloadedResult(folderPath, filename) {
 function rawResult(job) {
   if (!job?.result_json) return null;
   try { return JSON.parse(job.result_json); } catch { return null; }
+}
+
+function isRetainedJob(job) {
+  if (!job || job.status !== "completed") return false;
+  try { return JSON.parse(job.options_json || "{}").retention === "keep"; } catch { return false; }
 }
 
 function localJob(job, token) {
@@ -529,7 +560,7 @@ async function handle(request, response) {
       const body = await readJson(request);
       const requestedOrigin = validateWebsiteOrigin(body.origin || request.headers.origin, request.headers.origin);
       if (String(body.code || "").trim() !== state.pairingCode) throw new Error("The pairing code is incorrect or expired.");
-      const access = authorizeProcessing(requestedOrigin, Date.now(), state.sessions.size + 1);
+      const access = authorizeProcessing(requestedOrigin, Date.now(), processingSessionCount() + 1);
       if (!access.ok) {
         if (access.code === "origin_not_trusted") return json(response, 403, { error: "This website origin is not trusted by the local agent.", code: access.code, authorization: publicAuthorization(access.state) }, request, origin || request.headers.origin || null);
         if (access.code === "legal_consent_required") return legalConsentRequired(response, request, origin || request.headers.origin || null, access.state);
@@ -552,27 +583,33 @@ async function handle(request, response) {
     try {
       const body = await readJson(request);
       const requestedOrigin = validateWebsiteOrigin(body.origin || request.headers.origin, request.headers.origin);
-      const access = authorizeProcessing(requestedOrigin, Date.now(), state.sessions.size + 1);
+      const historyOnly = body.historyOnly === true;
+      const access = historyOnly
+        ? authorizeHistory(requestedOrigin)
+        : authorizeProcessing(requestedOrigin, Date.now(), processingSessionCount() + 1);
       if (!access.ok) {
         if (access.code === "origin_not_trusted") return json(response, 403, { error: "This website origin is not trusted by the local agent.", code: access.code, authorization: publicAuthorization(access.state) }, request, origin);
         if (access.code === "legal_consent_required") return legalConsentRequired(response, request, origin, access.state);
         return authorizationRequired(response, request, origin, access.state);
       }
-      const { token, session } = issueSession(requestedOrigin, body.clientLabel);
-      return json(response, 200, { token, sessionId: session.id, expiresAt: session.expiresAt, protocolVersion: PROTOCOL_VERSION, autoPaired: true, authorization: publicAuthorization(access.state) }, request, origin);
+      const { token, session } = issueSession(requestedOrigin, body.clientLabel, historyOnly ? "history" : "processing");
+      return json(response, 200, { token, sessionId: session.id, expiresAt: session.expiresAt, sessionScope: session.scope, protocolVersion: PROTOCOL_VERSION, autoPaired: true, authorization: publicAuthorization(access.state) }, request, origin);
     } catch (error) {
       return json(response, 400, { error: error instanceof Error ? error.message : "The browser session could not be created." }, request, origin);
     }
   }
 
-  if (!authorization.authorized) {
+  const auth = authorize(request, url);
+  const historyOnlySession = auth?.session?.scope === "history";
+  const historyRequest = isHistoryRequest(request, url);
+  if (historyOnlySession && !historyRequest) return json(response, 403, { error: "This session can only access saved history.", code: "history_session_only" }, request, origin);
+  if (!authorization.authorized && !(historyOnlySession && historyRequest)) {
     const hasToken = Boolean(tokenFrom(request, url));
     if (authorization.reason === "legal_consent_required") return legalConsentRequired(response, request, origin, authorization);
     return hasToken
       ? authorizationRequired(response, request, origin, authorization)
       : json(response, 401, { error: "Create a local agent session before accessing this resource.", code: "session_required", authorization: publicAuthorization(authorization) }, request, origin);
   }
-  const auth = authorize(request, url);
   if (!auth) return json(response, 401, { error: "Create a local agent session before accessing this resource.", code: "session_required", authorization: publicAuthorization(authorization) }, request, origin);
   // Native clients may not send an Origin header. If one is present, authorize()
   // has already verified that it matches the origin used during pairing.
@@ -664,6 +701,7 @@ async function handle(request, response) {
     const action = jobMatch[2];
     const job = getJob(id);
     if (!job) return json(response, 404, { error: "Job not found" }, request, origin);
+    if (historyOnlySession && action && !isRetainedJob(job)) return json(response, 404, { error: "History item not found." }, request, origin);
     if (!action && request.method === "GET") return json(response, 200, localJob(job, auth.token), request, origin);
     if (action === "download" && (request.method === "GET" || request.method === "HEAD")) {
       return streamResult(request, response, job, url.searchParams.get("preview") === "1", () => {
@@ -686,9 +724,7 @@ async function handle(request, response) {
     const id = decodeURIComponent(historyMatch[1]);
     const job = getJob(id);
     if (!job) return json(response, 404, { error: "History item not found." }, request, origin);
-    let options = {};
-    try { options = JSON.parse(job.options_json || "{}"); } catch { /* treat as non-retained */ }
-    if (job.status !== "completed" || options.retention !== "keep") return json(response, 404, { error: "This result is not a retained history item." }, request, origin);
+    if (!isRetainedJob(job)) return json(response, 404, { error: "This result is not a retained history item." }, request, origin);
     await cleanupJob(id);
     return json(response, 200, { ok: true, deleted: id }, request, origin);
   }

@@ -51,7 +51,7 @@ Browser endpoints use an explicit trusted-origin allowlist. Admin endpoints use 
 1. Connect and mount the exFAT SSD.
 2. Configure `LICENSE_DATA_DIR=/Volumes/Sandisk Exf/MediaToolboxLicensing` and the volume UUID.
 3. Bootstrap an Ed25519 signing key. Keep the private key encrypted in the service data directory and keep the public key in the released Local Agent.
-4. Run the licensing service with `npm run license-server` under a process supervisor, or click **Start licensing server** in the installed owner dashboard. The dashboard performs the SSD and health checks and starts the bundled service with the correct runtime.
+4. Launch the installed owner agent. It performs the SSD and health checks and starts the bundled licensing service automatically with the correct runtime. If the SSD is missing, it waits and retries automatically when the configured storage path becomes available. **Start licensing server** remains available as a manual fallback.
 5. Enable Tailscale Funnel for the Mac and point it at `http://127.0.0.1:4900`. Set the stable HTTPS `*.ts.net` URL as `NEXT_PUBLIC_LICENSE_SERVER_URL` in Vercel.
 6. Restrict Funnel to the licensing service. Do not expose the SSD or any desktop management endpoint through it.
 

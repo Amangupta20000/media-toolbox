@@ -359,6 +359,13 @@ if (!app.requestSingleInstanceLock()) {
     }
     await agent.startAgentServer();
     registerDashboardIpc();
+    // The owner licensing service follows the agent lifecycle. It starts in
+    // the background when the SSD is already mounted and is retried whenever
+    // the SSD appears later. A manual Stop action still suppresses retries
+    // until the user explicitly starts the service again.
+    licenseServerManager.watchForStorage?.().catch((error) => {
+      console.warn("Automatic licensing-server startup is waiting:", error.message);
+    });
     setupAutoUpdater();
     const firstUpdateCheck = setTimeout(() => checkForUpdates().catch(() => undefined), 8000);
     firstUpdateCheck.unref?.();
@@ -400,6 +407,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on("before-quit", async (event) => {
     if (!agent?.stopAgentServer && !licenseServerManager?.stop) return;
     event.preventDefault();
+    licenseServerManager?.stopWatching?.();
     await agent?.stopAgentServer?.();
     await licenseServerManager?.stop?.();
     app.exit(0);

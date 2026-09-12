@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Download, Eye, FileText, Film, FolderOpen, Image as ImageIcon, Pencil, RefreshCw, Trash2, X } from "lucide-react";
 import { formatBytes } from "./file-dropzone.jsx";
 import { rememberHistoryEdit } from "./history-edit.js";
-import { deleteDownloadedFile, deleteLocalHistory, deleteServerHistory, getLocalHistory, getServerHistory, openLocalResultsFolder, probeLocalAgent, probeServer } from "./processing-client.js";
+import { deleteDownloadedFile, deleteLocalHistory, deleteServerHistory, getLocalHistory, getServerHistory, openLocalResultsFolder, probeServer } from "./processing-client.js";
 
 const toolNames = {
   "image-converter": "Image conversion",
@@ -40,21 +40,15 @@ function formatDuration(value) {
 
 async function loadLocalHistory(tool) {
   try {
-    const agent = await probeLocalAgent();
-    if (!agent.connected) return { status: "unavailable", items: [], message: agent.error || "Admin login or activation is required in the Local agent dashboard." };
-    try {
-      const payload = await getLocalHistory(tool);
-      return { status: "ready", items: Array.isArray(payload.items) ? payload.items : [], message: "" };
-    } catch (error) {
-      if (error?.status === 404) {
-        return { status: "unsupported", items: [], message: "The Local agent is connected, but this installed version does not support History. Update the agent application to the latest release." };
-      }
-      if (error?.status === 401 || error?.status === 403) {
-        return { status: "unavailable", items: [], message: "The Local agent is running, but this browser is not authorized. Open the Local agent dashboard." };
-      }
-      return { status: "error", items: [], message: error instanceof Error ? error.message : "Local history could not be loaded." };
-    }
+    const payload = await getLocalHistory(tool);
+    return { status: "ready", items: Array.isArray(payload.items) ? payload.items : [], message: "" };
   } catch (error) {
+    if (error?.status === 404) {
+      return { status: "unsupported", items: [], message: "This installed Local agent does not support History. Update the agent application to the latest release." };
+    }
+    if (error?.status === 401 || error?.status === 402 || error?.status === 403) {
+      return { status: "unavailable", items: [], message: error.message || "Accept the legal documents in the Local agent dashboard to view saved history." };
+    }
     return { status: "error", items: [], message: error instanceof Error ? error.message : "Local history could not be loaded." };
   }
 }

@@ -3,6 +3,9 @@ const SECURE_AGENT_URL = "https://127.0.0.1:4789";
 const TOKEN_KEY = "media-toolbox-agent-token";
 const TOKEN_EXPIRY_KEY = "media-toolbox-agent-token-expires";
 const SESSION_ID_KEY = "media-toolbox-agent-session-id";
+const HISTORY_TOKEN_KEY = "media-toolbox-agent-history-token";
+const HISTORY_TOKEN_EXPIRY_KEY = "media-toolbox-agent-history-token-expires";
+const HISTORY_SESSION_ID_KEY = "media-toolbox-agent-history-session-id";
 const AGENT_BASE_KEY = "media-toolbox-agent-base";
 
 export function agentBaseUrl() {
@@ -68,17 +71,32 @@ function rememberAgentBase(base) {
   if (typeof window !== "undefined" && base) window.localStorage.setItem(AGENT_BASE_KEY, base);
 }
 
-function storedAgentToken() {
+function storedSessionToken(tokenKey, expiryKey, sessionIdKey) {
   if (typeof window === "undefined") return "";
-  const token = window.localStorage.getItem(TOKEN_KEY) || "";
-  const expires = Number(window.localStorage.getItem(TOKEN_EXPIRY_KEY) || 0);
+  const token = window.localStorage.getItem(tokenKey) || "";
+  const expires = Number(window.localStorage.getItem(expiryKey) || 0);
   if (!token || (expires && expires < Date.now())) {
-    window.localStorage.removeItem(TOKEN_KEY);
-    window.localStorage.removeItem(TOKEN_EXPIRY_KEY);
-    window.localStorage.removeItem(SESSION_ID_KEY);
+    window.localStorage.removeItem(tokenKey);
+    window.localStorage.removeItem(expiryKey);
+    window.localStorage.removeItem(sessionIdKey);
     return "";
   }
   return token;
+}
+
+function storedAgentToken() {
+  return storedSessionToken(TOKEN_KEY, TOKEN_EXPIRY_KEY, SESSION_ID_KEY);
+}
+
+function storedHistoryToken() {
+  return storedSessionToken(HISTORY_TOKEN_KEY, HISTORY_TOKEN_EXPIRY_KEY, HISTORY_SESSION_ID_KEY);
+}
+
+function clearStoredHistorySession() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(HISTORY_TOKEN_KEY);
+  window.localStorage.removeItem(HISTORY_TOKEN_EXPIRY_KEY);
+  window.localStorage.removeItem(HISTORY_SESSION_ID_KEY);
 }
 
 export function clearAgentPairing() {
@@ -86,6 +104,9 @@ export function clearAgentPairing() {
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(TOKEN_EXPIRY_KEY);
   window.localStorage.removeItem(SESSION_ID_KEY);
+  window.localStorage.removeItem(HISTORY_TOKEN_KEY);
+  window.localStorage.removeItem(HISTORY_TOKEN_EXPIRY_KEY);
+  window.localStorage.removeItem(HISTORY_SESSION_ID_KEY);
   window.localStorage.removeItem("media-toolbox-agent-auto-pair-suppressed");
 }
 
@@ -156,6 +177,13 @@ function storeAgentSession(value) {
   if (value.sessionId) window.localStorage.setItem(SESSION_ID_KEY, value.sessionId);
 }
 
+function storeHistorySession(value) {
+  if (typeof window === "undefined" || !value?.token) return;
+  window.localStorage.setItem(HISTORY_TOKEN_KEY, value.token);
+  window.localStorage.setItem(HISTORY_TOKEN_EXPIRY_KEY, String(value.expiresAt || Date.now() + 12 * 60 * 60 * 1000));
+  if (value.sessionId) window.localStorage.setItem(HISTORY_SESSION_ID_KEY, value.sessionId);
+}
+
 export async function ensureLocalAgentSession() {
   const token = storedAgentToken();
   if (token) return token;
@@ -166,6 +194,18 @@ export async function ensureLocalAgentSession() {
   });
   storeAgentSession(session);
   return storedAgentToken();
+}
+
+export async function ensureLocalHistorySession() {
+  const token = storedHistoryToken();
+  if (token) return token;
+  const { payload: session } = await fetchLocalJson("/v1/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ origin: window.location.origin, clientLabel: `${browserSessionLabel()} · history`, historyOnly: true }),
+  });
+  storeHistorySession(session);
+  return storedHistoryToken();
 }
 
 export async function probeLocalAgent() {
@@ -227,6 +267,11 @@ function requestOptions(mode, options = {}) {
   return { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` } };
 }
 
+function historyRequestOptions(options = {}) {
+  const token = storedHistoryToken();
+  return { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` } };
+}
+
 function endpoint(mode, path) {
   return mode === "local" ? `${agentBaseUrl()}/v1${path}` : `/api${path}`;
 }
@@ -261,8 +306,18 @@ export async function deleteProcessingJob(mode, id) {
 }
 
 export async function getLocalHistory(tool) {
+  await ensureLocalHistorySession();
   const query = `?tool=${encodeURIComponent(tool)}`;
-  return fetchJson(`${agentBaseUrl()}/v1/history${query}`, requestOptions("local"));
+  try {
+    const { payload } = await fetchLocalJson(`/v1/history${query}`, historyRequestOptions());
+    return payload;
+  } catch (error) {
+    if (error?.status !== 401) throw error;
+    clearStoredHistorySession();
+    await ensureLocalHistorySession();
+    const { payload } = await fetchLocalJson(`/v1/history${query}`, historyRequestOptions());
+    return payload;
+  }
 }
 
 export async function getLocalSessions() {
@@ -284,12 +339,30 @@ export async function endAllLocalSessions() {
 }
 
 export async function deleteLocalHistory(id) {
-  return fetchJson(`${agentBaseUrl()}/v1/history/${encodeURIComponent(id)}`, requestOptions("local", { method: "DELETE" }));
+  await ensureLocalHistorySession();
+  const path = `/v1/history/${encodeURIComponent(id)}`;
+  try {
+    const { payload } = await fetchLocalJson(path, historyRequestOptions({ method: "DELETE" }));
+    return payload;
+  } catch (error) {
+    if (error?.status !== 401) throw error;
+    clearStoredHistorySession();
+    const { payload } = await fetchLocalJson(path, historyRequestOptions({ method: "DELETE" }));
+    return payload;
+  }
 }
 
 export async function openLocalResultsFolder() {
-  await ensureLocalAgentSession();
-  return fetchJson(`${agentBaseUrl()}/v1/results/open`, requestOptions("local", { method: "POST" }));
+  await ensureLocalHistorySession();
+  try {
+    const { payload } = await fetchLocalJson("/v1/results/open", historyRequestOptions({ method: "POST" }));
+    return payload;
+  } catch (error) {
+    if (error?.status !== 401) throw error;
+    clearStoredHistorySession();
+    const { payload } = await fetchLocalJson("/v1/results/open", historyRequestOptions({ method: "POST" }));
+    return payload;
+  }
 }
 
 export async function deleteDownloadedFile(folderPath, filename) {

@@ -99,6 +99,36 @@ test("local agent entrypoint starts and completes a local image job", async () =
       consentProcess.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`The local agent consent setup failed: ${consentError}`)));
     });
 
+    const historySessionResponse = await fetch(`${baseUrl}/v1/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
+      body: JSON.stringify({ origin: "http://localhost:3000", clientLabel: "History-only browser", historyOnly: true }),
+    });
+    assert.equal(historySessionResponse.status, 200);
+    const historySession = await historySessionResponse.json();
+    assert.equal(historySession.sessionScope, "history");
+    assert.ok(historySession.token);
+    assert.equal(historySession.authorization.trialStartedAt, null);
+
+    const historyResponse = await fetch(`${baseUrl}/v1/history?tool=image-converter`, {
+      headers: { Authorization: `Bearer ${historySession.token}`, Origin: "http://localhost:3000" },
+    });
+    assert.equal(historyResponse.status, 200);
+    assert.deepEqual((await historyResponse.json()).items, []);
+
+    const historyCapabilitiesResponse = await fetch(`${baseUrl}/v1/capabilities`, {
+      headers: { Authorization: `Bearer ${historySession.token}`, Origin: "http://localhost:3000" },
+    });
+    assert.equal(historyCapabilitiesResponse.status, 403);
+    assert.equal((await historyCapabilitiesResponse.json()).code, "history_session_only");
+
+    const historyJobResponse = await fetch(`${baseUrl}/v1/jobs`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${historySession.token}`, Origin: "http://localhost:3000" },
+    });
+    assert.equal(historyJobResponse.status, 403);
+    assert.equal((await historyJobResponse.json()).code, "history_session_only");
+
     const sessionResponse = await fetch(`${baseUrl}/v1/session`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
