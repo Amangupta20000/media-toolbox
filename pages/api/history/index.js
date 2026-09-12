@@ -19,11 +19,16 @@ export default function handler(request, response) {
   const tool = String(request.query.tool || "").trim();
   if (!HISTORY_TOOLS.has(tool)) return response.status(400).json({ error: "Choose a supported tool for history." });
 
-  const items = listCompletedJobs(tool)
-    .filter((row) => {
-      const resultPath = resultPathFor(row);
-      return Boolean(resultPath && fs.existsSync(resultPath));
-    })
-    .map((row) => ({ ...getJobForPublic(row.id), storage: "server", storedLocally: false, location: "Server temporary storage · auto-cleaned" }));
-  return response.status(200).json({ items });
+  try {
+    const items = listCompletedJobs(tool)
+      .filter((row) => {
+        const resultPath = resultPathFor(row);
+        return Boolean(resultPath && fs.existsSync(resultPath));
+      })
+      .map((row) => ({ ...getJobForPublic(row.id), storage: "server", storedLocally: false, location: "Server temporary storage · auto-cleaned" }));
+    return response.status(200).json({ items });
+  } catch (error) {
+    console.error("Server history is unavailable:", error);
+    return response.status(503).json({ error: "Server history requires a running worker and persistent writable storage. Use the Local agent or connect a persistent backend." });
+  }
 }

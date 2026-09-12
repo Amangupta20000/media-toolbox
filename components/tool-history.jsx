@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, Download, Eye, FileText, Film, Image as ImageIcon, Pencil, RefreshCw, Trash2, X } from "lucide-react";
 import { formatBytes } from "./file-dropzone.jsx";
 import { rememberHistoryEdit } from "./history-edit.js";
-import { deleteDownloadedFile, deleteLocalHistory, deleteServerHistory, getLocalHistory, getServerHistory, probeLocalAgent } from "./processing-client.js";
+import { deleteDownloadedFile, deleteLocalHistory, deleteServerHistory, getLocalHistory, getServerHistory, probeLocalAgent, probeServer } from "./processing-client.js";
 
 const toolNames = {
   "image-converter": "Image conversion",
@@ -54,9 +54,13 @@ async function loadLocalHistory(tool) {
 
 async function loadServerHistory(tool) {
   try {
+    await probeServer();
     const payload = await getServerHistory(tool);
     return { status: "ready", items: Array.isArray(payload.items) ? payload.items : [], message: "" };
   } catch (error) {
+    if (Number(error?.status) >= 500) {
+      return { status: "unavailable", items: [], message: "Server history is unavailable because the server worker or persistent storage is not connected. Use the Local agent or connect a persistent backend." };
+    }
     return { status: "error", items: [], message: error instanceof Error ? error.message : "Server history could not be loaded." };
   }
 }
