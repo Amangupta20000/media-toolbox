@@ -51,8 +51,14 @@ BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/media-toolbox-untrunc.XXXXXX")"
 SOURCE_DIR="$BUILD_DIR/untrunc"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
-git clone --depth 5 https://github.com/anthwlock/untrunc "$SOURCE_DIR"
-git -C "$SOURCE_DIR" checkout "${UNTRUNC_SOURCE_REF:-9d86ec9ef2ffed1bf8131abe80742c0574db52b6}"
+UNTRUNC_REF="${UNTRUNC_SOURCE_REF:-9d86ec9ef2ffed1bf8131abe80742c0574db52b6}"
+# The pinned revision is intentionally older than the repository's latest
+# commits. Fetch that exact revision directly instead of relying on a shallow
+# branch clone containing it.
+git init -q "$SOURCE_DIR"
+git -C "$SOURCE_DIR" remote add origin https://github.com/anthwlock/untrunc.git
+git -C "$SOURCE_DIR" fetch --depth 1 origin "$UNTRUNC_REF"
+git -C "$SOURCE_DIR" checkout --detach FETCH_HEAD
 
 # FFmpeg 3.3.9's architecture-specific code is rejected by current Linux and
 # macOS toolchains. Untrunc still builds and works with FFmpeg's C
