@@ -25,12 +25,21 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Cache bundled Untrunc
+        if: matrix.platform != 'win'
+        id: untrunc-cache
+        uses: actions/cache@v4
+        with:
+          path: vendor/untrunc
+          key: untrunc-${{ matrix.platform }}-${{ runner.arch }}-9d86ec9ef2ffed1bf8131abe80742c0574db52b6
+          restore-keys: |
+            untrunc-${{ matrix.platform }}-${{ runner.arch }}-
       - name: Install macOS Untrunc build dependency
-        if: matrix.platform == 'mac'
+        if: matrix.platform == 'mac' && steps.untrunc-cache.outputs.cache-hit != 'true'
         run: brew install yasm
       - name: Install Linux Untrunc build dependencies
-        if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y ca-certificates g++ git make wget xz-utils yasm
+        if: matrix.platform == 'linux' && steps.untrunc-cache.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ca-certificates g++ git make wget xz-utils yasm
       - name: Prepare bundled Untrunc on macOS or Linux
         if: matrix.platform != 'win'
         shell: bash

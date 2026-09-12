@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Download, FilePlus2, FileText, GripVertical, ImagePlus, LoaderCircle, Lock, Plus, RotateCcw, Trash2, Unlock, UploadCloud, WandSparkles, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FilePlus2, FileText, GripVertical, ImagePlus, LoaderCircle, Lock, Plus, Printer, RotateCcw, Trash2, Unlock, UploadCloud, WandSparkles, X } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { formatBytes } from "./file-dropzone.jsx";
 import { takeHistoryEdit } from "./history-edit.js";
@@ -35,6 +35,24 @@ function isPdf(file) {
 
 function isImage(file) {
   return file && ((file.type || "").startsWith("image/") || ACCEPTED_IMAGE_EXTENSIONS.has(fileExtension(file.name)));
+}
+
+function clipboardImageFile(blob, index) {
+  const type = String(blob?.type || "image/png").toLowerCase();
+  const subtype = type.split("/")[1]?.split(";")[0] || "png";
+  const extension = subtype === "jpeg" ? "jpg" : subtype.replace(/[^a-z0-9]/g, "") || "png";
+  return new File([blob], `pasted-image-${Date.now()}-${index + 1}.${extension}`, { type });
+}
+
+function clipboardImageFiles(clipboardData) {
+  const clipboardFiles = Array.from(clipboardData?.files || []).filter((file) => isImage(file));
+  if (clipboardFiles.length) return clipboardFiles.map((file, index) => clipboardImageFile(file, index));
+  const items = Array.from(clipboardData?.items || []);
+  return items
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item, index) => item.getAsFile())
+    .filter(Boolean)
+    .map((blob, index) => clipboardImageFile(blob, index));
 }
 
 async function loadPdfLibrary() {
@@ -498,6 +516,8 @@ export function PdfEditor() {
       next.splice(insertionIndex, 0, moved);
       return next;
     });
+    setSelectedId(sourceId);
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => scrollPreviewIntoView(sourceId)));
     setDropTargetId(null);
     setDropPosition(null);
     setRecentlyDroppedId(sourceId);
@@ -758,6 +778,20 @@ export function PdfEditor() {
       setError(imageError instanceof Error ? imageError.message : "The image could not be added.");
     }
   };
+
+  useEffect(() => {
+    const handlePaste = (event) => {
+      if (activeView !== "tool" || job || !selectedPage || event.defaultPrevented) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable=\"true\"]")) return;
+      const files = clipboardImageFiles(event.clipboardData);
+      if (!files.length) return;
+      event.preventDefault();
+      void addImages(files);
+    };
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [activeView, job, selectedPage]);
 
   const removeImage = (pageId, imageId) => {
     const page = pages.find((item) => item.id === pageId);
@@ -1158,6 +1192,8 @@ function PdfResultPreview({ result }) {
 
 function PdfJobCard({ job: initialJob, mode = "server", keepResult = false, onReset, onContinue }) {
   const [job, setJob] = useState(initialJob);
+  const [printing, setPrinting] = useState(false);
+  const [printError, setPrintError] = useState("");
   useEffect(() => {
     let active = true;
     const poll = async () => {
@@ -1174,8 +1210,40 @@ function PdfJobCard({ job: initialJob, mode = "server", keepResult = false, onRe
     return () => { active = false; };
   }, [initialJob.id, mode]);
 
+  const printPdf = async () => {
+    if (!job.result?.downloadUrl || printing) return;
+    setPrinting(true);
+    setPrintError("");
+    let printWindow = null;
+    let objectUrl = "";
+    try {
+      printWindow = window.open("about:blank", "_blank");
+      if (!printWindow) throw new Error("Printing was blocked by the browser. Allow pop-ups for this site and try again.");
+      printWindow.document.title = `Print ${job.result.filename || "PDF"}`;
+      printWindow.document.body.innerHTML = "<p style=\"font:16px system-ui,sans-serif;padding:24px\">Preparing PDF for printing…</p>";
+      const response = await fetch(job.result.downloadUrl, { cache: "no-store" });
+      if (!response.ok) throw new Error("The PDF could not be opened for printing. Download it and print the downloaded file instead.");
+      const blob = await response.blob();
+      objectUrl = URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
+      printWindow.location.href = objectUrl;
+      window.setTimeout(() => {
+        if (printWindow && !printWindow.closed) {
+          printWindow.focus();
+          printWindow.print();
+        }
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+      }, 1500);
+    } catch (error) {
+      if (printWindow && !printWindow.closed) printWindow.close();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setPrintError(error instanceof Error ? error.message : "The PDF could not be opened for printing.");
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   const done = job.status === "completed";
   const failed = job.status === "failed";
   const progress = Math.max(0, Math.min(100, job.progress || 0));
-  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : job.status === "queued" ? "Queued" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be created" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<div className="pdf-job-log"><div className="job-log-heading"><span>Worker log</span><span>{(job.logs || []).length} events</span></div><div className="job-log-list">{job.logs?.length ? job.logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for progress…</div>}</div></div>{done && job.result && <><div className="pdf-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>All {job.result.pageCount || ""} pages</small></div><PdfResultPreview result={job.result} /></div><div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Pages</span><strong>{job.result.pageCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div></>} {done && job.result && <ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} />}<div className="job-actions">{done && job.result && <><a className="primary-button" href={job.result.downloadUrl} download={job.result.filename}><Download size={18} /> Download PDF</a><button className="secondary-button" type="button" onClick={() => onContinue?.(job.result)}><FilePlus2 size={17} /> Continue editing</button></>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
+  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : job.status === "queued" ? "Queued" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be created" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<div className="pdf-job-log"><div className="job-log-heading"><span>Worker log</span><span>{(job.logs || []).length} events</span></div><div className="job-log-list">{job.logs?.length ? job.logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for progress…</div>}</div></div>{done && job.result && <><div className="pdf-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>All {job.result.pageCount || ""} pages</small></div><PdfResultPreview result={job.result} /></div><div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Pages</span><strong>{job.result.pageCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div></>} {done && job.result && <ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} />} {printError && <div className="error-banner"><AlertTriangle size={17} /><span>{printError}</span></div>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={job.result.downloadUrl} download={job.result.filename}><Download size={18} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button><button className="secondary-button" type="button" onClick={() => onContinue?.(job.result)}><FilePlus2 size={17} /> Continue editing</button></>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
 }

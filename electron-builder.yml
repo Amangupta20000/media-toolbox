@@ -8,8 +8,79 @@ files:
   - worker/**/*
   - vendor/untrunc/**/*
   - components/processing-client.js
-  - node_modules/**/*
   - package.json
+  # Keep the desktop agent self-contained, but do not ship the Next.js website
+  # and its development dependencies. The previous node_modules/**/* pattern
+  # added hundreds of megabytes that the agent never loads.
+  - node_modules/@ffmpeg-installer/**/*
+  - node_modules/@ffprobe-installer/**/*
+  - node_modules/@img/**/*
+  - node_modules/@pdf-lib/**/*
+  - node_modules/@peculiar/**/*
+  - node_modules/@noble/**/*
+  - node_modules/asn1js/**/*
+  - node_modules/base64-js/**/*
+  - node_modules/better-sqlite3/**/*
+  - node_modules/bindings/**/*
+  - node_modules/bl/**/*
+  - node_modules/buffer/**/*
+  - node_modules/busboy/**/*
+  - node_modules/bytestreamjs/**/*
+  - node_modules/chownr/**/*
+  - node_modules/decompress-response/**/*
+  - node_modules/deep-extend/**/*
+  - node_modules/detect-libc/**/*
+  - node_modules/end-of-stream/**/*
+  - node_modules/expand-template/**/*
+  - node_modules/file-uri-to-path/**/*
+  - node_modules/fs-constants/**/*
+  - node_modules/github-from-package/**/*
+  - node_modules/ieee754/**/*
+  - node_modules/inherits/**/*
+  - node_modules/ini/**/*
+  - node_modules/mimic-response/**/*
+  - node_modules/minimist/**/*
+  - node_modules/mkdirp-classic/**/*
+  - node_modules/napi-build-utils/**/*
+  - node_modules/node-abi/**/*
+  - node_modules/once/**/*
+  - node_modules/pako/**/*
+  - node_modules/pdf-lib/**/*
+  - node_modules/pkijs/**/*
+  - node_modules/prebuild-install/**/*
+  - node_modules/pump/**/*
+  - node_modules/pvtsutils/**/*
+  - node_modules/pvutils/**/*
+  - node_modules/rc/**/*
+  - node_modules/readable-stream/**/*
+  - node_modules/reflect-metadata/**/*
+  - node_modules/safe-buffer/**/*
+  - node_modules/selfsigned/**/*
+  - node_modules/semver/**/*
+  - node_modules/sharp/**/*
+  - node_modules/simple-concat/**/*
+  - node_modules/simple-get/**/*
+  - node_modules/streamsearch/**/*
+  - node_modules/string_decoder/**/*
+  - node_modules/strip-json-comments/**/*
+  - node_modules/tar-fs/**/*
+  - node_modules/tar-stream/**/*
+  - node_modules/tslib/**/*
+  - node_modules/tsyringe/**/*
+  - node_modules/tunnel-agent/**/*
+  - node_modules/util-deprecate/**/*
+  - node_modules/webcrypto-core/**/*
+  - node_modules/wrappy/**/*
+  # These are website-only dependencies. electron-builder also discovers
+  # production dependencies from the root package.json, so exclude them
+  # explicitly after the agent runtime allow-list above.
+  - "!node_modules/next/**/*"
+  - "!node_modules/@next/**/*"
+  - "!node_modules/react/**/*"
+  - "!node_modules/react-dom/**/*"
+  - "!node_modules/pdfjs-dist/**/*"
+  - "!node_modules/lucide-react/**/*"
+  - "!node_modules/@napi-rs/**/*"
 asar: true
 extraMetadata:
   main: agent/electron-main.cjs
