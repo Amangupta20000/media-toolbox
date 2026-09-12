@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { FileImage, FileVideo, UploadCloud, X } from "lucide-react";
 
-export function FileDropzone({ file, onFile, onClear, accept, label, hint, variant = "image", disabled = false }) {
+export function FileDropzone({ file, onFile, onClear, accept, label, hint, variant = "image", disabled = false, required = false }) {
   const inputRef = useRef(null);
   const [dragging, setDragging] = useState(false);
   const Icon = variant === "image" ? FileImage : FileVideo;
@@ -18,7 +18,7 @@ export function FileDropzone({ file, onFile, onClear, accept, label, hint, varia
     role="button" tabIndex={disabled ? -1 : 0}
     onKeyDown={(event) => { if ((event.key === "Enter" || event.key === " ") && !disabled) inputRef.current?.click(); }}
   >
-    <input ref={inputRef} type="file" accept={accept} hidden onChange={(event) => choose(event.target.files?.[0])} />
+    <input ref={inputRef} type="file" accept={accept} required={required && !file} aria-required={required} hidden onChange={(event) => choose(event.target.files?.[0])} />
     {file ? <div className="selected-file" onClick={(event) => event.stopPropagation()}>
       <div className="file-symbol"><Icon size={21} /></div>
       <div className="selected-file-copy"><strong>{file.name}</strong><span>{formatBytes(file.size)} · ready to process</span></div>

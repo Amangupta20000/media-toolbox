@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock3, Download, FileCheck2, Info, LoaderCircle, RotateCcw, ShieldCheck, Sparkles, Zap } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { FileDropzone, formatBytes } from "./file-dropzone.jsx";
+import { clipboardImageFile, isSupportedImageFile } from "../lib/image-input.js";
 import { takeHistoryEdit } from "./history-edit.js";
 import { ProcessingMode } from "./processing-mode.jsx";
 import { ResultDownloadNote } from "./result-download-note.jsx";
@@ -112,6 +113,20 @@ export function ToolPage({ tool }) {
   };
 
   const handleSourceFile = (file) => {
+    if (isImage && !isSupportedImageFile(file)) {
+      setSource(null);
+      setPreviewUrl("");
+      setPreviewError(false);
+      setError("Choose a supported image file (JPG, PNG, HEIC, TIFF, GIF, or BMP).");
+      return;
+    }
+    if (isImage && file.size > 25 * 1024 * 1024) {
+      setSource(null);
+      setPreviewUrl("");
+      setPreviewError(false);
+      setError("The image must be 25 MB or smaller.");
+      return;
+    }
     setSource(file);
     setPreviewUrl("");
     setPreviewError(false);
@@ -120,6 +135,21 @@ export function ToolPage({ tool }) {
     setJpegConfirmed(false);
     setError("");
   };
+
+  useEffect(() => {
+    if (!isImage) return undefined;
+    const handlePaste = (event) => {
+      if (event.defaultPrevented || busy || uploadProgress) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+      const file = clipboardImageFile(event.clipboardData);
+      if (!file) return;
+      event.preventDefault();
+      handleSourceFile(file);
+    };
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [isImage, busy, uploadProgress, handleSourceFile]);
 
   useEffect(() => {
     const pending = takeHistoryEdit(tool);
@@ -172,7 +202,7 @@ export function ToolPage({ tool }) {
     <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />
     <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${capabilities?.status === "ready" ? "ready" : ""}`} /><span>{capabilities?.status === "ready" ? `${processingMode === "local" ? "Local agent" : "Server"} worker online` : "Connecting to processing worker"}</span></div>{isImage ? <span>{heicReady ? (capabilities?.image?.heic ? "HEIC enabled" : "HEIC enabled via local fallback") : capabilities?.status === "ready" ? "HEIC unavailable" : "HEIC capability checking"}</span> : <span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery + fallback" : "Reference recovery · upload a reference") : capabilities?.status === "ready" ? "FFmpeg recovery enabled · reference recovery unavailable" : "Video capabilities checking"}</span>}</div>
     {job ? <JobStatusCard job={job} isImage={isImage} mode={jobMode} keepResult={keepResult} onReset={reset} /> : <div className="workspace-grid">
-      <section className="tool-card primary-card"><div className="card-heading"><div><span className="card-index">01</span><h2>{isImage ? "Add an image" : "Add a damaged video"}</h2></div><span className="required-label">Required</span></div><FileDropzone file={source} onFile={isImage ? handleSourceFile : (file) => { setSource(file); setError(""); }} onClear={() => { setSource(null); setPreviewUrl(""); setPreviewError(false); }} variant={isImage ? "image" : "video"} accept={isImage ? imageAccept : "video/*,.mkv,.webm,.avi,.3gp"} label={isImage ? "Drop an image here" : "Drop a video here"} hint="or click to browse from your device" disabled={Boolean(uploadProgress)} />{isImage && source && previewUrl && <div className="image-preview-card"><div className="preview-heading"><span>Browser preview</span><small>Local only · not uploaded</small></div><div className="image-preview-frame">{previewError ? <div className="preview-unavailable"><AlertTriangle size={18} /><span>This browser cannot preview this image format, but the file can still be processed.</span></div> : <img src={previewUrl} alt={`Preview of ${source.name}`} onError={() => setPreviewError(true)} />}</div></div>}<div className="limit-row"><span>Maximum file size</span><strong>{isImage ? "25 MB" : "2 GB"}</strong></div>{processingMode === "local" && <label className="keep-result-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label>}</section>
+      <section className="tool-card primary-card"><div className="card-heading"><div><span className="card-index">01</span><h2>{isImage ? "Add an image" : "Add a damaged video"}</h2></div><span className="required-label">Required</span></div><FileDropzone file={source} onFile={isImage ? handleSourceFile : (file) => { setSource(file); setError(""); }} onClear={() => { setSource(null); setPreviewUrl(""); setPreviewError(false); }} variant={isImage ? "image" : "video"} accept={isImage ? imageAccept : "video/*,.mkv,.webm,.avi,.3gp"} label={isImage ? "Drop or paste an image here" : "Drop a video here"} hint={isImage ? "or click to browse from your device" : "or click to browse from your device"} required={isImage} disabled={Boolean(uploadProgress)} />{isImage && source && previewUrl && <div className="image-preview-card"><div className="preview-heading"><span>Browser preview</span><small>Local only · not uploaded</small></div><div className="image-preview-frame">{previewError ? <div className="preview-unavailable"><AlertTriangle size={18} /><span>This browser cannot preview this image format, but the file can still be processed.</span></div> : <img src={previewUrl} alt={`Preview of ${source.name}`} onError={() => setPreviewError(true)} />}</div></div>}<div className="limit-row"><span>Maximum file size</span><strong>{isImage ? "25 MB" : "2 GB"}</strong></div>{processingMode === "local" && <label className="keep-result-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label>}</section>
     {isImage ? <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Choose output</h2></div><span className="optional-label">Optional target</span></div><p className="card-description">Original keeps the selected file type, so a PNG remains a PNG. A size target aims for the requested KB without changing pixel dimensions.</p><div className="format-grid">{imageFormats.map(([value, label, detail]) => <button type="button" key={value} className={`format-option ${format === value ? "selected" : ""}`} onClick={() => { setFormat(value); if (value !== "jpeg") setJpegConfirmed(false); }}><span className="format-radio" /><strong>{label}</strong><small>{detail}</small></button>)}</div><label className="field-label">Processing method <span>Worker engine</span></label><div className="method-list">{imageMethods.map(([value, label, detail, tag]) => { const unavailable = (value === "imagemagick" && capabilities?.status === "ready" && !imageMagickReady) || (value === "sips" && capabilities?.status === "ready" && !sipsReady); return <button type="button" key={value} className={`method-option ${method === value ? "selected" : ""} ${unavailable ? "unavailable" : ""}`} disabled={unavailable} onClick={() => setMethod(value)}><span className="method-copy"><strong>{label}</strong><small>{detail}</small></span><span className="method-tag">{unavailable ? "Unavailable" : tag}</span></button>; })}</div><label className="field-label" htmlFor="max-size">Target size <span>KB</span></label><div className="input-with-suffix"><input id="max-size" type="text" inputMode="numeric" value={maxSizeKb} onChange={(event) => setMaxSizeKb(event.target.value.replace(/[^0-9]/g, ""))} placeholder="Leave blank for normal quality" /><span>KB target</span></div>{format === "jpeg" && <label className="warning-check"><input type="checkbox" checked={jpegConfirmed} onChange={(event) => setJpegConfirmed(event.target.checked)} /><span><AlertTriangle size={16} /><span>JPEG flattens transparent pixels. I understand.</span></span></label>}</section> : <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Reference video</h2></div><span className={serverReferenceReady ? "optional-label" : "required-label"}>{serverReferenceReady ? "Optional server fallback" : "Upload for damaged MP4"}</span></div><p className="card-description">A healthy recording from the same device or app can rebuild missing MP4 metadata when it was recorded with the same settings.</p><FileDropzone file={reference} onFile={setReference} onClear={() => setReference(null)} variant="video" accept="video/*,.mkv,.webm,.avi,.3gp" label="Drop a reference video" hint={serverReferenceReady ? "or continue without one" : "required when MP4 metadata is missing"} disabled={Boolean(uploadProgress)} /><div className="info-note"><Info size={16} /><span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery is available. If you do not upload one, the configured server reference will be tried." : "No server-side reference is configured. Upload a healthy recording from the same device or app for missing MP4 metadata; readable containers can still be repaired without one.") : "FFmpeg can repair readable containers. Missing MP4 metadata requires Untrunc and a matching healthy reference."}</span></div></section>}
       <section className="tool-card action-card"><div className="action-copy"><div className="action-icon"><Zap size={19} /></div><div><h2>Ready when you are</h2><p>{isImage ? "Your output will be created as a new file." : "The worker will try the safest recovery method first."}</p></div></div><button className="primary-button" onClick={submit} disabled={!canSubmit}>{uploadProgress ? <><LoaderCircle className="spin" size={18} /> Uploading {uploadProgress}%</> : <><Sparkles size={18} /> {isImage ? "Convert image" : "Repair video"}</>}</button></section>
     </div>}
