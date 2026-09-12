@@ -40,6 +40,7 @@
     "pdfjs-dist": "^6.3.289",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "selfsigned": "^5.5.0",
     "sharp": "^0.35.4"
   }
 }

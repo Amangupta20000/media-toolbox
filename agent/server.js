@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import http from "node:http";
+import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 import { randomInt, randomUUID } from "node:crypto";
@@ -11,7 +12,7 @@ import { acceptMultipartJob } from "../lib/job-intake.js";
 import { firstAvailable, runCommand } from "../lib/command.js";
 import { processJob, writeCapabilities } from "../worker/index.js";
 
-const AGENT_VERSION = process.env.AGENT_VERSION || "0.1.0";
+const AGENT_VERSION = process.env.AGENT_VERSION || "0.2.0";
 const PROTOCOL_VERSION = 1;
 const DEFAULT_PORT = 4789;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -19,6 +20,7 @@ const HISTORY_TOOLS = new Set(["image-converter", "video-repair", "pdf-editor"])
 const state = {
   server: null,
   port: DEFAULT_PORT,
+  protocol: "http",
   pairingCode: String(randomInt(100000, 1000000)),
   sessions: new Map(),
   allowedOrigins: new Set(),
@@ -171,7 +173,7 @@ function rawResult(job) {
 function localJob(job, token) {
   const value = getJobForPublic(job.id);
   if (!value?.result) return value;
-  const base = `http://127.0.0.1:${state.port}`;
+  const base = `${state.protocol}://127.0.0.1:${state.port}`;
   value.result.downloadUrl = `${base}/v1/jobs/${encodeURIComponent(job.id)}/download?access_token=${encodeURIComponent(token)}`;
   value.result.previewUrl = `${base}/v1/jobs/${encodeURIComponent(job.id)}/download?preview=1&access_token=${encodeURIComponent(token)}`;
   return value;
@@ -323,7 +325,7 @@ async function renderPdfPage(request, response, job, page) {
 }
 
 async function handle(request, response) {
-  const url = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`);
+  const url = new URL(request.url || "/", `${state.protocol}://${request.headers.host || "127.0.0.1"}`);
   const pathParts = url.pathname.split("/").filter(Boolean);
   const origin = addCors(request, response, pathParts[0] === "v1" && ["health", "pair"].includes(pathParts[1]));
   if (request.method === "OPTIONS") {
@@ -334,7 +336,7 @@ async function handle(request, response) {
   if (url.pathname === "/v1/health" && request.method === "GET") {
     const requestOrigin = String(request.headers.origin || "").trim();
     const paired = requestOrigin ? state.allowedOrigins.has(requestOrigin) : state.allowedOrigins.size > 0;
-    return json(response, 200, { ok: true, service: "media-toolbox-agent", agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, platform: process.platform, arch: process.arch, paired }, request, origin || request.headers.origin || null);
+    return json(response, 200, { ok: true, service: "media-toolbox-agent", agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, protocol: state.protocol, platform: process.platform, arch: process.arch, paired }, request, origin || request.headers.origin || null);
   }
   if (url.pathname === "/v1/pair" && request.method === "POST") {
     try {
@@ -448,23 +450,29 @@ async function handle(request, response) {
 }
 
 export function getAgentState() {
-  return { pairingCode: state.pairingCode, port: state.port, running: Boolean(state.server), agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION };
+  return { pairingCode: state.pairingCode, port: state.port, running: Boolean(state.server), protocol: state.protocol, agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION };
 }
 
-export async function startAgentServer({ port = Number(process.env.AGENT_PORT) || DEFAULT_PORT, host = "127.0.0.1" } = {}) {
+export async function startAgentServer({ port = Number(process.env.AGENT_PORT) || DEFAULT_PORT, host = "127.0.0.1", protocol = process.env.AGENT_PROTOCOL || "http", certPath = process.env.AGENT_TLS_CERT || "", keyPath = process.env.AGENT_TLS_KEY || "" } = {}) {
   if (state.server) return state.server;
   state.port = port;
+  const tlsEnabled = protocol === "https";
+  if (tlsEnabled && (!certPath || !keyPath)) throw new Error("HTTPS agent mode requires a certificate and private key.");
   await fsp.mkdir(paths.jobs, { recursive: true });
   await writeCapabilities();
-  console.log(`Media Toolbox local agent ${AGENT_VERSION} listening on http://${host}:${port}`);
+  state.protocol = tlsEnabled ? "https" : "http";
+  console.log(`Media Toolbox local agent ${AGENT_VERSION} listening on ${state.protocol}://${host}:${port}`);
   console.log(`Pairing code: ${state.pairingCode}`);
-  state.server = http.createServer((request, response) => {
+  const requestHandler = (request, response) => {
     handle(request, response).catch((error) => {
       console.error("Local agent request failed", error);
       if (!response.headersSent) json(response, 500, { error: "The local agent could not complete the request." }, request, originFor(request));
       else response.destroy();
     });
-  });
+  };
+  state.server = tlsEnabled
+    ? https.createServer({ cert: await fsp.readFile(certPath), key: await fsp.readFile(keyPath) }, requestHandler)
+    : http.createServer(requestHandler);
   await new Promise((resolve, reject) => {
     state.server.once("error", reject);
     state.server.listen(port, host, resolve);
@@ -481,6 +489,7 @@ export async function stopAgentServer() {
   if (!state.server) return;
   await new Promise((resolve) => state.server.close(resolve));
   state.server = null;
+  state.protocol = "http";
 }
 
 const invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : "";

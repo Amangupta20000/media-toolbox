@@ -1,4 +1,5 @@
 const path = require("node:path");
+const { execFileSync } = require("node:child_process");
 const { app, BrowserWindow, dialog, Menu, shell, Tray } = require("electron");
 
 if (!app.requestSingleInstanceLock()) {
@@ -7,6 +8,19 @@ if (!app.requestSingleInstanceLock()) {
   let agent;
   let tray;
   let pairingWindow;
+
+  function trustLocalCertificate(certPath) {
+    try {
+      if (process.platform === "darwin") {
+        const keychain = path.join(app.getPath("home"), "Library", "Keychains", "login.keychain-db");
+        execFileSync("/usr/bin/security", ["add-trusted-cert", "-r", "trustRoot", "-p", "ssl", "-k", keychain, certPath], { stdio: "ignore", timeout: 5000 });
+      } else if (process.platform === "win32") {
+        execFileSync("certutil", ["-user", "-addstore", "-f", "Root", certPath], { stdio: "ignore", timeout: 5000 });
+      }
+    } catch (error) {
+      console.warn("The local HTTPS certificate could not be added to the user trust store:", error.message);
+    }
+  }
 
   function showPairingCode() {
     const code = agent?.getAgentState().pairingCode || "Start the agent first.";
@@ -39,6 +53,12 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform === "darwin") app.dock?.hide();
     app.setLoginItemSettings({ openAtLogin: true });
     app.setAsDefaultProtocolClient("mediatoolbox");
+    const { ensureAgentCertificate } = await import("./tls.js");
+    const certificate = await ensureAgentCertificate(path.join(app.getPath("userData"), "tls"));
+    trustLocalCertificate(certificate.certPath);
+    process.env.AGENT_PROTOCOL = "https";
+    process.env.AGENT_TLS_CERT = certificate.certPath;
+    process.env.AGENT_TLS_KEY = certificate.keyPath;
     agent = await import("./server.js");
     await agent.startAgentServer();
     tray = new Tray(require("electron").nativeImage.createEmpty());

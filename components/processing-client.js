@@ -1,4 +1,5 @@
 const DEFAULT_AGENT_URL = "http://127.0.0.1:4789";
+const SECURE_AGENT_URL = "https://127.0.0.1:4789";
 const TOKEN_KEY = "media-toolbox-agent-token";
 const TOKEN_EXPIRY_KEY = "media-toolbox-agent-token-expires";
 const AGENT_BASE_KEY = "media-toolbox-agent-base";
@@ -6,18 +7,30 @@ const AGENT_BASE_KEY = "media-toolbox-agent-base";
 export function agentBaseUrl() {
   if (typeof window !== "undefined") {
     const remembered = window.localStorage.getItem(AGENT_BASE_KEY);
-    if (remembered) return remembered;
+    if (remembered && (!isSecurePage() || remembered.startsWith("https://"))) return remembered;
   }
   return configuredAgentBaseUrl();
 }
 
+function isSecurePage() {
+  return typeof window !== "undefined" && window.location.protocol === "https:";
+}
+
 function configuredAgentBaseUrl() {
-  return String(process.env.NEXT_PUBLIC_AGENT_URL || DEFAULT_AGENT_URL).replace(/\/$/, "");
+  const configured = String(process.env.NEXT_PUBLIC_AGENT_URL || "").replace(/\/$/, "");
+  // HTTPS pages cannot fetch the agent's HTTP endpoint in Safari (mixed
+  // content). The Electron agent uses HTTPS on the same loopback port, while
+  // local HTTP development continues to use the lightweight HTTP agent.
+  if (isSecurePage() && (!configured || configured.startsWith("http://"))) return SECURE_AGENT_URL;
+  return configured || DEFAULT_AGENT_URL;
 }
 
 function agentBaseCandidates() {
   const configured = configuredAgentBaseUrl();
-  const candidates = [agentBaseUrl(), configured];
+  const remembered = typeof window !== "undefined" ? window.localStorage.getItem(AGENT_BASE_KEY) : "";
+  const candidates = isSecurePage()
+    ? [remembered?.startsWith("https://") ? remembered : "", configured]
+    : [remembered, configured];
   if (configured.includes("127.0.0.1")) candidates.push(configured.replace("127.0.0.1", "localhost"));
   if (configured.includes("localhost")) candidates.push(configured.replace("localhost", "127.0.0.1"));
   return candidates.filter((value, index) => value && candidates.indexOf(value) === index);
