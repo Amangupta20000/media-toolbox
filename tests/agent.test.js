@@ -154,6 +154,7 @@ if (getAuthorizationState().trialStartedAt !== state.trialStartedAt) process.exi
 test("desktop dashboard can request and poll an online activation code", async () => {
   const auth = await import("../agent/auth.js");
   const previousServerUrl = process.env.AGENT_LICENSE_SERVER_URL;
+  const previousLocalServerUrl = process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
   const requests = [];
   const server = http.createServer(async (request, response) => {
     requests.push({ method: request.method, url: request.url, headers: request.headers });
@@ -176,9 +177,13 @@ test("desktop dashboard can request and poll an online activation code", async (
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    process.env.AGENT_LICENSE_SERVER_URL = `http://127.0.0.1:${server.address().port}`;
+    // Local development must prefer the loopback licensing service because a
+    // machine cannot always hairpin back through its own public Funnel URL.
+    process.env.AGENT_LICENSE_SERVER_URL = "http://127.0.0.1:1";
+    process.env.AGENT_LICENSE_SERVER_LOCAL_URL = `http://127.0.0.1:${server.address().port}`;
     const config = auth.getLicenseRequestConfig();
     assert.equal(config.available, true);
+    assert.equal(config.localServerUrl, `http://127.0.0.1:${server.address().port}`);
     assert.ok(config.suggestedOrigins.includes("https://media-toolbox-woad.vercel.app"));
     const created = await auth.requestActivationCode("http://localhost:3000", "Local agent dashboard");
     assert.equal(created.status, "pending");
@@ -189,7 +194,28 @@ test("desktop dashboard can request and poll an online activation code", async (
   } finally {
     if (previousServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_URL;
     else process.env.AGENT_LICENSE_SERVER_URL = previousServerUrl;
+    if (previousLocalServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
+    else process.env.AGENT_LICENSE_SERVER_LOCAL_URL = previousLocalServerUrl;
     await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("online licensing configuration supports a local-first fallback", async () => {
+  const auth = await import("../agent/auth.js");
+  const previousServerUrl = process.env.AGENT_LICENSE_SERVER_URL;
+  const previousLocalServerUrl = process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
+  try {
+    process.env.AGENT_LICENSE_SERVER_URL = "https://media-toolbox-license.tailf9a730.ts.net";
+    process.env.AGENT_LICENSE_SERVER_LOCAL_URL = "http://127.0.0.1:4900";
+    const config = auth.getLicenseRequestConfig();
+    assert.equal(config.available, true);
+    assert.equal(config.localServerUrl, "http://127.0.0.1:4900");
+    assert.equal(config.serverUrl, "https://media-toolbox-license.tailf9a730.ts.net");
+  } finally {
+    if (previousServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_URL;
+    else process.env.AGENT_LICENSE_SERVER_URL = previousServerUrl;
+    if (previousLocalServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
+    else process.env.AGENT_LICENSE_SERVER_LOCAL_URL = previousLocalServerUrl;
   }
 });
 

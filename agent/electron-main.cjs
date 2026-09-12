@@ -1,4 +1,5 @@
 const path = require("node:path");
+const fs = require("node:fs");
 const { execFileSync } = require("node:child_process");
 const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, Tray } = require("electron");
 
@@ -140,6 +141,11 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   async function start() {
+    loadLocalEnvironment();
+    // The owner dashboard may run on the same Mac as the SSD licensing
+    // service. Prefer loopback there and fall back to the packaged public URL
+    // for agents installed on other computers.
+    process.env.AGENT_LICENSE_SERVER_LOCAL_URL = process.env.AGENT_LICENSE_SERVER_LOCAL_URL || "http://127.0.0.1:4900";
     process.env.DATA_DIR = path.join(app.getPath("userData"), "data");
     process.env.AGENT_SETUP_URL = process.env.AGENT_SETUP_URL || "http://localhost:3000/local-agent";
     if (process.platform === "darwin") app.dock?.hide();
@@ -164,6 +170,16 @@ if (!app.requestSingleInstanceLock()) {
       { label: "Quit", click: () => app.quit() },
     ]));
     if (!process.argv.includes("--hidden")) openDashboard();
+  }
+
+  function loadLocalEnvironment() {
+    const filename = path.join(__dirname, "..", ".env.local");
+    if (!fs.existsSync(filename)) return;
+    for (const line of fs.readFileSync(filename, "utf8").split(/\r?\n/)) {
+      const match = line.match(/^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*)\s*$/);
+      if (!match || process.env[match[1]] !== undefined) continue;
+      process.env[match[1]] = match[2].replace(/^['"]|['"]$/g, "");
+    }
   }
 
   app.on("window-all-closed", (event) => event.preventDefault());

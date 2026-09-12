@@ -276,41 +276,50 @@ function activateVerifiedPayload(payload, code, record, now) {
 }
 
 export function hasOnlineLicenseServer() {
-  return Boolean(onlineLicenseServerUrl());
+  return Boolean(onlineLicenseServerUrl() || localLicenseServerUrl());
 }
 
 export function onlineLicenseServerUrl() {
   return String(process.env.AGENT_LICENSE_SERVER_URL || process.env.NEXT_PUBLIC_LICENSE_SERVER_URL || packagedLicenseServerUrl()).trim().replace(/\/$/, "");
 }
 
-function onlineLicenseUrl(pathname) {
-  const serverUrl = onlineLicenseServerUrl();
-  if (!serverUrl) throw new Error("The online licensing server is not configured on this agent.");
-  let parsed;
-  try { parsed = new URL(serverUrl); } catch { throw new Error("The online licensing server URL is invalid."); }
-  if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("The online licensing server URL must use HTTP or HTTPS.");
-  return `${serverUrl}${pathname}`;
+function localLicenseServerUrl() {
+  return String(process.env.AGENT_LICENSE_SERVER_LOCAL_URL || "").trim().replace(/\/$/, "");
+}
+
+function onlineLicenseUrls(pathname) {
+  const configuredUrls = [localLicenseServerUrl(), onlineLicenseServerUrl()].filter(Boolean);
+  if (!configuredUrls.length) throw new Error("The online licensing server is not configured on this agent.");
+  return [...new Set(configuredUrls)].map((serverUrl) => {
+    let parsed;
+    try { parsed = new URL(serverUrl); } catch { throw new Error("The online licensing server URL is invalid."); }
+    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("The online licensing server URL must use HTTP or HTTPS.");
+    return `${serverUrl}${pathname}`;
+  });
 }
 
 async function onlineLicenseFetch(pathname, options = {}) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
-  try {
-    const response = await fetch(onlineLicenseUrl(pathname), {
-      cache: "no-store",
-      ...options,
-      signal: controller.signal,
-    });
-    let body = {};
-    try { body = await response.json(); } catch { /* report the status below */ }
-    if (!response.ok) throw new Error(body.error || `The licensing server rejected the request (${response.status}).`);
-    return body;
-  } catch (error) {
-    if (error?.name === "AbortError") throw new Error("The licensing server request timed out.");
-    throw error;
-  } finally {
-    clearTimeout(timeout);
+  let lastError;
+  for (const requestUrl of onlineLicenseUrls(pathname)) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const response = await fetch(requestUrl, {
+        cache: "no-store",
+        ...options,
+        signal: controller.signal,
+      });
+      let body = {};
+      try { body = await response.json(); } catch { /* report the status below */ }
+      if (!response.ok) throw new Error(body.error || `The licensing server rejected the request (${response.status}).`);
+      return body;
+    } catch (error) {
+      lastError = error?.name === "AbortError" ? new Error("The licensing server request timed out.") : error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
+  throw lastError || new Error("The licensing server request failed.");
 }
 
 function requestOrigin(value) {
@@ -322,7 +331,8 @@ function requestOrigin(value) {
 export function getLicenseRequestConfig() {
   return {
     available: hasOnlineLicenseServer(),
-    serverUrl: onlineLicenseServerUrl(),
+    serverUrl: onlineLicenseServerUrl() || localLicenseServerUrl(),
+    localServerUrl: localLicenseServerUrl(),
     suggestedOrigins: defaultTrustedOrigins(),
   };
 }
