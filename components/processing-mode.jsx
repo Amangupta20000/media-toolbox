@@ -10,7 +10,7 @@ const labels = {
 
 export function ProcessingMode({ value, onChange, locations, compact = false }) {
   const modes = ["local", "server"].filter((mode) => mode !== "server" || locations?.server?.available);
-  const ready = (mode) => Boolean(locations?.[mode]?.connected);
+  const ready = (mode) => Boolean(locations?.[mode]?.connected || locations?.[mode]?.ready);
   return <div className={`processing-mode ${compact ? "compact" : ""}`}>
     <div className="processing-mode-heading"><span><Settings2 size={16} /> Processing location</span><small>Choose where this job runs</small></div>
     <div className="processing-mode-options">

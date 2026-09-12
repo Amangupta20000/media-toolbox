@@ -54,7 +54,12 @@ export function ToolPage({ tool }) {
     probeProcessingLocations().then((value) => {
       if (!active) return;
       setLocations(value);
-      const preferred = value.server.connected ? "server" : value.local.connected ? "local" : "server";
+      // An authorized local agent may have no browser session yet. `ready`
+      // means the agent has confirmed this origin and uploadWithProgress can
+      // create the short-lived session when the user submits the job. This
+      // keeps the trial from starting during a passive health probe while
+      // avoiding a dead-end where Local is never selectable in a new browser.
+      const preferred = value.server.connected ? "server" : value.local.connected || value.local.ready ? "local" : "server";
       setProcessingMode(preferred);
       setCapabilities(processingCapabilities(value, preferred));
     }).catch(() => undefined);

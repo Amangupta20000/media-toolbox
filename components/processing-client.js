@@ -20,20 +20,47 @@ function isSecurePage() {
 function configuredAgentBaseUrl() {
   const configured = String(process.env.NEXT_PUBLIC_AGENT_URL || "").replace(/\/$/, "");
   // HTTPS pages cannot fetch the agent's HTTP endpoint in Safari (mixed
-  // content). The Electron agent uses HTTPS on the same loopback port, while
-  // local HTTP development continues to use the lightweight HTTP agent.
+  // content). The Electron agent uses HTTPS on the same loopback port. Local
+  // HTTP development may use the lightweight HTTP agent, but must also be
+  // able to reach an installed Electron agent, which is HTTPS-only.
   if (isSecurePage() && (!configured || configured.startsWith("http://"))) return SECURE_AGENT_URL;
   return configured || DEFAULT_AGENT_URL;
 }
 
-function agentBaseCandidates() {
-  const configured = configuredAgentBaseUrl();
-  const remembered = typeof window !== "undefined" ? window.localStorage.getItem(AGENT_BASE_KEY) : "";
-  const candidates = isSecurePage()
+function isLoopbackAgentBase(value) {
+  try {
+    const parsed = new URL(value);
+    return ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+export function agentBaseCandidates({ secure = isSecurePage(), configured = configuredAgentBaseUrl(), remembered = typeof window !== "undefined" ? window.localStorage.getItem(AGENT_BASE_KEY) : "" } = {}) {
+  const candidates = secure
     ? [remembered?.startsWith("https://") ? remembered : "", configured]
     : [remembered, configured];
-  if (configured.includes("127.0.0.1")) candidates.push(configured.replace("127.0.0.1", "localhost"));
-  if (configured.includes("localhost")) candidates.push(configured.replace("localhost", "127.0.0.1"));
+
+  // The packaged desktop agent uses HTTPS so production HTTPS pages do not
+  // trigger mixed-content blocking. Keep HTTP as the first local-development
+  // candidate for `npm run agent:dev`, then try the secure loopback endpoint
+  // used by the installed Electron agent on the same port.
+  for (const base of [...candidates]) {
+    if (!base || !isLoopbackAgentBase(base)) continue;
+    try {
+      const parsed = new URL(base);
+      const hostVariants = [base];
+      if (parsed.hostname === "127.0.0.1") hostVariants.push(base.replace("127.0.0.1", "localhost"));
+      if (parsed.hostname === "localhost") hostVariants.push(base.replace("localhost", "127.0.0.1"));
+      for (const variant of hostVariants) {
+        candidates.push(variant);
+        if (!secure && parsed.protocol === "http:") candidates.push(variant.replace(/^http:/, "https:"));
+      }
+    } catch {
+      // Ignore malformed remembered/configured values; fetchLocalJson will
+      // report the normal local-agent connection error.
+    }
+  }
   return candidates.filter((value, index) => value && candidates.indexOf(value) === index);
 }
 
@@ -145,6 +172,18 @@ export async function probeLocalAgent() {
   const { payload: health, base } = await fetchLocalJson("/v1/health");
   let token = storedAgentToken();
   const readyWithoutSession = Boolean(health.processingAvailable || health.trialAvailable);
+  // A new browser/profile has no token yet. Once the agent has already been
+  // authorized for this trusted origin, create that browser's short-lived
+  // session during discovery so Local mode is immediately usable. Do not do
+  // this for a fresh trial: its five-minute clock must start only when the
+  // user begins processing, not while the website is merely checking status.
+  if (!token && health.processingAvailable && health.trustedOrigin) {
+    try {
+      token = await ensureLocalAgentSession();
+    } catch (error) {
+      return { available: true, connected: false, ready: readyWithoutSession, health, capabilities: null, authorization: error?.authorization || health?.authorization, baseUrl: base, error: error?.message || "The local agent browser session could not be created." };
+    }
+  }
   if (!token) return { available: true, connected: false, ready: readyWithoutSession, health, capabilities: null, authorization: health?.authorization, baseUrl: base };
   try {
     const { payload: capabilities } = await fetchLocalJson("/v1/capabilities", { headers: { Authorization: `Bearer ${token}` } });
