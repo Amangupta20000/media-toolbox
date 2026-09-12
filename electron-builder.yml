@@ -132,6 +132,7 @@ win:
   target:
     - nsis
 linux:
+  maintainer: support@media-toolbox.app
   target:
     - AppImage
     - deb

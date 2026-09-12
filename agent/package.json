@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "description": "Runtime and packaging dependencies for the Media Toolbox desktop agent.",
+  "homepage": "https://media-toolbox-woad.vercel.app",
+  "author": {
+    "name": "Media Toolbox",
+    "email": "support@media-toolbox.app"
+  },
   "type": "module",
   "main": "agent/electron-main.cjs",
   "engines": {
