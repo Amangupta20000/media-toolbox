@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import test, { after, before } from "node:test";
 import { firstAvailable, runCommand } from "../lib/command.js";
 
@@ -9,6 +10,8 @@ const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-agent-te
 process.env.DATA_DIR = path.join(testRoot, "data");
 process.env.MEDIA_TOOLBOX_DOWNLOADS_DIR = path.join(testRoot, "Downloads");
 process.env.AGENT_PORT = "0";
+const licenseKeys = generateKeyPairSync("ed25519", { publicKeyEncoding: { type: "spki", format: "pem" }, privateKeyEncoding: { type: "pkcs8", format: "pem" } });
+process.env.AGENT_LICENSE_PUBLIC_KEY = licenseKeys.publicKey;
 const agent = await import("../agent/server.js");
 let server;
 let port;
@@ -25,6 +28,118 @@ after(async () => {
 });
 
 const url = (pathName) => `http://127.0.0.1:${port}${pathName}`;
+const encodeLicensePart = (value) => Buffer.from(value).toString("base64").replace(/=+$/g, "");
+const makeActivationCode = ({ deviceId = agent.getDeviceId(), origins = ["http://localhost:3000", "http://127.0.0.1:3000"], issuedAt = Date.now(), durationMs = 10 * 60 * 1000 } = {}) => {
+  const payload = { v: 1, licenseId: randomUUID(), deviceId, origins, issuedAt, durationMs };
+  const payloadText = encodeLicensePart(JSON.stringify(payload));
+  const signature = encodeLicensePart(sign(null, Buffer.from(payloadText), licenseKeys.privateKey));
+  return `MT1-${`${payloadText}.${signature}`.match(/.{1,4}/g).join("-")}`;
+};
+
+test("agent starts a persistent five-minute trial without login or activation", async () => {
+  const initialHealth = await fetch(url("/v1/health"), { headers: { Origin: "http://localhost:3000" } });
+  const initialState = await initialHealth.json();
+  assert.equal(initialState.authorization.mode, "locked");
+  assert.equal(initialState.authorization.authorized, false);
+
+  const noSessionCapabilities = await fetch(url("/v1/capabilities"), { headers: { Origin: "http://localhost:3000" } });
+  assert.equal(noSessionCapabilities.status, 401);
+
+  const sessionResponse = await fetch(url("/v1/session"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
+    body: JSON.stringify({ origin: "http://localhost:3000", clientLabel: "Trial browser" }),
+  });
+  assert.equal(sessionResponse.status, 200);
+  const trialSession = await sessionResponse.json();
+  assert.equal(trialSession.authorization.mode, "trial");
+  assert.equal(trialSession.autoPaired, true);
+  assert.ok(trialSession.authorization.trialStartedAt);
+  assert.equal(trialSession.authorization.trialExpiresAt - trialSession.authorization.trialStartedAt, 5 * 60 * 1000);
+
+  const trialForm = new FormData();
+  trialForm.append("tool", "image-converter");
+  trialForm.append("format", "png");
+  trialForm.append("method", "imagemagick");
+  trialForm.append("jpegConfirmed", "false");
+  trialForm.append("retention", "delete");
+  trialForm.append("source", new Blob([Buffer.from("not a real image")], { type: "image/png" }), "trial.png");
+  const trialJobResponse = await fetch(url("/v1/jobs"), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${trialSession.token}`, Origin: "http://localhost:3000" },
+    body: trialForm,
+  });
+  assert.equal(trialJobResponse.status, 202);
+  const trialJob = await trialJobResponse.json();
+  assert.ok(trialJob.jobId);
+
+  let terminalJob;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const statusResponse = await fetch(url(`/v1/jobs/${trialJob.jobId}`), { headers: { Authorization: `Bearer ${trialSession.token}`, Origin: "http://localhost:3000" } });
+    terminalJob = await statusResponse.json();
+    if (["completed", "failed"].includes(terminalJob.status)) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.ok(["completed", "failed"].includes(terminalJob.status));
+  const deletedTrialJob = await fetch(url(`/v1/jobs/${trialJob.jobId}`), { method: "DELETE", headers: { Authorization: `Bearer ${trialSession.token}`, Origin: "http://localhost:3000" } });
+  assert.equal(deletedTrialJob.status, 200);
+
+  const startedAt = trialSession.authorization.trialStartedAt;
+  await agent.stopAgentServer();
+  server = await agent.startAgentServer({ port: 0 });
+  port = server.address().port;
+  const afterRestart = agent.getAgentState().authorization;
+  assert.equal(afterRestart.mode, "trial");
+  assert.equal(afterRestart.trialStartedAt, startedAt);
+
+  const expired = (await import("../agent/auth.js")).getAuthorizationState(startedAt + 5 * 60 * 1000 + 1);
+  assert.equal(expired.mode, "locked");
+  assert.equal(expired.reason, "trial_expired");
+  const deniedAfterExpiry = (await import("../agent/auth.js")).authorizeProcessing("http://localhost:3000", startedAt + 5 * 60 * 1000 + 1);
+  assert.equal(deniedAfterExpiry.ok, false);
+  assert.equal(deniedAfterExpiry.code, "activation_required");
+});
+
+test("agent persists Admin authorization across restarts and rejects bad credentials", async () => {
+  assert.throws(() => agent.loginAdmin("Admin", "wrong"), /incorrect/i);
+  agent.loginAdmin("Admin", "12345");
+  assert.equal(agent.getAgentState().authorization.mode, "admin");
+
+  const adminSessionResponse = await fetch(url("/v1/session"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
+    body: JSON.stringify({ origin: "http://localhost:3000", clientLabel: "Admin browser" }),
+  });
+  assert.equal(adminSessionResponse.status, 200);
+  const adminSession = await adminSessionResponse.json();
+  agent.logoutAdmin();
+  const revokedAdminAccess = await fetch(url("/v1/capabilities"), { headers: { Authorization: `Bearer ${adminSession.token}`, Origin: "http://localhost:3000" } });
+  assert.equal(revokedAdminAccess.status, 401);
+  agent.loginAdmin("Admin", "12345");
+
+  await agent.stopAgentServer();
+  server = await agent.startAgentServer({ port: 0 });
+  port = server.address().port;
+  assert.equal(agent.getAgentState().authorization.mode, "admin");
+  agent.logoutAdmin();
+  // Logging out removes the Admin override and returns to the still-running
+  // installation trial; it must not reset or silently extend that trial.
+  assert.equal(agent.getAgentState().authorization.mode, "trial");
+});
+
+test("agent accepts only a signed, device-bound, one-use activation code", () => {
+  assert.throws(() => agent.activateLicense(makeActivationCode({ deviceId: "different-device" })), /different device/i);
+  const code = makeActivationCode();
+  const compactCode = code.slice(4).replace(/-/g, "");
+  const signatureStart = compactCode.indexOf(".") + 1;
+  const signatureChar = compactCode[signatureStart];
+  const tamperedCompact = `${compactCode.slice(0, signatureStart)}${signatureChar === "A" ? "B" : "A"}${compactCode.slice(signatureStart + 1)}`;
+  const tampered = `MT1-${tamperedCompact.match(/.{1,4}/g).join("-")}`;
+  assert.throws(() => agent.activateLicense(tampered), /signature is invalid/i);
+  agent.activateLicense(code);
+  assert.equal(agent.getAgentState().authorization.mode, "activation");
+  assert.throws(() => agent.activateLicense(code), /already been used/i);
+});
 
 test("agent reports health, rejects unauthenticated jobs, and pairs with a one-time code", async () => {
   const healthResponse = await fetch(url("/v1/health"), { headers: { Origin: "http://localhost:3000" } });
@@ -156,6 +271,15 @@ test("agent supports automatic browser sessions and ending one or all sessions",
   assert.ok(automaticSession.sessionId);
   assert.equal(automaticSession.autoPaired, true);
 
+  const secondBrowser = await fetch(url("/v1/session"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "http://127.0.0.1:3000" },
+    body: JSON.stringify({ origin: "http://127.0.0.1:3000", clientLabel: "Chrome private window" }),
+  });
+  assert.equal(secondBrowser.status, 200);
+  const secondBrowserSession = await secondBrowser.json();
+  assert.equal(secondBrowserSession.autoPaired, true);
+
   const differentOrigin = await fetch(url("/v1/session"), {
     method: "POST",
     headers: { "Content-Type": "application/json", Origin: "https://another.example" },
@@ -169,6 +293,7 @@ test("agent supports automatic browser sessions and ending one or all sessions",
   assert.equal(sessionsResponse.status, 200);
   const sessions = await sessionsResponse.json();
   assert.ok(sessions.items.some((item) => item.id === automaticSession.sessionId && item.clientLabel === "Safari on macOS"));
+  assert.ok(sessions.items.some((item) => item.id === secondBrowserSession.sessionId && item.clientLabel === "Chrome private window"));
   assert.ok(sessions.items.some((item) => item.current));
 
   const ended = await fetch(url(`/v1/sessions/${automaticSession.sessionId}`), {
@@ -190,4 +315,19 @@ test("agent supports automatic browser sessions and ending one or all sessions",
   assert.ok((await endedAll.json()).revokedCount >= 1);
   const healthAfterRevoke = await fetch(url("/v1/health"), { headers: { Origin: "http://localhost:3000" } });
   assert.equal((await healthAfterRevoke.json()).paired, false);
+});
+
+test("activation authorization expires after exactly ten minutes", async () => {
+  const active = agent.getAgentState().authorization;
+  assert.equal(active.mode, "activation");
+  assert.equal(active.activationExpiresAt - active.activationStartedAt, 10 * 60 * 1000);
+  assert.ok(active.remainingMs > 0 && active.remainingMs <= 10 * 60 * 1000);
+
+  const auth = await import("../agent/auth.js");
+  const expired = auth.getAuthorizationState(active.activationStartedAt + 10 * 60 * 1000 + 1);
+  assert.equal(expired.mode, "locked");
+  assert.equal(expired.authorized, false);
+  const denied = auth.authorizeProcessing("http://localhost:3000", active.activationStartedAt + 10 * 60 * 1000 + 1);
+  assert.equal(denied.ok, false);
+  assert.equal(denied.code, "activation_required");
 });

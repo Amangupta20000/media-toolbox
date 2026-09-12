@@ -18,10 +18,10 @@ export function ProcessingMode({ value, onChange, locations, compact = false }) 
         const [label, detail, Icon] = labels[mode];
         const available = ready(mode);
         return <button type="button" key={mode} className={`processing-mode-option ${value === mode ? "selected" : ""} ${!available ? "unavailable" : ""}`} disabled={!available} onClick={() => onChange(mode)}>
-          <Icon size={18} /><span><strong>{label}</strong><small>{available ? detail : mode === "local" ? "Start and pair the agent" : "API is unavailable"}</small></span><em>{value === mode ? "Selected" : available ? "Available" : "Unavailable"}</em>
+          <Icon size={18} /><span><strong>{label}</strong><small>{available ? detail : mode === "local" ? "Start and authorize the agent" : "API is unavailable"}</small></span><em>{value === mode ? "Selected" : available ? "Available" : "Unavailable"}</em>
         </button>;
       })}
     </div>
-    {(!locations?.local?.connected || !locations?.server?.connected) && <div className="processing-mode-help"><span>{locations?.local?.connected ? "" : "Local agent is not paired. "}</span>{!locations?.local?.connected && <Link href="/local-agent">Set up Local agent</Link>}<span>{!locations?.local?.connected && !locations?.server?.connected ? " · " : ""}</span>{!locations?.server?.connected && <span>Server processing is unavailable.</span>}</div>}
+    {(!locations?.local?.connected || !locations?.server?.connected) && <div className="processing-mode-help"><span>{locations?.local?.connected ? "" : "Local agent requires Admin login or activation. "}</span>{!locations?.local?.connected && <Link href="/local-agent">Open Local agent setup</Link>}<span>{!locations?.local?.connected && !locations?.server?.connected ? " · " : ""}</span>{!locations?.server?.connected && <span>Server processing is unavailable.</span>}</div>}
   </div>;
 }

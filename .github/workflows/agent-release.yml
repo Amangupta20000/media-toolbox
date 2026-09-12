@@ -67,6 +67,11 @@ jobs:
           else
             echo "::warning::macOS signing credentials are incomplete; this build will be unsigned and may show a Gatekeeper warning."
           fi
+      - name: Embed license public key
+        env:
+          AGENT_LICENSE_PUBLIC_KEY: ${{ vars.AGENT_LICENSE_PUBLIC_KEY }}
+        shell: bash
+        run: node scripts/stage-agent-license-public-key.mjs
       - name: Package macOS installer
         if: matrix.platform == 'mac'
         env:

@@ -22,6 +22,8 @@
     "agent:dev": "node agent/index.js",
     "agent": "electron agent/electron-main.cjs",
     "agent:package": "electron-builder --config electron-builder.yml",
+    "agent:license-keygen": "node scripts/generate-agent-license.mjs --keygen",
+    "agent:license": "node scripts/generate-agent-license.mjs",
     "setup:untrunc": "bash scripts/setup-untrunc-macos.sh",
     "lint": "next lint"
   },

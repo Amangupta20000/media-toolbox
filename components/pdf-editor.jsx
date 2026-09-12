@@ -849,7 +849,7 @@ export function PdfEditor() {
       return;
     }
     if (processingMode !== "browser" && !pdfFiles.length) { setError("Add at least one PDF before exporting with Local agent or Server."); return; }
-    if (processingMode !== "browser" && !isProcessingLocationReady(locations, processingMode)) { setError(processingMode === "local" ? "Start and pair the Local agent before exporting." : "Server processing is unavailable."); return; }
+    if (processingMode !== "browser" && !isProcessingLocationReady(locations, processingMode)) { setError(processingMode === "local" ? "Admin login or activation is required in the Local agent dashboard." : "Server processing is unavailable."); return; }
     setError("");
     setJobMode(processingMode);
     if (processingMode === "browser") {

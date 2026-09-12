@@ -1,6 +1,6 @@
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
-const { app, BrowserWindow, dialog, Menu, shell, Tray } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, Tray } = require("electron");
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -8,6 +8,64 @@ if (!app.requestSingleInstanceLock()) {
   let agent;
   let tray;
   let pairingWindow;
+  let pairingWatch;
+  let dashboardWindow;
+
+  function openDashboard() {
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.show();
+      dashboardWindow.focus();
+      return dashboardWindow;
+    }
+    dashboardWindow = new BrowserWindow({
+      width: 1040,
+      height: 800,
+      minWidth: 820,
+      minHeight: 620,
+      show: false,
+      title: "Media Toolbox Agent",
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        preload: path.join(__dirname, "preload.cjs"),
+      },
+    });
+    dashboardWindow.on("closed", () => { dashboardWindow = null; });
+    dashboardWindow.loadFile(path.join(__dirname, "dashboard.html"));
+    dashboardWindow.once("ready-to-show", () => { dashboardWindow?.show(); dashboardWindow?.focus(); });
+    return dashboardWindow;
+  }
+
+  function registerDashboardIpc() {
+    ipcMain.handle("agent:get-state", () => agent?.getManagementState?.() || {});
+    ipcMain.handle("agent:login", (_event, username, password) => {
+      const value = agent.loginAdmin(String(username || ""), String(password || ""));
+      return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
+    });
+    ipcMain.handle("agent:logout", () => {
+      agent.logoutAdmin();
+      return agent.getManagementState();
+    });
+    ipcMain.handle("agent:activate", (_event, code) => {
+      const value = agent.activateLicense(String(code || ""));
+      return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
+    });
+    ipcMain.handle("agent:end-session", (_event, sessionId) => {
+      const value = agent.endSession(String(sessionId || ""));
+      return agent.getManagementState().then((state) => ({ ...state, sessionAction: value }));
+    });
+    ipcMain.handle("agent:end-all-sessions", () => {
+      const value = agent.revokeAllSessions();
+      return agent.getManagementState().then((state) => ({ ...state, revokedCount: value }));
+    });
+    ipcMain.handle("agent:copy-device-id", (_event, deviceId) => {
+      const expected = agent.getDeviceId();
+      if (String(deviceId || "") !== expected) throw new Error("The device ID is invalid.");
+      clipboard.writeText(expected);
+      return { ok: true };
+    });
+  }
 
   function trustLocalCertificate(certPath) {
     try {
@@ -23,7 +81,10 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   function showPairingCode() {
-    const code = agent?.getAgentState().pairingCode || "Start the agent first.";
+    const pairingState = agent?.getAgentState() || {};
+    const initialPairingCode = pairingState.pairingCode;
+    const initialSessionCount = pairingState.sessionCount || 0;
+    const code = initialPairingCode || "Start the agent first.";
     if (pairingWindow && !pairingWindow.isDestroyed()) {
       pairingWindow.focus();
       return;
@@ -38,20 +99,36 @@ if (!app.requestSingleInstanceLock()) {
       resizable: false,
       show: false,
       title: "Media Toolbox pairing code",
-      alwaysOnTop: true,
       webPreferences: { contextIsolation: true, sandbox: true },
     });
-    pairingWindow.on("closed", () => { pairingWindow = null; });
-    const page = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:28px;background:#102b3b;color:#e6f3f5;font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:center}h1{margin:0 0 10px;font-size:21px}p{margin:0;color:#a8c0c9;line-height:1.45}code{display:block;margin:22px 0;padding:13px 10px;background:#0a1d29;border:1px solid #2aaeb2;border-radius:10px;color:#72e2df;font:700 34px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.18em}small{color:#94aeb8}</style></head><body><h1>Pair this browser</h1><p>Enter this code on the Media Toolbox website.</p><code>${code}</code><small>The code changes after a successful pairing.</small></body></html>`;
+    pairingWindow.on("closed", () => {
+      if (pairingWatch) clearInterval(pairingWatch);
+      pairingWatch = null;
+      pairingWindow = null;
+    });
+    const page = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:28px;background:#102b3b;color:#e6f3f5;font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:center}h1{margin:0 0 10px;font-size:21px}p{margin:0;color:#a8c0c9;line-height:1.45}code{display:block;margin:22px 0;padding:13px 10px;background:#0a1d29;border:1px solid #2aaeb2;border-radius:10px;color:#72e2df;font:700 34px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.18em}small{color:#94aeb8;display:block;line-height:1.4}</style></head><body><h1>Pair this browser</h1><p>Enter this code on the Media Toolbox website.</p><code>${code}</code><small>This temporary window closes after the browser connects.<br>The agent keeps running in the background.</small></body></html>`;
     pairingWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(page)}`);
-    pairingWindow.once("ready-to-show", () => pairingWindow.show());
+    pairingWindow.once("ready-to-show", () => {
+      pairingWindow.show();
+      pairingWatch = setInterval(() => {
+        if (!pairingWindow || pairingWindow.isDestroyed()) return;
+        const nextState = agent?.getAgentState() || {};
+        if (
+          nextState.pairingCode !== initialPairingCode ||
+          (nextState.sessionCount || 0) > initialSessionCount
+        ) {
+          pairingWindow.close();
+        }
+      }, 500);
+      pairingWatch.unref?.();
+    });
   }
 
   async function start() {
     process.env.DATA_DIR = path.join(app.getPath("userData"), "data");
     process.env.AGENT_SETUP_URL = process.env.AGENT_SETUP_URL || "http://localhost:3000/local-agent";
     if (process.platform === "darwin") app.dock?.hide();
-    app.setLoginItemSettings({ openAtLogin: true });
+    app.setLoginItemSettings({ openAtLogin: true, args: ["--hidden"] });
     app.setAsDefaultProtocolClient("mediatoolbox");
     const { ensureAgentCertificate } = await import("./tls.js");
     const certificate = await ensureAgentCertificate(path.join(app.getPath("userData"), "tls"));
@@ -61,18 +138,29 @@ if (!app.requestSingleInstanceLock()) {
     process.env.AGENT_TLS_KEY = certificate.keyPath;
     agent = await import("./server.js");
     await agent.startAgentServer();
+    registerDashboardIpc();
     tray = new Tray(require("electron").nativeImage.createEmpty());
     tray.setToolTip("Media Toolbox local agent");
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: "Show pairing code", click: showPairingCode },
-      { label: "Open agent setup", click: () => shell.openExternal(process.env.AGENT_SETUP_URL) },
+      { label: "Open agent dashboard & sessions", click: openDashboard },
+      { label: "Open website setup", click: () => shell.openExternal(process.env.AGENT_SETUP_URL) },
       { type: "separator" },
       { label: "Quit", click: () => app.quit() },
     ]));
+    if (!process.argv.includes("--hidden")) openDashboard();
   }
 
-  app.on("second-instance", () => tray?.displayBalloon?.({ title: "Media Toolbox", content: "The local agent is already running." }));
-  app.on("open-url", (event) => { event.preventDefault(); showPairingCode(); });
+  app.on("window-all-closed", (event) => event.preventDefault());
+  app.on("second-instance", (_event, commandLine) => {
+    if (commandLine.some((value) => String(value).includes("dashboard"))) openDashboard();
+    else tray?.displayBalloon?.({ title: "Media Toolbox", content: "The local agent is already running." });
+  });
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    if (String(url || "").includes("dashboard")) openDashboard();
+    else showPairingCode();
+  });
   app.whenReady().then(start).catch((error) => { dialog.showErrorBox("Media Toolbox agent could not start", error.message); app.quit(); });
   app.on("before-quit", async (event) => {
     if (!agent?.stopAgentServer) return;

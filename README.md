@@ -16,12 +16,14 @@ Private image conversion, video repair, and PDF editing tools. The website runs 
 - Drag-and-drop or browse upload controls.
 - Local in-browser image preview before upload, including transparency checkerboard support.
 - Background jobs with progress, live worker logs, and downloadable results.
-- Basic Auth protection and automatic temporary-file cleanup.
+- Public website/server APIs with authorization enforced by the Local agent for local processing, plus automatic temporary-file cleanup.
 - Processing location can be selected per job: Local agent or Server.
 
 ## Local processing agent
 
-The Local agent is an optional desktop application for macOS, Windows, and Linux. It runs the same worker functions as the server, listens only on `127.0.0.1:4789`, starts at login after installation, and processes one job at a time. Packaged agents use a per-install HTTPS certificate on the loopback endpoint so an HTTPS production website can connect in Safari without a mixed-content block; the installer adds that certificate to the user's trust store where the platform supports it. A paired browser can upload to it without sending the source files to the server. The agent never accepts shell commands or arbitrary filesystem paths from the website; its download-delete action accepts only a named regular file inside the user's Downloads folder.
+The Local agent is an optional desktop application for macOS, Windows, and Linux. It runs the same worker functions as the server, listens only on `127.0.0.1:4789`, starts at login after installation, and processes one job at a time. Packaged agents use a per-install HTTPS certificate on the loopback endpoint so an HTTPS production website can connect in Safari without a mixed-content block; the installer adds that certificate to the user's trust store where the platform supports it. A trusted browser can upload to it without sending the source files to the server. The agent never accepts shell commands or arbitrary filesystem paths from the website; its download-delete action accepts only a named regular file inside the user's Downloads folder.
+
+The Local agent dashboard owns local processing authorization. Every installation provisions the fixed Admin account (`Admin` / `12345`), keeps the Admin unlock across restarts until logout, and provides one persistent five-minute trial. An owner can generate a device-bound, signed ten-minute activation code with the license commands below. The website never collects these credentials or codes.
 
 Start the development agent in a second terminal:
 
@@ -29,7 +31,7 @@ Start the development agent in a second terminal:
 npm run agent:dev
 ```
 
-Open `/local-agent`, click **Check connection**, then enter the 6-digit code printed in the agent terminal. For the tray application, use:
+Open `/local-agent`; when the agent is running it creates a browser session automatically for a trusted origin. Use the desktop dashboard to log in as Admin or activate a license. For the tray application, use:
 
 ```bash
 npm run agent
@@ -37,7 +39,31 @@ npm run agent
 
 Build an installer for the current operating system with `npm run agent:package`. GitHub Actions builds macOS, Windows, and Linux installers on an `agent-v*` tag. Set `NEXT_PUBLIC_AGENT_RELEASES_URL` in the website environment to the repository's latest Releases page. The setup page links users to those installers.
 
-For a Vercel frontend that uses the Local agent, set `APP_USERNAME`, `APP_PASSWORD`, `AUTH_SECRET`, `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_AGENT_URL` (`http://127.0.0.1:4789` for local HTTP development; secure production pages automatically use `https://127.0.0.1:4789`), `NEXT_PUBLIC_AGENT_RELEASES_URL`, and `NEXT_PUBLIC_MACOS_AGENT_SIGNED`. Do not set `NEXT_PUBLIC_AGENT_URL` to a cloud URL: the browser must reach the agent on the same computer. Users must install the latest agent release for Safari production access. The Vercel filesystem is ephemeral and Vercel does not run the separate worker process, so server processing and server history require a persistent backend deployment such as the Docker deployment described below.
+Generate the owner signing key pair once, outside the repository:
+
+```bash
+npm run agent:license-keygen
+npm run agent:license -- --device-id <device-id> --duration 10m --origins https://media-toolbox-woad.vercel.app,http://localhost:3000,http://127.0.0.1:3000
+```
+
+The first command writes the private key and public key to `~/.config/media-toolbox/` by default. Keep the private key on the owner's computer only; never commit it, upload it to Vercel, or add it to a GitHub variable. The public key is safe to distribute because it can only verify licenses.
+
+Before creating an `agent-v*` release, add the public PEM as a GitHub Actions **repository variable**:
+
+1. Open the repository on GitHub and go to **Settings → Secrets and variables → Actions → Variables**.
+2. Click **New repository variable**.
+3. Set **Name** to `AGENT_LICENSE_PUBLIC_KEY`.
+4. Copy the complete contents of `~/.config/media-toolbox/agent-license-public.pem` into **Value**, including `-----BEGIN PUBLIC KEY-----` and `-----END PUBLIC KEY-----`, then save it.
+
+The command-line equivalent is:
+
+```bash
+gh variable set AGENT_LICENSE_PUBLIC_KEY --repo Amangupta20000/media-toolbox < ~/.config/media-toolbox/agent-license-public.pem
+```
+
+The release workflow reads that public variable and embeds it in every packaged agent. It does not read or need the private key. For local development, set `AGENT_LICENSE_PUBLIC_KEY_FILE` to the public PEM path if it is not in `~/.config/media-toolbox/`. The device ID needed for `agent:license` is shown in the desktop agent dashboard.
+
+For a Vercel frontend that uses the Local agent, set only `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_AGENT_URL` (`http://127.0.0.1:4789` for local HTTP development; secure production pages automatically use `https://127.0.0.1:4789`), `NEXT_PUBLIC_AGENT_RELEASES_URL`, and `NEXT_PUBLIC_MACOS_AGENT_SIGNED`. Do not set `NEXT_PUBLIC_AGENT_URL` to a cloud URL: the browser must reach the agent on the same computer. Users must install the latest agent release for Safari production access. The Vercel filesystem is ephemeral and Vercel does not run the separate worker process, so server processing and server history require a persistent backend deployment such as the Docker deployment described below.
 
 ### macOS release signing and notarization
 
@@ -76,13 +102,11 @@ The healthy video should come from the same device/app and use the same video si
 
 ## Run with Docker
 
-1. Copy the environment template and set real credentials:
+1. Copy the environment template:
 
    ```bash
    cp .env.example .env
    ```
-
-   Set `APP_USERNAME`, `APP_PASSWORD`, and a long random `AUTH_SECRET` in `.env`.
 
 2. Start the web app, worker, and reverse proxy:
 

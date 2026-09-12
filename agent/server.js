@@ -11,6 +11,7 @@ import { config, paths } from "../lib/config.js";
 import { acceptMultipartJob } from "../lib/job-intake.js";
 import { firstAvailable, runCommand } from "../lib/command.js";
 import { processJob, writeCapabilities } from "../worker/index.js";
+import { activate as activateAgent, authorizeProcessing, ensureAgentAuth, getAuthorizationState, getDeviceId as getDeviceIdFromAuth, loginAdmin as loginAdminAgent, logoutAdmin as logoutAdminAgent } from "./auth.js";
 
 const AGENT_VERSION = process.env.AGENT_VERSION || "0.2.1";
 const PROTOCOL_VERSION = 1;
@@ -26,6 +27,7 @@ const state = {
   allowedOrigins: new Set(),
   queueRunning: false,
   cleanupTimer: null,
+  authorizationMode: "locked",
 };
 
 function json(response, status, payload, request, origin = null) {
@@ -38,11 +40,24 @@ function json(response, status, payload, request, origin = null) {
   response.end(JSON.stringify(payload));
 }
 
+function publicAuthorization(authorization) {
+  const { deviceId: _deviceId, username: _username, ...value } = authorization || {};
+  return value;
+}
+
 function originFor(request, allowAny = false) {
   const origin = request.headers.origin;
   if (!origin) return null;
   if (allowAny) return origin;
   return state.allowedOrigins.has(origin) ? origin : null;
+}
+
+function authorizationRequired(response, request, origin, authorization = getAuthorizationState()) {
+  return json(response, 402, {
+    error: "Admin login or activation required.",
+    code: "activation_required",
+    authorization: publicAuthorization(authorization),
+  }, request, origin);
 }
 
 function addCors(request, response, allowAny = false) {
@@ -83,7 +98,30 @@ function authorize(request, url) {
 }
 
 function rebuildAllowedOrigins() {
-  state.allowedOrigins = new Set([...state.sessions.values()].map((session) => session.origin));
+  state.allowedOrigins = new Set(getAuthorizationState().trustedOrigins);
+}
+
+function refreshAuthorization() {
+  const authorization = getAuthorizationState();
+  state.allowedOrigins = new Set(authorization.trustedOrigins);
+  if (!authorization.authorized && state.sessions.size) state.sessions.clear();
+  state.authorizationMode = authorization.mode;
+  return authorization;
+}
+
+export function revokeAllSessions() {
+  const revokedCount = state.sessions.size;
+  state.sessions.clear();
+  rebuildAllowedOrigins();
+  return revokedCount;
+}
+
+export function endSession(sessionId) {
+  const entry = [...state.sessions.entries()].find(([, session]) => session.id === String(sessionId || ""));
+  if (!entry) throw new Error("Session not found or already ended.");
+  state.sessions.delete(entry[0]);
+  rebuildAllowedOrigins();
+  return { ok: true, revokedSessionId: entry[1].id, sessionCount: state.sessions.size };
 }
 
 function pruneExpiredSessions() {
@@ -119,7 +157,6 @@ function issueSession(origin, clientLabel = "") {
     expiresAt: now + SESSION_TTL_MS,
   };
   state.sessions.set(token, session);
-  state.allowedOrigins.add(origin);
   return { token, session };
 }
 
@@ -379,6 +416,7 @@ async function renderPdfPage(request, response, job, page) {
 
 async function handle(request, response) {
   pruneExpiredSessions();
+  const authorization = refreshAuthorization();
   const url = new URL(request.url || "/", `${state.protocol}://${request.headers.host || "127.0.0.1"}`);
   const pathParts = url.pathname.split("/").filter(Boolean);
   const origin = addCors(request, response, pathParts[0] === "v1" && ["health", "pair"].includes(pathParts[1]));
@@ -393,13 +431,32 @@ async function handle(request, response) {
       ? [...state.sessions.values()].filter((session) => session.origin === requestOrigin).length
       : state.sessions.size;
     const paired = sessionCount > 0;
-    return json(response, 200, { ok: true, service: "media-toolbox-agent", agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, protocol: state.protocol, platform: process.platform, arch: process.arch, paired, sessionCount }, request, origin || request.headers.origin || null);
+    const trustedOrigin = !requestOrigin || state.allowedOrigins.has(requestOrigin);
+    return json(response, 200, {
+      ok: true,
+      service: "media-toolbox-agent",
+      agentVersion: AGENT_VERSION,
+      protocolVersion: PROTOCOL_VERSION,
+      protocol: state.protocol,
+      platform: process.platform,
+      arch: process.arch,
+      paired,
+      sessionCount,
+      trustedOrigin,
+      processingAvailable: authorization.authorized && trustedOrigin,
+      authorization: publicAuthorization(authorization),
+    }, request, origin || request.headers.origin || null);
   }
   if (url.pathname === "/v1/pair" && request.method === "POST") {
     try {
       const body = await readJson(request);
       const requestedOrigin = validateWebsiteOrigin(body.origin || request.headers.origin, request.headers.origin);
       if (String(body.code || "").trim() !== state.pairingCode) throw new Error("The pairing code is incorrect or expired.");
+      const access = authorizeProcessing(requestedOrigin);
+      if (!access.ok) {
+        if (access.code === "origin_not_trusted") return json(response, 403, { error: "This website origin is not trusted by the local agent.", code: access.code, authorization: publicAuthorization(access.state) }, request, origin || request.headers.origin || null);
+        return authorizationRequired(response, request, origin || request.headers.origin || null, access.state);
+      }
       const { token, session } = issueSession(requestedOrigin, body.clientLabel);
       state.pairingCode = String(randomInt(100000, 1000000));
       console.log(`Browser paired for ${requestedOrigin} (${session.clientLabel}). A new pairing code is ready.`);
@@ -417,16 +474,26 @@ async function handle(request, response) {
     try {
       const body = await readJson(request);
       const requestedOrigin = validateWebsiteOrigin(body.origin || request.headers.origin, request.headers.origin);
-      if (!state.allowedOrigins.has(requestedOrigin)) return json(response, 403, { error: "Pair this website with the local agent first." }, request, origin);
+      const access = authorizeProcessing(requestedOrigin);
+      if (!access.ok) {
+        if (access.code === "origin_not_trusted") return json(response, 403, { error: "This website origin is not trusted by the local agent.", code: access.code, authorization: publicAuthorization(access.state) }, request, origin);
+        return authorizationRequired(response, request, origin, access.state);
+      }
       const { token, session } = issueSession(requestedOrigin, body.clientLabel);
-      return json(response, 200, { token, sessionId: session.id, expiresAt: session.expiresAt, protocolVersion: PROTOCOL_VERSION, autoPaired: true }, request, origin);
+      return json(response, 200, { token, sessionId: session.id, expiresAt: session.expiresAt, protocolVersion: PROTOCOL_VERSION, autoPaired: true, authorization: publicAuthorization(access.state) }, request, origin);
     } catch (error) {
       return json(response, 400, { error: error instanceof Error ? error.message : "The browser session could not be created." }, request, origin);
     }
   }
 
+  if (!authorization.authorized) {
+    const hasToken = Boolean(tokenFrom(request, url));
+    return hasToken
+      ? authorizationRequired(response, request, origin, authorization)
+      : json(response, 401, { error: "Create a local agent session before accessing this resource.", code: "session_required", authorization: publicAuthorization(authorization) }, request, origin);
+  }
   const auth = authorize(request, url);
-  if (!auth) return json(response, 401, { error: "Pair the website with the local agent first." }, request, origin);
+  if (!auth) return json(response, 401, { error: "Create a local agent session before accessing this resource.", code: "session_required", authorization: publicAuthorization(authorization) }, request, origin);
   // Native clients may not send an Origin header. If one is present, authorize()
   // has already verified that it matches the origin used during pairing.
   if (origin && origin !== auth.session.origin) return json(response, 403, { error: "This website origin is not paired with the local agent." }, request, origin);
@@ -471,9 +538,7 @@ async function handle(request, response) {
   }
 
   if (url.pathname === "/v1/sessions/revoke-all" && request.method === "POST") {
-    const revokedCount = state.sessions.size;
-    state.sessions.clear();
-    state.allowedOrigins.clear();
+    const revokedCount = revokeAllSessions();
     return json(response, 200, { ok: true, revokedCount }, request, origin);
   }
 
@@ -543,7 +608,56 @@ async function handle(request, response) {
 
 export function getAgentState() {
   pruneExpiredSessions();
-  return { pairingCode: state.pairingCode, port: state.port, running: Boolean(state.server), protocol: state.protocol, agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, sessionCount: state.sessions.size };
+  const authorization = refreshAuthorization();
+  return {
+    pairingCode: state.pairingCode,
+    port: state.port,
+    running: Boolean(state.server),
+    protocol: state.protocol,
+    agentVersion: AGENT_VERSION,
+    protocolVersion: PROTOCOL_VERSION,
+    sessionCount: state.sessions.size,
+    authorization,
+  };
+}
+
+export function loginAdmin(username, password) {
+  const authorization = loginAdminAgent(username, password);
+  rebuildAllowedOrigins();
+  return authorization;
+}
+
+export function logoutAdmin() {
+  const authorization = logoutAdminAgent();
+  revokeAllSessions();
+  return authorization;
+}
+
+export function activateLicense(code) {
+  const authorization = activateAgent(code);
+  rebuildAllowedOrigins();
+  revokeAllSessions();
+  return authorization;
+}
+
+export function getDeviceId() {
+  return getDeviceIdFromAuth();
+}
+
+export function getManagementState() {
+  const authorization = refreshAuthorization();
+  const sessions = [...state.sessions.values()]
+    .sort((left, right) => right.createdAt - left.createdAt)
+    .map((session) => publicSession(session));
+  return fsp.readFile(paths.capabilities, "utf8")
+    .then((value) => JSON.parse(value))
+    .catch(() => ({ status: "starting", image: {}, video: {} }))
+    .then((capabilities) => ({
+      ...getAgentState(),
+      authorization,
+      capabilities: { ...capabilities, agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION },
+      sessions,
+    }));
 }
 
 export async function startAgentServer({ port = Number(process.env.AGENT_PORT) || DEFAULT_PORT, host = "127.0.0.1", protocol = process.env.AGENT_PROTOCOL || "http", certPath = process.env.AGENT_TLS_CERT || "", keyPath = process.env.AGENT_TLS_KEY || "" } = {}) {
@@ -551,6 +665,8 @@ export async function startAgentServer({ port = Number(process.env.AGENT_PORT) |
   state.port = port;
   const tlsEnabled = protocol === "https";
   if (tlsEnabled && (!certPath || !keyPath)) throw new Error("HTTPS agent mode requires a certificate and private key.");
+  ensureAgentAuth();
+  rebuildAllowedOrigins();
   await fsp.mkdir(paths.jobs, { recursive: true });
   await writeCapabilities();
   state.protocol = tlsEnabled ? "https" : "http";

@@ -134,7 +134,7 @@ export function ToolPage({ tool }) {
   const submit = async () => {
     setError("");
     if (!source) { setError(`Choose a ${isImage ? "source image" : "video"} first.`); return; }
-    if (!isProcessingLocationReady(locations, processingMode)) { setError(processingMode === "local" ? "Start and pair the Local agent before processing." : "Server processing is unavailable. Choose Local agent after pairing it."); return; }
+    if (!isProcessingLocationReady(locations, processingMode)) { setError(processingMode === "local" ? "Admin login or activation is required in the Local agent dashboard." : "Server processing is unavailable. Choose Local agent after authorizing it."); return; }
     if (isImage && maxSizeKb && (!/^\d+$/.test(maxSizeKb) || Number(maxSizeKb) <= 0)) { setError("Enter a positive whole number of KB."); return; }
     if (isImage && format === "jpeg" && !jpegConfirmed) { setError("Confirm the JPEG transparency warning before continuing."); return; }
     const form = new FormData();

@@ -3,7 +3,6 @@ const SECURE_AGENT_URL = "https://127.0.0.1:4789";
 const TOKEN_KEY = "media-toolbox-agent-token";
 const TOKEN_EXPIRY_KEY = "media-toolbox-agent-token-expires";
 const SESSION_ID_KEY = "media-toolbox-agent-session-id";
-const AUTO_PAIR_SUPPRESS_KEY = "media-toolbox-agent-auto-pair-suppressed";
 const AGENT_BASE_KEY = "media-toolbox-agent-base";
 
 export function agentBaseUrl() {
@@ -60,6 +59,7 @@ export function clearAgentPairing() {
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(TOKEN_EXPIRY_KEY);
   window.localStorage.removeItem(SESSION_ID_KEY);
+  window.localStorage.removeItem("media-toolbox-agent-auto-pair-suppressed");
 }
 
 export function localAgentToken() {
@@ -76,6 +76,8 @@ async function fetchJson(url, options = {}) {
     if (!response.ok) {
       const error = new Error(payload.error || `Request failed (${response.status}).`);
       error.status = response.status;
+      error.code = payload.code || "";
+      error.authorization = payload.authorization;
       throw error;
     }
     return payload;
@@ -125,28 +127,12 @@ function storeAgentSession(value) {
   window.localStorage.setItem(TOKEN_KEY, value.token);
   window.localStorage.setItem(TOKEN_EXPIRY_KEY, String(value.expiresAt || Date.now() + 12 * 60 * 60 * 1000));
   if (value.sessionId) window.localStorage.setItem(SESSION_ID_KEY, value.sessionId);
-  window.localStorage.removeItem(AUTO_PAIR_SUPPRESS_KEY);
-}
-
-function automaticPairingSuppressed() {
-  return typeof window !== "undefined" && window.localStorage.getItem(AUTO_PAIR_SUPPRESS_KEY) === "true";
-}
-
-function suppressAutomaticPairing() {
-  if (typeof window !== "undefined") window.localStorage.setItem(AUTO_PAIR_SUPPRESS_KEY, "true");
 }
 
 export async function probeLocalAgent() {
   const { payload: health, base } = await fetchLocalJson("/v1/health");
   let token = storedAgentToken();
-  if (!health?.paired) {
-    // A desktop-agent restart invalidates in-memory sessions. Do not let an
-    // old token turn a normal pairing state into a generic Safari "Load
-    // failed" error while probing capabilities.
-    if (token) clearAgentPairing();
-    return { available: true, connected: false, health, capabilities: null, baseUrl: base };
-  }
-  if (!token && !automaticPairingSuppressed()) {
+  if (!token) {
     try {
       const { payload: session } = await fetchLocalJson("/v1/session", {
         method: "POST",
@@ -156,41 +142,19 @@ export async function probeLocalAgent() {
       storeAgentSession(session);
       token = storedAgentToken();
     } catch (error) {
-      // A paired origin may create sessions automatically. A new origin must
-      // still use the explicit one-time pairing code, so leave it in the
-      // normal disconnected/pairing state when automatic pairing is denied.
-      if (![400, 401, 403].includes(error?.status)) {
-        return { available: true, connected: false, health, capabilities: null, baseUrl: base, error: error?.message || "The local agent session could not be created." };
-      }
+      return { available: true, connected: false, health, capabilities: null, authorization: error?.authorization || health?.authorization, baseUrl: base, error: error?.message || "The local agent session could not be created.", code: error?.code || "" };
     }
   }
-  if (!token) return { available: true, connected: false, health, capabilities: null, baseUrl: base };
+  if (!token) return { available: true, connected: false, health, capabilities: null, authorization: health?.authorization, baseUrl: base };
   try {
     const { payload: capabilities } = await fetchLocalJson("/v1/capabilities", { headers: { Authorization: `Bearer ${token}` } });
-    return { available: true, connected: true, health, capabilities, baseUrl: base };
+    return { available: true, connected: true, health, capabilities, authorization: health?.authorization, baseUrl: base };
   } catch (error) {
-    // Keep the token during network/startup failures. Only discard it when the
-    // agent explicitly says this session is no longer authorized.
-    const pairingRejected = error?.status === 401 || (error?.status === 403 && /origin is not paired|pair the website/i.test(error.message || ""));
-    if (pairingRejected) {
+    const sessionRejected = error?.status === 401 || error?.status === 402 || (error?.status === 403 && /origin is not trusted|not paired/i.test(error.message || ""));
+    if (sessionRejected) {
       clearAgentPairing();
-      // Another tab or browser may still have a valid session for this same
-      // origin. Re-issue a session automatically instead of forcing the user
-      // to copy the pairing code again.
-      if (health.paired) {
-        try {
-          const { payload: session } = await fetchLocalJson("/v1/session", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ origin: window.location.origin, clientLabel: browserSessionLabel() }),
-          });
-          storeAgentSession(session);
-          const refreshed = await fetchLocalJson("/v1/capabilities", { headers: { Authorization: `Bearer ${storedAgentToken()}` } });
-          return { available: true, connected: true, health, capabilities: refreshed.payload, baseUrl: base };
-        } catch { /* the user can pair this browser manually */ }
-      }
     }
-    return { available: true, connected: false, health, capabilities: null, baseUrl: base, error: error?.message || "The local agent capabilities could not be read.", pairingRejected };
+    return { available: true, connected: false, health, capabilities: null, authorization: error?.authorization || health?.authorization, baseUrl: base, error: error?.message || "The local agent capabilities could not be read.", sessionRejected };
   }
 }
 
@@ -234,12 +198,12 @@ export function uploadWithProgress(form, mode, onProgress) {
     xhr.open("POST", endpoint(mode, "/jobs"));
     if (mode === "local") xhr.setRequestHeader("Authorization", `Bearer ${storedAgentToken()}`);
     xhr.upload.onprogress = (event) => { if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100)); };
-    xhr.onerror = () => reject(new Error(mode === "local" ? "The local agent could not be reached. Start it and pair this browser first." : "The upload could not reach the server."));
+    xhr.onerror = () => reject(new Error(mode === "local" ? "The local agent could not be reached or is not authorized. Open the Local agent dashboard." : "The upload could not reach the server."));
     xhr.onload = () => {
       let payload = {};
       try { payload = JSON.parse(xhr.responseText); } catch { /* no-op */ }
       if (xhr.status >= 200 && xhr.status < 300 && payload.jobId) resolve(payload);
-      else reject(new Error(payload.error || (xhr.status === 401 ? "Pair this browser with the local agent first." : "The upload failed.")));
+      else reject(new Error(payload.error || (xhr.status === 401 || xhr.status === 402 ? "Admin login or activation is required in the Local agent dashboard." : "The upload failed.")));
     };
     xhr.send(form);
   });
@@ -265,7 +229,6 @@ export async function getLocalSessions() {
 export async function endLocalSession(sessionId) {
   const value = await fetchJson(`${agentBaseUrl()}/v1/sessions/${encodeURIComponent(sessionId)}`, requestOptions("local", { method: "DELETE" }));
   if (value.current) {
-    suppressAutomaticPairing();
     clearAgentPairing();
   }
   return value;
@@ -273,7 +236,6 @@ export async function endLocalSession(sessionId) {
 
 export async function endAllLocalSessions() {
   const value = await fetchJson(`${agentBaseUrl()}/v1/sessions/revoke-all`, requestOptions("local", { method: "POST" }));
-  suppressAutomaticPairing();
   clearAgentPairing();
   return value;
 }

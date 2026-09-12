@@ -34,7 +34,7 @@ function historyDate(value) {
 async function loadLocalHistory(tool) {
   try {
     const agent = await probeLocalAgent();
-    if (!agent.connected) return { status: "unavailable", items: [], message: agent.error || "Pair the Local agent to view files saved on this device." };
+    if (!agent.connected) return { status: "unavailable", items: [], message: agent.error || "Admin login or activation is required in the Local agent dashboard." };
     try {
       const payload = await getLocalHistory(tool);
       return { status: "ready", items: Array.isArray(payload.items) ? payload.items : [], message: "" };
@@ -43,7 +43,7 @@ async function loadLocalHistory(tool) {
         return { status: "unsupported", items: [], message: "The Local agent is connected, but this installed version does not support History. Update the agent application to the latest release." };
       }
       if (error?.status === 401 || error?.status === 403) {
-        return { status: "unavailable", items: [], message: "The Local agent is running, but this browser is no longer paired. Pair this browser again from Local agent setup." };
+        return { status: "unavailable", items: [], message: "The Local agent is running, but this browser is not authorized. Open the Local agent dashboard." };
       }
       return { status: "error", items: [], message: error instanceof Error ? error.message : "Local history could not be loaded." };
     }
@@ -113,7 +113,7 @@ export function ToolHistory({ tool }) {
         await deleteLocalHistory(item.id);
         setLocal((current) => ({ ...current, items: current.items.filter((entry) => entry.id !== item.id) }));
       } else {
-        // The browser owns its Downloads folder. The paired local agent must
+        // The browser owns its Downloads folder. The authorized local agent must
         // delete the downloaded copy before the server history is removed.
         await deleteDownloadedFile(downloadFolder, resultName);
         await deleteServerHistory(item.id);
@@ -146,7 +146,7 @@ export function ToolHistory({ tool }) {
       <button className="secondary-button" type="button" onClick={loadHistory} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={16} /> Refresh</button>
     </div>
     {loading && <div className="history-empty"><RefreshCw className="spin" size={24} /><strong>Loading history</strong><span>Checking saved results on this device and the server.</span></div>}
-    {!loading && !localReady && !serverReady && <div className="history-empty"><AlertTriangle size={22} /><strong>History is unavailable</strong><span>{local.message || server.message || "Connect to the server or pair the Local agent to view saved results."}</span><Link className="secondary-button" href="/local-agent">Open Local agent setup</Link></div>}
+    {!loading && !localReady && !serverReady && <div className="history-empty"><AlertTriangle size={22} /><strong>History is unavailable</strong><span>{local.message || server.message || "Connect to the server or authorize the Local agent to view saved results."}</span><Link className="secondary-button" href="/local-agent">Open Local agent setup</Link></div>}
     {!loading && local.status !== "ready" && <div className="history-source-note"><strong>{local.status === "unsupported" ? "Local history unavailable" : "Local agent"}</strong><span>{local.message || "Pair the Local agent to view files saved on this device."}</span><Link href="/local-agent">Open setup</Link></div>}
     {!loading && server.status !== "ready" && <div className="history-source-note"><strong>Server history unavailable</strong><span>{server.message || "The server did not respond."}</span></div>}
     {!loading && (localReady || serverReady) && !items.length && <div className="history-empty"><Icon size={25} /><strong>No saved results yet</strong><span>Local results appear only when “Keep final result on this device” is selected. Server results remain available until they are deleted or cleaned up.</span></div>}
@@ -158,7 +158,7 @@ export function ToolHistory({ tool }) {
         <div className="history-item-actions"><button className="icon-button history-preview-button" type="button" onClick={() => setPreviewItem(item)} aria-label={`Preview ${result.filename || "saved result"}`} title="Preview"><Eye size={17} /></button><a className="secondary-button" href={result.downloadUrl} download={result.filename}><Download size={16} /> Download</a><button className="icon-button history-delete-button" type="button" onClick={() => removeItem(item)} disabled={deletingId === item.id} aria-label={item.storage === "local" ? `Delete ${result.filename || "saved result"} from this device` : `Delete ${result.filename || "saved result"} from Downloads and server history`} title={item.storage === "local" ? "Delete from device" : "Delete from Downloads and server history"}><Trash2 size={17} /></button></div>
       </article>;
     })}</div>}
-    {!loading && <p className="history-note">Server Delete first asks the paired Local agent to remove the named file from the Downloads folder, then removes the server copy and listing. If the file is missing or the agent is unavailable, the listing stays.</p>}
+    {!loading && <p className="history-note">Server Delete first asks the authorized Local agent to remove the named file from the Downloads folder, then removes the server copy and listing. If the file is missing or the agent is unavailable, the listing stays.</p>}
     {message && <div className="error-banner"><AlertTriangle size={17} /><span>{message}</span></div>}
     {previewItem && <HistoryPreviewModal item={previewItem} onClose={() => setPreviewItem(null)} onDelete={() => removeItem(previewItem)} onEdit={() => editItem(previewItem)} deleting={deletingId === previewItem.id} />}
   </section>;

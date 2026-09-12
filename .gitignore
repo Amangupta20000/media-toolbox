@@ -11,3 +11,4 @@ vendor/untrunc/
 release/
 npm-debug.log*
 *.tsbuildinfo
+agent/license-public-key.pem
