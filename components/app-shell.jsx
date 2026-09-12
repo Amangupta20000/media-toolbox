@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { Bot, Clock3, Film, FileText, Image as ImageIcon, Menu, Moon, PanelLeftClose, PanelLeftOpen, ShieldCheck, Sparkles, Sun } from "lucide-react";
+import { Bot, Clock3, Film, FileText, Image as ImageIcon, KeyRound, Menu, Moon, PanelLeftClose, PanelLeftOpen, ShieldCheck, Sparkles, Sun } from "lucide-react";
 import { probeLocalAgent } from "./processing-client.js";
 
 const navigation = [
@@ -13,7 +13,10 @@ const navigation = [
   { href: "/local-agent", label: "Local agent", detail: "Process files on this device", icon: Bot },
 ];
 
-const comingSoonNavigation = { href: "/coming-soon", label: "Coming soon", detail: "More tools in progress", icon: Sparkles };
+const moreNavigation = [
+  { href: "/license-admin", label: "Licensing admin", detail: "Owner approval dashboard", icon: KeyRound },
+  { href: "/coming-soon", label: "Coming soon", detail: "More tools in progress", icon: Sparkles },
+];
 
 function accessTimerFor(authorization, now, trialAvailable = false) {
   if (!authorization) return null;
@@ -108,12 +111,8 @@ export function AppShell({ children }) {
         })}
       </nav>
       <div className="sidebar-label coming-soon-nav-label">More tools</div>
-      <nav className="tool-nav" aria-label="Coming soon tools">
-        <Link href={comingSoonNavigation.href} className={`tool-nav-item ${pathname === comingSoonNavigation.href ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={comingSoonNavigation.label}>
-          <span className="nav-icon"><Sparkles size={19} /></span>
-          <span className="nav-copy"><strong>{comingSoonNavigation.label}</strong><small>{comingSoonNavigation.detail}</small></span>
-          {pathname === comingSoonNavigation.href && <span className="active-dot" />}
-        </Link>
+      <nav className="tool-nav" aria-label="More tools">
+        {moreNavigation.map((item) => { const Icon = item.icon; const active = pathname === item.href; return <Link key={item.href} href={item.href} className={`tool-nav-item ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}><span className="nav-icon"><Icon size={19} /></span><span className="nav-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>{active && <span className="active-dot" />}</Link>; })}
       </nav>
       <div className="sidebar-footer">
         <div className="privacy-card"><ShieldCheck size={17} /><div><strong>Private by design</strong><span>Files are temporary and auto-cleaned.</span></div></div>

@@ -9,6 +9,10 @@ data/*
 vendor/untrunc-macos/
 vendor/untrunc/
 release/
+license-data/*
+!license-data/.gitkeep
 npm-debug.log*
 *.tsbuildinfo
 agent/license-public-key.pem
+agent/license-server-url.txt
+license-server-test-url.txt

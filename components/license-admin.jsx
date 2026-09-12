@@ -1,0 +1,70 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { Check, Github, LoaderCircle, LogIn, LogOut, RefreshCw, ShieldAlert, X } from "lucide-react";
+import { AppShell } from "./app-shell.jsx";
+import { approveLicenseRequest, declineLicenseRequest, getAdminLicenseRequests, licenseServerUrl, loginLicenseAdmin, logoutLicenseAdmin, storedAdminToken, updateGithubAgentLicenseServerUrl } from "./license-client.js";
+
+function date(value) {
+  return value ? new Date(value).toLocaleString() : "—";
+}
+
+export function LicenseAdmin() {
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [username, setUsername] = useState("Admin");
+  const [password, setPassword] = useState("");
+  const [items, setItems] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [releaseServerUrl, setReleaseServerUrl] = useState("");
+
+  const refresh = useCallback(async () => {
+    if (!storedAdminToken()) return;
+    try { setItems((await getAdminLicenseRequests()).items || []); setLoggedIn(true); setError(""); } catch (refreshError) {
+      setError(refreshError.message || "The licensing requests could not be loaded.");
+      if (refreshError.status === 401) setLoggedIn(false);
+    }
+  }, []);
+
+  useEffect(() => { setReleaseServerUrl(licenseServerUrl()); if (storedAdminToken()) { setLoggedIn(true); refresh(); } }, [refresh]);
+  useEffect(() => {
+    if (!loggedIn) return undefined;
+    const timer = window.setInterval(refresh, 3000);
+    return () => window.clearInterval(timer);
+  }, [loggedIn, refresh]);
+
+  const login = async (event) => {
+    event.preventDefault(); setBusy(true); setError("");
+    try { await loginLicenseAdmin(username, password); setPassword(""); setLoggedIn(true); await refresh(); }
+    catch (loginError) { setError(loginError.message || "Admin login failed."); }
+    finally { setBusy(false); }
+  };
+
+  const decide = async (item, action) => {
+    setBusy(true); setError(""); setMessage("");
+    try { if (action === "approve") await approveLicenseRequest(item.id); else await declineLicenseRequest(item.id); await refresh(); setMessage(action === "approve" ? "License approved. The requester will see the code in their browser." : "Request declined."); }
+    catch (decisionError) { setError(decisionError.message || "The request could not be updated."); }
+    finally { setBusy(false); }
+  };
+
+  const logout = async () => { setBusy(true); try { await logoutLicenseAdmin(); } catch { /* local logout still clears the session */ } finally { setLoggedIn(false); setItems([]); setBusy(false); } };
+
+  const updateGithubVariable = async (event) => {
+    event.preventDefault(); setBusy(true); setError(""); setMessage("");
+    try {
+      const result = await updateGithubAgentLicenseServerUrl(releaseServerUrl);
+      setMessage(`GitHub variable ${result.name} updated to ${result.value}. New agent releases will use this URL.`);
+    } catch (updateError) { setError(updateError.message || "The GitHub variable could not be updated."); }
+    finally { setBusy(false); }
+  };
+
+  return <AppShell>
+    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> Owner tools</div><h1>License requests</h1><p>Approve one-time ten-minute activation codes for trusted website origins.</p></div><div className="heading-note"><ShieldAlert size={16} /><span>Keep this page private</span></div></div>
+    {!licenseServerUrl() && <div className="error-banner"><ShieldAlert size={18} /><span>Set NEXT_PUBLIC_LICENSE_SERVER_URL before using the owner dashboard.</span></div>}
+    {!loggedIn ? <section className="agent-pair-card"><div className="card-heading"><div><span className="card-index">01</span><h2>Admin login</h2></div><span className="required-label">Owner only</span></div><p className="card-description">Sign in to approve or decline requests. The default local owner account is Admin / 12345; change this deployment credential before sharing the dashboard.</p><form className="admin-login-form" onSubmit={login}><label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label><button className="primary-button" type="submit" disabled={busy || !licenseServerUrl()}><LogIn size={17} /> {busy ? "Signing in…" : "Sign in"}</button></form></section> : <><section className="agent-sessions-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Pending and completed requests</h2></div><div className="agent-open-actions"><button className="secondary-button" type="button" onClick={refresh} disabled={busy}><RefreshCw size={16} /> Refresh</button><button className="secondary-button" type="button" onClick={logout} disabled={busy}><LogOut size={16} /> Log out</button></div></div><div className="license-request-list">{items.length ? items.map((item) => <div className="license-request-row" key={item.id}><div><strong>{item.requesterLabel || "Website user"}</strong><small>{item.origin}</small><small>Created {date(item.createdAt)} · expires {date(item.expiresAt)}</small><small>Status: {item.status}</small></div>{item.status === "pending" && <div className="agent-open-actions"><button className="primary-button" type="button" onClick={() => decide(item, "approve")} disabled={busy}><Check size={16} /> Approve</button><button className="secondary-button" type="button" onClick={() => decide(item, "decline")} disabled={busy}><X size={16} /> Decline</button></div>}</div>) : <div className="agent-session-empty">No license requests yet.</div>}</div></section><section className="agent-pair-card"><div className="card-heading"><div><span className="card-index">03</span><h2>Release configuration</h2></div><span className="optional-label">Owner only</span></div><p className="card-description">The SSD licensing server updates the GitHub Actions repository variable used by future desktop-agent releases. The GitHub token stays on the licensing server and is never sent to this page.</p><form className="admin-login-form" onSubmit={updateGithubVariable}><label>Agent licensing-server URL<input value={releaseServerUrl} onChange={(event) => setReleaseServerUrl(event.target.value)} placeholder="https://your-device.tailnet.ts.net" autoComplete="url" /></label><button className="primary-button" type="submit" disabled={busy || !releaseServerUrl}><Github size={17} /> {busy ? "Updating…" : "Update GitHub variable"}</button></form><p className="agent-session-note"><LoaderCircle size={14} /> Use the HTTPS Tailscale Funnel URL. Future releases embed it as <code>AGENT_LICENSE_SERVER_URL</code>.</p></section></>}
+    {message && <div className="success-banner"><Check size={17} /><span>{message}</span></div>}
+    {error && <div className="error-banner"><ShieldAlert size={17} /><span>{error}</span></div>}
+    {loggedIn && <p className="agent-session-note"><LoaderCircle size={14} /> Requests refresh every three seconds while this dashboard is open. The activation code is shown only to the requesting browser, not in this owner list.</p>}
+  </AppShell>;
+}

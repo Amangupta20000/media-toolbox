@@ -11,7 +11,7 @@ import { config, paths } from "../lib/config.js";
 import { acceptMultipartJob } from "../lib/job-intake.js";
 import { firstAvailable, runCommand } from "../lib/command.js";
 import { processJob, writeCapabilities } from "../worker/index.js";
-import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, authorizeProcessing, ensureAgentAuth, getAuthorizationState, getDeviceId as getDeviceIdFromAuth, loginAdmin as loginAdminAgent, logoutAdmin as logoutAdminAgent } from "./auth.js";
+import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, activateOnline, authorizeProcessing, ensureAgentAuth, getAuthorizationState, getDeviceId as getDeviceIdFromAuth, hasOnlineLicenseServer, loginAdmin as loginAdminAgent, logoutAdmin as logoutAdminAgent } from "./auth.js";
 
 const AGENT_VERSION = process.env.AGENT_VERSION || "0.2.1";
 const PROTOCOL_VERSION = 1;
@@ -652,6 +652,13 @@ export function logoutAdmin() {
 }
 
 export function activateLicense(code) {
+  if (hasOnlineLicenseServer()) {
+    return activateOnline(code).then((authorization) => {
+      rebuildAllowedOrigins();
+      revokeAllSessions();
+      return authorization;
+    });
+  }
   const authorization = activateAgent(code);
   rebuildAllowedOrigins();
   revokeAllSessions();

@@ -51,8 +51,8 @@ if (!app.requestSingleInstanceLock()) {
       agent.logoutAdmin();
       return agent.getManagementState();
     });
-    ipcMain.handle("agent:activate", (_event, code) => {
-      const value = agent.activateLicense(String(code || ""));
+    ipcMain.handle("agent:activate", async (_event, code) => {
+      const value = await agent.activateLicense(String(code || ""));
       return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
     });
     ipcMain.handle("agent:end-session", (_event, sessionId) => {

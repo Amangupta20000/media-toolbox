@@ -5,6 +5,7 @@ import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual, verif
 import { fileURLToPath } from "node:url";
 import { config, paths } from "../lib/config.js";
 import { createAgentAuth, getAgentAuth, hasUsedAgentLicense, recordUsedAgentLicense, updateAgentAuth } from "../lib/db.js";
+import { verifyLicenseToken, ACTIVATION_DURATION_MS as SHARED_ACTIVATION_DURATION_MS } from "../lib/license-token.js";
 
 export const ADMIN_USERNAME = "Admin";
 export const TRIAL_DURATION_MS = 5 * 60 * 1000;
@@ -57,6 +58,11 @@ function publicKeyCandidates() {
     path.join(os.homedir(), ".config", "media-toolbox", "agent-license-public.pem"),
     path.join(moduleDirectory, "license-public-key.pem"),
   ].filter(Boolean);
+}
+
+function packagedLicenseServerUrl() {
+  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+  try { return fs.readFileSync(path.join(moduleDirectory, "license-server-url.txt"), "utf8").trim().replace(/\/$/, ""); } catch { return ""; }
 }
 
 function readPublicKey() {
@@ -230,6 +236,10 @@ export function activate(code, now = Date.now()) {
   requireLegalConsent();
   const record = ensureAgentAuth();
   const payload = parseActivationCode(code);
+  return activateVerifiedPayload(payload, code, record, now);
+}
+
+function activateVerifiedPayload(payload, code, record, now) {
   if (payload.v !== 1 || typeof payload.licenseId !== "string") throw new Error("The activation code format is invalid.");
   // The local used-license table prevents replay on this installation. The
   // device binding prevents the same signed code being copied elsewhere.
@@ -250,6 +260,49 @@ export function activate(code, now = Date.now()) {
     activationCodeHash: codeHash,
   });
   return getAuthorizationState(now);
+}
+
+export function hasOnlineLicenseServer() {
+  return Boolean(onlineLicenseServerUrl());
+}
+
+function onlineLicenseServerUrl() {
+  return String(process.env.AGENT_LICENSE_SERVER_URL || process.env.NEXT_PUBLIC_LICENSE_SERVER_URL || packagedLicenseServerUrl()).trim().replace(/\/$/, "");
+}
+
+export async function activateOnline(code, now = Date.now()) {
+  requireLegalConsent();
+  const record = ensureAgentAuth();
+  const serverUrl = onlineLicenseServerUrl();
+  if (!serverUrl) throw new Error("The online licensing server is not configured on this agent.");
+  let parsed;
+  try { parsed = new URL(serverUrl); } catch { throw new Error("The online licensing server URL is invalid."); }
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error("The online licensing server URL must use HTTP or HTTPS.");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(`${serverUrl}/v1/licenses/redeem`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: String(code || "").trim(), deviceId: record.device_id }),
+      signal: controller.signal,
+    });
+    let body = {};
+    try { body = await response.json(); } catch { /* report the status below */ }
+    if (!response.ok) throw new Error(body.error || `The licensing server rejected the code (${response.status}).`);
+    if (!body.token) throw new Error("The licensing server did not return a bound activation token.");
+    const publicKey = readPublicKey();
+    if (!publicKey) throw new Error("Activation is not configured on this agent. The owner must embed the license public key before packaging.");
+    const payload = verifyLicenseToken(body.token, publicKey);
+    if (payload.durationMs !== SHARED_ACTIVATION_DURATION_MS) throw new Error("The licensing server returned an invalid activation duration.");
+    if (payload.deviceId !== record.device_id) throw new Error("The licensing server returned a token for a different device.");
+    return activateVerifiedPayload(payload, body.token, record, now);
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("The licensing server request timed out.");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export function getDeviceId() {

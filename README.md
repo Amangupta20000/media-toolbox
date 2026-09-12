@@ -73,9 +73,51 @@ The release workflow reads that public variable and embeds it in every packaged 
 4. The owner sends that code to the user through a private channel such as email or chat. The user enters it only in the Local agent desktop dashboard.
 5. The agent verifies the signature locally, checks the device binding, trusted origin, and one-use license ID, then authorizes local processing for ten minutes. The website receives only a short-lived local browser session token.
 
-There is no central licensing server in this design. The private signing key stays with the owner, while the code contains the recipient installation's Device ID. Therefore one code is valid for one installation only and is rejected if copied to another installation or submitted again after use. If a code is exposed before use, generate a new code and do not share the exposed one.
+The offline command remains available for development and disconnected use. For public user requests, use the SSD-backed licensing server below; it generates a code without requiring the user to send a Device ID, then binds it atomically to the first agent that redeems it. A code cannot be reused after redemption.
 
-For a Vercel frontend that uses the Local agent, set only `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_AGENT_URL` (`http://127.0.0.1:4789` for local HTTP development; secure production pages automatically use `https://127.0.0.1:4789`), `NEXT_PUBLIC_AGENT_RELEASES_URL`, and `NEXT_PUBLIC_MACOS_AGENT_SIGNED`. Do not set `NEXT_PUBLIC_AGENT_URL` to a cloud URL: the browser must reach the agent on the same computer. Users must install the latest agent release for Safari production access. The Vercel filesystem is ephemeral and Vercel does not run the separate worker process, so server processing and server history require a persistent backend deployment such as the Docker deployment described below.
+### SSD-backed licensing server
+
+The licensing server is a separate, small Node service. It does not run media jobs and does not receive media files. It stores its own SQLite database and encrypted signing-key blob only in `/Volumes/Sandisk Exf/MediaToolboxLicensing`, after checking the configured exFAT volume UUID. The service fails closed if the expected SSD is not mounted.
+
+Create or reuse the signing key and encrypt its private key into the SSD data directory:
+
+```bash
+LICENSE_DATA_DIR="/Volumes/Sandisk Exf/MediaToolboxLicensing" npm run license-server:keygen -- --private-key ~/.config/media-toolbox/agent-license-private.pem
+```
+
+Run the service locally:
+
+```bash
+LICENSE_DATA_DIR="/Volumes/Sandisk Exf/MediaToolboxLicensing" npm run license-server
+```
+
+Expose only `http://127.0.0.1:4900` through Tailscale Funnel. Set the resulting stable HTTPS `*.ts.net` URL as `NEXT_PUBLIC_LICENSE_SERVER_URL` in Vercel. Set the same URL as the GitHub Actions repository variable `AGENT_LICENSE_SERVER_URL` so released agents can redeem server-issued codes. The existing public key variable remains `AGENT_LICENSE_PUBLIC_KEY`.
+
+The GitHub variable can be set with:
+
+```bash
+gh variable set AGENT_LICENSE_SERVER_URL --repo Amangupta20000/media-toolbox --body "https://license.example.com"
+```
+
+Replace the example hostname with the real Tailscale Funnel hostname. Do not set it until the Funnel is configured.
+
+For a no-domain test or small owner-run deployment, Tailscale Funnel can expose the local licensing service through a stable HTTPS `*.ts.net` hostname. Install and sign in to Tailscale on the SSD Mac, then run the licensing service and Funnel together:
+
+```bash
+npm run license-server:funnel
+```
+
+The command keeps the Node licensing service running on the SSD and runs `tailscale funnel --bg --https=443 http://127.0.0.1:4900`. It prints the public Tailscale URL. Tailscale must be installed, signed in, and allowed to use Funnel. Keep the SSD mounted and configure the licensing service to start after reboot. Set the printed HTTPS URL as `NEXT_PUBLIC_LICENSE_SERVER_URL` in Vercel and as the `AGENT_LICENSE_SERVER_URL` repository variable before an agent release. The owner dashboard's **Update GitHub variable** button can update the repository variable after `LICENSE_GITHUB_TOKEN` is configured on the licensing server.
+
+Set the owner-only GitHub token on the SSD server as `LICENSE_GITHUB_TOKEN`. It needs permission to manage Actions variables for `Amangupta20000/media-toolbox`; it is never included in the website bundle, desktop agent, or GitHub variable. The dashboard only sends the HTTPS URL to the authenticated licensing server.
+
+The owner opens `/license-admin`, signs in, and approves or declines pending requests. A user requests a code from `/local-agent`, waits for owner approval, then copies the displayed code into the desktop agent dashboard. The service returns the code only to that requesting browser. The agent redeems it with its device ID; the service stores the binding and removes the encrypted code payload.
+
+The initial owner credential is intentionally fixed as `Admin / 12345` to match the product requirement. It is hashed for comparison, rate-limited, and should be replaced before using this service for valuable licenses. Never put the private signing key, master key, Tailscale auth key, GitHub token, or the SSD directory in Vercel or GitHub variables.
+
+The licensing regression tests cover the storage boundary, request flow, admin approval, one-time redemption, wrong-device/replay rejection, and local-agent online redemption. See [`docs/ssd-licensing-server-plan.md`](docs/ssd-licensing-server-plan.md) for the deployment boundary and later scaling options.
+
+For a Vercel frontend that uses the Local agent, set `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_AGENT_URL` (`http://127.0.0.1:4789` for local HTTP development; secure production pages automatically use `https://127.0.0.1:4789`), `NEXT_PUBLIC_AGENT_RELEASES_URL`, `NEXT_PUBLIC_MACOS_AGENT_SIGNED`, and (when using public license requests) `NEXT_PUBLIC_LICENSE_SERVER_URL`. Do not set `NEXT_PUBLIC_AGENT_URL` to a cloud URL: the browser must reach the agent on the same computer. Users must install the latest agent release for Safari production access. The Vercel filesystem is ephemeral and Vercel does not run the separate worker process, so server processing and server history require a persistent backend deployment such as the Docker deployment described below.
 
 ### macOS release signing and notarization
 

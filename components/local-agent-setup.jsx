@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Download, ExternalLink, Laptop, LoaderCircle, LogOut, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, Copy, Download, ExternalLink, Laptop, LoaderCircle, LogOut, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { agentBaseUrl, endAllLocalSessions, endLocalSession, getLocalSessions, localAgentToken, probeLocalAgent } from "./processing-client.js";
+import { createLicenseRequest, getLicenseRequest, licenseServerUrl } from "./license-client.js";
 
 const releasesUrl = process.env.NEXT_PUBLIC_AGENT_RELEASES_URL || "https://github.com/Amangupta20000/media-toolbox/releases/latest";
 const macBuildSigned = process.env.NEXT_PUBLIC_MACOS_AGENT_SIGNED === "true";
@@ -22,6 +23,10 @@ export function LocalAgentSetup() {
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessionAction, setSessionAction] = useState("");
   const [sessionError, setSessionError] = useState("");
+  const [licenseRequest, setLicenseRequest] = useState(null);
+  const [licenseRequestBusy, setLicenseRequestBusy] = useState(false);
+  const [licenseRequestError, setLicenseRequestError] = useState("");
+  const [licenseCopied, setLicenseCopied] = useState(false);
   const checkingRef = useRef(false);
 
   const publishStatus = useCallback((nextStatus) => {
@@ -64,6 +69,35 @@ export function LocalAgentSetup() {
     return () => window.clearInterval(timer);
   }, [check, status]);
 
+  useEffect(() => {
+    try {
+      const saved = window.sessionStorage.getItem("media-toolbox-license-request");
+      if (saved) setLicenseRequest(JSON.parse(saved));
+    } catch { /* ignore stale or malformed browser state */ }
+  }, []);
+
+  useEffect(() => {
+    if (!licenseRequest?.requestId || !licenseRequest?.requestToken || !["pending", "approved"].includes(licenseRequest.status)) return undefined;
+    let active = true;
+    const poll = async () => {
+      try {
+        const next = await getLicenseRequest(licenseRequest.requestId, licenseRequest.requestToken);
+        if (!active) return;
+        setLicenseRequest((current) => ({ ...current, ...next, code: next.code || current.code }));
+      } catch (requestError) {
+        if (active) setLicenseRequestError(requestError.message || "The activation request could not be checked.");
+      }
+    };
+    poll();
+    const timer = window.setInterval(poll, 3000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [licenseRequest?.requestId, licenseRequest?.requestToken, licenseRequest?.status]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !licenseRequest) return;
+    try { window.sessionStorage.setItem("media-toolbox-license-request", JSON.stringify(licenseRequest)); } catch { /* browser storage may be disabled */ }
+  }, [licenseRequest]);
+
   const endSession = async (sessionId) => {
     setSessionAction(sessionId); setSessionError("");
     try {
@@ -86,6 +120,21 @@ export function LocalAgentSetup() {
     } finally { setSessionAction(""); }
   };
 
+  const requestActivation = async () => {
+    setLicenseRequestBusy(true); setLicenseRequestError("");
+    try {
+      const value = await createLicenseRequest({ origin: window.location.origin, requesterLabel: `${navigator.userAgent.includes("Safari") ? "Safari" : "Website"} user` });
+      setLicenseRequest(value);
+    } catch (requestError) {
+      setLicenseRequestError(requestError.message || "The activation request could not be created.");
+    } finally { setLicenseRequestBusy(false); }
+  };
+
+  const copyLicense = async () => {
+    if (!licenseRequest?.code) return;
+    try { await navigator.clipboard.writeText(licenseRequest.code); setLicenseCopied(true); window.setTimeout(() => setLicenseCopied(false), 1600); } catch { setLicenseRequestError("The activation code could not be copied."); }
+  };
+
   const capabilities = status?.capabilities;
   const agentFound = Boolean(status?.available);
   const authorization = status?.authorization || status?.health?.authorization;
@@ -105,7 +154,7 @@ export function LocalAgentSetup() {
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> Local processing</div><h1>Local agent</h1><p>Run image, video, and PDF jobs on the same device while using the website from any browser.</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Files stay on this device</span></div></div>
     <section className={`agent-status-card ${status?.connected ? "connected" : ""}`}><div className="agent-status-icon">{status?.connected ? <CheckCircle2 size={27} /> : status?.available ? <Laptop size={27} /> : <XCircle size={27} />}</div><div className="agent-status-copy"><span className="agent-status-label">{status?.connected ? "Connected" : status?.available ? (legalConsentRequired ? "Agent found — consent required" : locked ? "Agent found — authorization needed" : trialAvailable ? "Agent found — trial available" : "Agent found") : "Disconnected"}</span><strong>{status?.connected ? "Local processing is ready" : status?.available ? (legalConsentRequired ? "Accept the Privacy Policy and Terms in the agent dashboard" : locked ? "Admin login or activation required" : trialAvailable ? "Local processing ready to start" : "Starting a browser session") : "Start the Local agent application"}</strong><small>{status?.connected ? `${status.health?.platform || "Desktop"} · ${authorizationLabel(authorization)} · ${agentBaseUrl()}` : status?.error || "The website checks 127.0.0.1:4789. The agent must be running on this device."}</small></div><button className="secondary-button" type="button" onClick={check}><RefreshCw size={16} /> Check connection</button></section>
     {showInstallStep && <section className="agent-install-card"><div className="card-heading"><div><span className="card-index">01</span><h2>Install the agent</h2></div><span className="optional-label">macOS · Windows · Linux</span></div><p className="card-description">Download the installer for the computer that should do the processing, install it, and launch the agent. It runs in the background, starts at login, and listens only on this computer.</p><div className="agent-download-grid"><a className="secondary-button" href={releasesUrl} target="_blank" rel="noreferrer"><Download size={17} /> macOS installer</a><a className="secondary-button" href={releasesUrl} target="_blank" rel="noreferrer"><Download size={17} /> Windows installer</a><a className="secondary-button" href={releasesUrl} target="_blank" rel="noreferrer"><Download size={17} /> Linux installer</a></div><div className="agent-https-note"><ShieldCheck size={17} /><span>Use the latest agent release for Safari and other secure production websites. It creates a trusted HTTPS connection to this device automatically.</span></div>{!macBuildSigned && <div className="agent-macos-note"><AlertTriangle size={17} /><span><strong>macOS first launch:</strong> This release is not Apple-notarized yet. If macOS says the app is “damaged”, copy it to Applications, then run <code>xattr -dr com.apple.quarantine "/Applications/Media Toolbox Agent.app"</code> in Terminal and open it again.</span></div>}<div className="agent-security-note"><ShieldCheck size={17} /><span>The website never receives Admin credentials or activation codes. Authorization is managed inside the Local agent dashboard.</span></div></section>}
-    {agentFound && !status?.connected && <section className="agent-pair-card"><div className="card-heading"><div><span className="card-index">02</span><h2>{trialAvailable ? "Ready for local processing" : "Authorize this agent"}</h2></div><span className={locked ? "required-label" : "optional-label"}>{locked ? "Action required" : "Automatic"}</span></div><p className="card-description">The website only checks the agent here; it does not create a processing session or consume the five-minute trial. The session starts when you submit your first local job. For a locked agent, open the desktop dashboard and choose Admin login or enter an activation code.</p><div className="agent-open-actions"><a className="secondary-button" href="mediatoolbox://dashboard"><ExternalLink size={16} /> Open agent dashboard</a><span>Credentials and license codes stay inside the desktop application.</span></div></section>}
+    {agentFound && !status?.connected && <section className="agent-pair-card"><div className="card-heading"><div><span className="card-index">02</span><h2>{trialAvailable ? "Ready for local processing" : "Authorize this agent"}</h2></div><span className={locked ? "required-label" : "optional-label"}>{locked ? "Action required" : "Automatic"}</span></div><p className="card-description">The website only checks the agent here; it does not create a processing session or consume the five-minute trial. The session starts when you submit your first local job. For a locked agent, open the desktop dashboard and choose Admin login or enter an activation code.</p><div className="agent-open-actions"><a className="secondary-button" href="mediatoolbox://dashboard"><ExternalLink size={16} /> Open agent dashboard</a><span>Credentials and license codes stay inside the desktop application.</span></div>{locked && <div className="license-request-box"><h3>Request an activation code</h3><p>The owner can approve a one-time ten-minute code for this website. The code is shown only to this browser and must be entered in the desktop agent dashboard.</p>{!licenseServerUrl() ? <div className="agent-session-empty">The licensing server is not configured for this website.</div> : licenseRequest?.code ? <><div className="license-code-row"><code>{licenseRequest.code}</code><button className="secondary-button" type="button" onClick={copyLicense}><Copy size={16} /> {licenseCopied ? "Copied" : "Copy code"}</button></div><div className="agent-session-note"><Check size={15} /> Approved. Open the desktop dashboard and paste this code.</div></> : licenseRequest?.status === "declined" || licenseRequest?.status === "expired" ? <><div className="agent-session-empty">This request was {licenseRequest.status}. Create a new request when ready.</div><button className="secondary-button" type="button" onClick={() => setLicenseRequest(null)}>Request again</button></> : licenseRequest ? <div className="agent-session-empty"><LoaderCircle className="spin" size={16} /> Waiting for owner approval…</div> : <button className="primary-button" type="button" onClick={requestActivation} disabled={licenseRequestBusy}><ExternalLink size={16} /> {licenseRequestBusy ? "Sending request…" : "Request activation"}</button>}{licenseRequestError && <div className="error-banner"><XCircle size={16} /><span>{licenseRequestError}</span></div>}</div>}</section>}
     <section className="agent-capabilities-card"><div className="card-heading"><div><span className="card-index">03</span><h2>Available tools</h2></div><span className={status?.connected ? "optional-label" : "required-label"}>{status?.connected ? "Detected on this device" : "Waiting for agent"}</span></div><div className="agent-capabilities-grid">{capabilityRows.map(([label, available]) => <div className="agent-capability-row" key={label}><span className={`capability-dot ${available ? "ready" : ""}`} /><strong>{label}</strong><span>{available === undefined ? "Not checked" : available ? "Available" : "Unavailable"}</span></div>)}</div><p className="card-description">FFmpeg, ffprobe, the image engine, and Untrunc are included in the installer. HEIC uses macOS sips or the bundled HEIF-capable image engine. Readable MKV/WebM files use FFmpeg; MKVToolNix remains optional for damaged-container reconstruction.</p></section>
     {status?.connected && <section className="agent-sessions-card"><div className="card-heading"><div><span className="card-index">04</span><h2>Connected browsers</h2></div><span className="optional-label">{sessions.length} active</span></div><p className="card-description">One agent can serve Chrome, Safari, other browsers, and private/incognito windows at the same time. Each browser receives its own short-lived session while the website origin is trusted.</p><div className="agent-session-list">{sessionsLoading ? <div className="agent-session-empty"><LoaderCircle className="spin" size={17} /> Loading sessions…</div> : sessions.length ? sessions.map((session) => <div className="agent-session-row" key={session.id}><div className="agent-session-copy"><strong>{session.clientLabel || "Website session"}{session.current && <span className="session-current-label">This browser</span>}</strong><small>{session.origin}</small><small>Connected {new Date(session.createdAt).toLocaleString()} · expires {new Date(session.expiresAt).toLocaleString()}</small></div><button className="secondary-button" type="button" onClick={() => endSession(session.id)} disabled={Boolean(sessionAction)}><LogOut size={16} /> {sessionAction === session.id ? "Ending…" : "End session"}</button></div>) : <div className="agent-session-empty">No active browser sessions.</div>}</div>{sessions.length > 0 && <button className="secondary-button agent-end-all" type="button" onClick={endAllSessions} disabled={Boolean(sessionAction)}><LogOut size={16} /> {sessionAction === "all" ? "Ending all sessions…" : "End all sessions"}</button>}{sessionError && <div className="session-error"><XCircle size={16} /><span>{sessionError}</span></div>}<p className="agent-session-note">Ending a session revokes its access immediately. It does not stop the desktop agent or delete local results.</p></section>}
     {error && <div className="error-banner"><XCircle size={18} /><span>{error}</span></div>}

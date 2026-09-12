@@ -72,6 +72,11 @@ jobs:
           AGENT_LICENSE_PUBLIC_KEY: ${{ vars.AGENT_LICENSE_PUBLIC_KEY }}
         shell: bash
         run: node scripts/stage-agent-license-public-key.mjs
+      - name: Embed licensing server URL
+        env:
+          AGENT_LICENSE_SERVER_URL: ${{ vars.AGENT_LICENSE_SERVER_URL }}
+        shell: bash
+        run: node scripts/stage-agent-license-server-url.mjs
       - name: Package macOS installer
         if: matrix.platform == 'mac'
         env:

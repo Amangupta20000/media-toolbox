@@ -721,6 +721,19 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .agent-pair-form > div { display: flex; gap: 9px; }
 .agent-pair-form input { width: 180px; padding: 12px 14px; color: var(--navy); background: #f8fbfc; border: 1px solid var(--line); border-radius: 9px; font-size: 16px; letter-spacing: .13em; }
 .agent-open-actions { display: flex; align-items: center; gap: 10px; margin-top: 14px; color: #8193a2; font-size: 10px; }
+.license-request-box { margin-top: 18px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: rgba(31, 145, 151, .05); }
+.license-request-box h3 { margin: 0 0 6px; font-size: 14px; }
+.license-request-box p { margin: 0 0 12px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.license-code-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.license-code-row code { flex: 1 1 300px; overflow-wrap: anywhere; padding: 10px 12px; color: var(--accent); background: var(--surface-strong); border-radius: 8px; font: 700 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.admin-login-form { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 12px; }
+.admin-login-form label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.admin-login-form input { width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-strong); color: var(--text); }
+.license-request-list { display: grid; gap: 10px; }
+.license-request-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
+.license-request-row > div:first-child { display: grid; gap: 4px; min-width: 0; }
+.license-request-row small { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+.success-banner { display: flex; align-items: center; gap: 9px; margin-top: 14px; padding: 12px 14px; color: #087f69; background: #e8faf4; border: 1px solid #bdebdc; border-radius: 10px; font-size: 11px; font-weight: 650; }
 .agent-capabilities-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 9px; margin: 16px 0; }
 .agent-capability-row { display: grid; gap: 6px; padding: 13px; background: #f8fbfc; border: 1px solid var(--line); border-radius: 10px; }
 .agent-capability-row strong { color: var(--navy); font-size: 11px; }
@@ -773,4 +786,6 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
   .agent-pair-form > div { align-items: stretch; flex-direction: column; }
   .agent-pair-form input { width: 100%; }
   .agent-open-actions { align-items: flex-start; flex-direction: column; }
+  .admin-login-form { grid-template-columns: 1fr; }
+  .license-request-row { align-items: flex-start; flex-direction: column; }
 }
