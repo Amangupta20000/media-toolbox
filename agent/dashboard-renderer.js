@@ -27,9 +27,9 @@
     const progressBar = el("agent-update-progress-bar");
     if (!panel || !title || !message || !action || !progress || !progressBar) return;
     const status = value.status || "unavailable";
-    const visible = ["checking", "available", "downloading", "downloaded", "error"].includes(status);
+    const visible = ["checking", "available", "downloading", "downloaded", "error", "manual"].includes(status);
     panel.classList.toggle("hidden", !visible);
-    panel.classList.toggle("update-error", status === "error");
+    panel.classList.toggle("update-error", status === "error" || status === "manual");
     panel.classList.toggle("update-ready", status === "downloaded");
     progress.classList.toggle("hidden", status !== "downloading");
     progressBar.style.width = `${Math.max(0, Math.min(100, Number(value.progress) || 0))}%`;
@@ -56,6 +56,12 @@
       message.textContent = "The update is downloaded and will be verified before installation. Restart the agent to finish.";
       action.textContent = "Restart and install";
       action.dataset.action = "install";
+      action.disabled = false;
+    } else if (status === "manual") {
+      title.textContent = "Update manually from GitHub Releases";
+      message.textContent = value.error || "Automatic macOS updates require an Apple Developer ID signed build.";
+      action.textContent = "Open latest release";
+      action.dataset.action = "open-release";
       action.disabled = false;
     } else {
       title.textContent = "Agent update check failed";
@@ -142,8 +148,11 @@
     licenseServerState = value || {};
     const panel = el("license-server-panel");
     const ownerMachine = value.ownerConfigured === true;
-    if (panel) panel.classList.toggle("hidden", !visible || !ownerMachine);
-    if (!visible || !ownerMachine) return;
+    // Admin should be able to inspect the licensing endpoint from any
+    // installation. Only the owner installation can start or stop the SSD
+    // server; the manager still enforces the SSD check in the main process.
+    if (panel) panel.classList.toggle("hidden", !visible);
+    if (!visible) return;
     const badge = el("license-server-badge");
     const message = el("license-server-message");
     const startButton = el("start-license-server");
@@ -155,9 +164,11 @@
     const publicHealthy = value.publicHealthy === null || value.publicHealthy === undefined ? null : Boolean(value.publicHealthy);
     const mounted = Boolean(value.ssdMounted);
     const fullyReachable = healthy && (!publicConfigured || publicHealthy !== false);
-    badge.textContent = !mounted ? "SSD not mounted" : !healthy ? "Stopped" : fullyReachable ? "Running" : "Public endpoint unavailable";
-    badge.className = `badge ${!mounted || !healthy ? "error" : fullyReachable ? "ready" : "warning"}`;
-    message.textContent = healthy
+    badge.textContent = !ownerMachine ? "Owner machine not configured" : !mounted ? "SSD not mounted" : !healthy ? "Stopped" : fullyReachable ? "Running" : "Public endpoint unavailable";
+    badge.className = `badge ${!ownerMachine ? "warning" : !mounted || !healthy ? "error" : fullyReachable ? "ready" : "warning"}`;
+    message.textContent = !ownerMachine
+      ? "This Admin session can inspect the licensing endpoint, but this installation is not configured as the owner machine. Connect the licensing SSD on the owner computer to start the server."
+      : healthy
       ? `The licensing service is reachable at ${value.url || "http://127.0.0.1:4900"}. Tailscale Funnel can forward to it using its saved configuration.`
       : value.error || (mounted ? "The licensing service is not running. Click Start licensing server after the SSD is mounted." : "Connect the Sandisk Exf licensing SSD, then click Start licensing server.");
     el("license-server-url").textContent = value.url || "http://127.0.0.1:4900";
@@ -165,8 +176,8 @@
     el("license-server-storage").textContent = value.dataDir || "/Volumes/Sandisk Exf/MediaToolboxLicensing";
     el("license-server-public-url").textContent = value.publicUrl || "Configured by Tailscale Funnel";
     el("license-server-public-status").textContent = !publicConfigured ? "Not configured" : publicHealthy === true ? "Connected" : publicHealthy === false ? "Unavailable" : "Checking";
-    startButton.disabled = healthy || !mounted || value.available === false;
-    startButton.textContent = healthy ? "Licensing server running" : "Start licensing server";
+    startButton.disabled = healthy || !ownerMachine || !mounted || value.available === false;
+    startButton.textContent = healthy ? "Licensing server running" : ownerMachine ? "Start licensing server" : "Available on owner machine";
     stopButton.classList.toggle("hidden", !value.managed);
     stopButton.disabled = !value.managed;
   }
@@ -579,6 +590,10 @@
     if (!updateAction) return;
     button.disabled = true;
     try {
+      if (updateAction === "open-release") {
+        await api.openReleasePage();
+        return;
+      }
       const nextState = updateAction === "download" ? await api.downloadUpdate() : updateAction === "install" ? await api.installUpdate() : await api.checkForUpdates();
       renderUpdate(nextState);
       if (updateAction === "check" && nextState.status === "up-to-date") showNotice("The agent is up to date.");

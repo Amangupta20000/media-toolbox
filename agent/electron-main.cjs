@@ -1,6 +1,6 @@
 const path = require("node:path");
 const fs = require("node:fs");
-const { execFileSync } = require("node:child_process");
+const { execFileSync, spawnSync } = require("node:child_process");
 const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, Tray } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { createLicenseServerManager, findNode22Executable } = require("./license-server-manager.cjs");
@@ -14,6 +14,7 @@ if (!app.requestSingleInstanceLock()) {
   let pairingWatch;
   let dashboardWindow;
   let licenseServerManager;
+  const latestReleaseUrl = "https://github.com/Amangupta20000/media-toolbox/releases/latest";
   const updateState = {
     status: "unavailable",
     currentVersion: app.getVersion(),
@@ -25,6 +26,24 @@ if (!app.requestSingleInstanceLock()) {
     error: "Updates are available after installing a packaged agent release.",
   };
 
+  function hasDeveloperIdSignature() {
+    if (process.platform !== "darwin") return true;
+    try {
+      const result = spawnSync("/usr/bin/codesign", ["-dvvv", process.execPath], { encoding: "utf8" });
+      const output = `${result.stdout || ""}\n${result.stderr || ""}`;
+      return result.status === 0 && /Authority=Developer ID Application:/.test(output) && !/Signature=adhoc/.test(output);
+    } catch {
+      return false;
+    }
+  }
+
+  function updateUnavailableMessage() {
+    if (process.platform === "darwin" && app.isPackaged && !hasDeveloperIdSignature()) {
+      return "Automatic macOS updates are unavailable for this unsigned build. Download the latest Mac release manually from GitHub Releases.";
+    }
+    return "Updates are checked by packaged agent releases.";
+  }
+
   function publishUpdateState(nextState = {}) {
     Object.assign(updateState, nextState, { currentVersion: app.getVersion() });
     if (dashboardWindow && !dashboardWindow.isDestroyed()) dashboardWindow.webContents.send("agent:update-state", { ...updateState });
@@ -32,12 +51,12 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   function canUseAutoUpdater() {
-    return app.isPackaged && !process.defaultApp;
+    return app.isPackaged && !process.defaultApp && hasDeveloperIdSignature();
   }
 
   function setupAutoUpdater() {
     if (!canUseAutoUpdater()) {
-      publishUpdateState({ status: "unavailable", error: "Updates are checked by packaged agent releases." });
+      publishUpdateState({ status: process.platform === "darwin" && app.isPackaged ? "manual" : "unavailable", error: updateUnavailableMessage() });
       return;
     }
     autoUpdater.autoDownload = false;
@@ -51,7 +70,7 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   async function checkForUpdates() {
-    if (!canUseAutoUpdater()) return publishUpdateState({ status: "unavailable", error: "Updates are checked by packaged agent releases.", checkedAt: new Date().toISOString() });
+    if (!canUseAutoUpdater()) return publishUpdateState({ status: process.platform === "darwin" && app.isPackaged ? "manual" : "unavailable", error: updateUnavailableMessage(), checkedAt: new Date().toISOString() });
     try {
       await autoUpdater.checkForUpdates();
       return { ...updateState };
@@ -61,14 +80,14 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   async function downloadUpdate() {
-    if (!canUseAutoUpdater()) throw new Error("Updates are available only in a packaged agent release.");
+    if (!canUseAutoUpdater()) throw new Error(updateUnavailableMessage());
     if (updateState.status !== "available" && updateState.status !== "error") throw new Error("There is no update ready to download.");
     await autoUpdater.downloadUpdate();
     return { ...updateState };
   }
 
   function installUpdate() {
-    if (!canUseAutoUpdater()) throw new Error("Updates are available only in a packaged agent release.");
+    if (!canUseAutoUpdater()) throw new Error(updateUnavailableMessage());
     if (updateState.status !== "downloaded") throw new Error("Download the update before installing it.");
     autoUpdater.quitAndInstall(false, true);
     return { ...updateState };
@@ -106,6 +125,10 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle("agent:check-for-updates", () => checkForUpdates());
     ipcMain.handle("agent:download-update", () => downloadUpdate());
     ipcMain.handle("agent:install-update", () => installUpdate());
+    ipcMain.handle("agent:open-release-page", async () => {
+      await shell.openExternal(latestReleaseUrl);
+      return { ok: true, url: latestReleaseUrl };
+    });
     ipcMain.handle("agent:run-diagnostics", () => agent?.runDiagnostics?.() || Promise.reject(new Error("The agent diagnostics are not ready.")));
     ipcMain.handle("agent:open-results-folder", async () => {
       const directory = path.join(app.getPath("userData"), "data", "Results");

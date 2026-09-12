@@ -70,6 +70,10 @@ function publicKeyCandidates() {
 }
 
 function packagedLicenseServerUrl() {
+  // The file is a release-time asset. Do not let a generated ignored file in
+  // the source checkout change Node-based development/test behavior; Electron
+  // provides resourcesPath for packaged agents.
+  if (!process.resourcesPath && process.env.AGENT_PACKAGED_CONFIG !== "1") return "";
   const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
   try { return fs.readFileSync(path.join(moduleDirectory, "license-server-url.txt"), "utf8").trim().replace(/\/$/, ""); } catch { return ""; }
 }
@@ -416,7 +420,7 @@ async function onlineLicenseFetch(pathname, options = {}) {
   }
   if (attempts.length > 1 || lastError?.name === "TypeError") {
     const details = attempts.map(({ url, message }) => `${url}: ${message}`).join(" | ");
-    const error = new Error(`The licensing server could not be reached. ${details} Check that the owner's licensing server and public HTTPS endpoint are running.`);
+    const error = new Error(`The licensing server could not be reached. ${details} Check that the owner's licensing server and public HTTPS endpoint are running. If this hostname is unfamiliar or outdated, install the latest agent release.`);
     error.cause = lastError;
     error.attempts = attempts;
     throw error;

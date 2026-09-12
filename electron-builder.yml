@@ -9,6 +9,10 @@ directories:
   output: release
 files:
   - agent/**/*
+  # This file is generated immediately before release packaging. Keep it as an
+  # explicit include so the online licensing endpoint cannot be omitted from a
+  # packaged agent by an ignore rule or a release repair step.
+  - agent/license-server-url.txt
   # The owner dashboard can start the SSD licensing service without a
   # separate Terminal or Node installation. It is only exposed through the
   # fixed Electron IPC action and still binds to loopback.

@@ -24,4 +24,13 @@ await copy("electron-builder.yml");
 await copy("agent/package.json", "package.json");
 await copy("agent/package-lock.json", "package-lock.json");
 
+for (const filename of ["license-public-key.pem", "license-server-url.txt"]) {
+  const stagedFile = path.join(stagingDirectory, "agent", filename);
+  try {
+    await fs.access(stagedFile);
+  } catch {
+    throw new Error(`The staged agent is missing agent/${filename}. Run the embedding step before packaging.`);
+  }
+}
+
 console.log(`Staged the agent-only package at ${stagingDirectory}`);

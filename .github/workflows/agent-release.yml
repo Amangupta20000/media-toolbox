@@ -95,6 +95,13 @@ jobs:
         run: node scripts/stage-agent-license-server-url.mjs
       - name: Stage agent-only packaging directory
         run: node scripts/stage-agent-package.mjs
+      - name: Verify embedded licensing configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .agent-build/agent/license-public-key.pem
+          test -s .agent-build/agent/license-server-url.txt
+          grep -Eq '^https://[^[:space:]]+$' .agent-build/agent/license-server-url.txt
       - name: Install agent-only packaging dependencies
         working-directory: .agent-build
         run: npm ci --prefer-offline --no-audit --no-fund

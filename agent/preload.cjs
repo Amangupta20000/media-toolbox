@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("mediaToolboxAgent", {
   checkForUpdates: () => ipcRenderer.invoke("agent:check-for-updates"),
   downloadUpdate: () => ipcRenderer.invoke("agent:download-update"),
   installUpdate: () => ipcRenderer.invoke("agent:install-update"),
+  openReleasePage: () => ipcRenderer.invoke("agent:open-release-page"),
   onUpdateState: (callback) => {
     if (typeof callback !== "function") return;
     ipcRenderer.on("agent:update-state", (_event, value) => callback(value));

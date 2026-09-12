@@ -160,6 +160,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   const dashboardCss = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard.css"), "utf8");
   const dashboardRenderer = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard-renderer.js"), "utf8");
   const dashboardPreload = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "preload.cjs"), "utf8");
+  const electronMain = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "electron-main.cjs"), "utf8");
   const agentPackage = JSON.parse(await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "package.json"), "utf8"));
   const builderConfig = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "electron-builder.yml"), "utf8");
   const updateConfig = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "build", "app-update.yml"), "utf8");
@@ -184,11 +185,16 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardPreload, /agent:check-for-updates/);
   assert.match(dashboardPreload, /agent:download-update/);
   assert.match(dashboardPreload, /agent:install-update/);
+  assert.match(dashboardPreload, /agent:open-release-page/);
   assert.match(dashboardRenderer, /currentState\?\.authorization\?\.mode === "admin"/);
   assert.match(dashboardRenderer, /el\("run-self-test"\)/);
   assert.match(dashboardHtml, /id="agent-update-panel"/);
   assert.match(dashboardRenderer, /Restart and install/);
   assert.match(dashboardRenderer, /downloadUpdate/);
+  assert.match(dashboardRenderer, /open-release/);
+  assert.match(dashboardRenderer, /Update manually from GitHub Releases/);
+  assert.match(electronMain, /hasDeveloperIdSignature/);
+  assert.match(electronMain, /status: process\.platform === "darwin" && app\.isPackaged \? "manual"/);
   assert.match(dashboardRenderer, /check-updates-bottom/);
   assert.match(builderConfig, /provider: github/);
   assert.match(builderConfig, /to: app-update\.yml/);
@@ -202,6 +208,8 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(releaseWorkflow, /hashFiles\('agent\/package-lock\.json', 'electron-builder\.yml'\)/);
   assert.match(releaseWorkflow, /Stage agent-only packaging directory/);
   assert.match(releaseWorkflow, /node scripts\/stage-agent-package\.mjs/);
+  assert.match(releaseWorkflow, /Verify embedded licensing configuration/);
+  assert.match(builderConfig, /agent\/license-server-url\.txt/);
   assert.match(releaseWorkflow, /working-directory: \.agent-build/);
   assert.match(releaseWorkflow, /npm ci --prefer-offline --no-audit --no-fund/);
   assert.doesNotMatch(releaseWorkflow, /npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund/);
@@ -351,6 +359,31 @@ test("dashboard licensing server manager reports local and public health separat
   }
 });
 
+test("packaged licensing-server manager reads the embedded public URL", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const moduleDirectory = path.join(testRoot, "packaged-agent");
+  const previousPackagedConfig = process.env.AGENT_PACKAGED_CONFIG;
+  process.env.AGENT_PACKAGED_CONFIG = "1";
+  await fs.mkdir(moduleDirectory, { recursive: true });
+  await fs.writeFile(path.join(moduleDirectory, "license-server-url.txt"), "https://media-toolbox-license.example\n");
+  try {
+    const manager = createLicenseServerManager({
+      moduleDirectory,
+      dataDirectory: path.join(testRoot, "packaged-license-data"),
+      mountPath: path.join(testRoot, "missing-packaged-ssd"),
+      existsSync: (value) => value.endsWith(path.join("license-server", "index.js")),
+      healthCheck: async () => false,
+      publicHealthCheck: async (value) => value === "https://media-toolbox-license.example/v1/health",
+    });
+    const state = await manager.getState();
+    assert.equal(state.publicUrl, "https://media-toolbox-license.example");
+    assert.equal(state.publicHealthy, true);
+  } finally {
+    if (previousPackagedConfig === undefined) delete process.env.AGENT_PACKAGED_CONFIG;
+    else process.env.AGENT_PACKAGED_CONFIG = previousPackagedConfig;
+  }
+});
+
 test("client installations do not advertise the owner-only SSD licensing server", async () => {
   const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -364,6 +397,13 @@ test("client installations do not advertise the owner-only SSD licensing server"
   const state = await manager.getState();
   assert.equal(state.ownerConfigured, false);
   assert.equal(state.error, "");
+});
+
+test("Admin dashboard shows licensing-server status on non-owner installations without enabling SSD controls", async () => {
+  const source = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard-renderer.js"), "utf8");
+  assert.match(source, /panel\.classList\.toggle\("hidden", !visible\)/);
+  assert.match(source, /Owner machine not configured/);
+  assert.match(source, /!ownerMachine \|\| !mounted/);
 });
 
 test("website local-agent setup does not expose license-request controls", async () => {

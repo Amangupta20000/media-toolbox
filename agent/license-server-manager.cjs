@@ -96,7 +96,15 @@ function createLicenseServerManager({
   }
 
   function publicUrl() {
-    return String(process.env.LICENSE_SERVER_PUBLIC_URL || process.env.AGENT_LICENSE_SERVER_URL || process.env.NEXT_PUBLIC_LICENSE_SERVER_URL || "").trim().replace(/\/$/, "");
+    let packagedUrl = "";
+    if (process.resourcesPath || process.env.AGENT_PACKAGED_CONFIG === "1") {
+      try {
+        packagedUrl = fs.readFileSync(path.join(moduleDirectory, "license-server-url.txt"), "utf8").trim();
+      } catch {
+        packagedUrl = "";
+      }
+    }
+    return String(process.env.LICENSE_SERVER_PUBLIC_URL || process.env.AGENT_LICENSE_SERVER_URL || process.env.NEXT_PUBLIC_LICENSE_SERVER_URL || packagedUrl).trim().replace(/\/$/, "");
   }
 
   function storageState() {

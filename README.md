@@ -42,7 +42,7 @@ npm run agent
 
 Build an installer for the current operating system with `npm run agent:package`. GitHub Actions builds macOS, Windows, and Linux installers on an `agent-v*` tag. Set `NEXT_PUBLIC_AGENT_RELEASES_URL` in the website environment to the repository's latest Releases page. The setup page links users to those installers.
 
-Packaged agents check GitHub Releases shortly after startup and periodically while running. When a newer signed release is available, the desktop dashboard shows an **Agent update** notification. Click **Update now** to download it, then click **Restart and install** after the download completes. Development agents do not attempt release updates. The release workflow must publish the updater metadata (`latest*.yml` and blockmaps) alongside the installers; this is handled by `.github/workflows/agent-release.yml`.
+Packaged agents check GitHub Releases shortly after startup and periodically while running. When a newer signed release is available, the desktop dashboard shows an **Agent update** notification. Click **Update now** to download it, then click **Restart and install** after the download completes. Automatic replacement is enabled for Developer ID-signed macOS builds and packaged Windows/Linux builds. Unsigned macOS builds show an **Open latest release** button instead; macOS cannot reliably validate automatic updates when each ad-hoc signature has a different executable hash. Development agents do not attempt release updates. The release workflow publishes updater metadata (`latest*.yml` and blockmaps) alongside the installers; this is handled by `.github/workflows/agent-release.yml`.
 
 Generate the owner signing key pair once, outside the repository:
 
@@ -132,7 +132,7 @@ For a Vercel frontend that uses the Local agent, set `NEXT_PUBLIC_APP_NAME`, `NE
 
 ### macOS release signing and notarization
 
-The public macOS build must be signed with an Apple Developer ID Application certificate and notarized before users download it. Without those Apple credentials, Gatekeeper can report the app as damaged. The GitHub workflow intentionally stops the macOS release instead of publishing an unsigned DMG.
+The public macOS build should be signed with an Apple Developer ID Application certificate and notarized before users download it. Without those Apple credentials, Gatekeeper can report the app as damaged, and automatic in-app updates are disabled because ad-hoc signatures cannot satisfy a stable update requirement. Unsigned builds remain available for testing through the manual GitHub Releases link.
 
 To enable signed releases:
 
