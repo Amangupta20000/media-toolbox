@@ -1,0 +1,26 @@
+{
+  "name": "media-toolbox-agent-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Runtime and packaging dependencies for the Media Toolbox desktop agent.",
+  "type": "module",
+  "main": "agent/electron-main.cjs",
+  "engines": {
+    "node": ">=20.9.0",
+    "npm": ">=10.0.0"
+  },
+  "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@ffprobe-installer/ffprobe": "^2.1.2",
+    "better-sqlite3": "^11.10.0",
+    "busboy": "^1.6.0",
+    "electron-updater": "^6.8.9",
+    "pdf-lib": "^1.17.1",
+    "selfsigned": "^5.5.0",
+    "sharp": "^0.35.4"
+  },
+  "devDependencies": {
+    "electron": "^37.2.6",
+    "electron-builder": "^26.0.12"
+  }
+}

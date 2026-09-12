@@ -20,12 +20,7 @@ jobs:
             artifact: win
           - os: ubuntu-latest
             platform: linux
-            linux-target: AppImage
-            artifact: linux-appimage
-          - os: ubuntu-latest
-            platform: linux
-            linux-target: deb
-            artifact: linux-deb
+            artifact: linux
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +28,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: agent/package-lock.json
       - name: Cache Electron packaging downloads
         uses: actions/cache@v4
         with:
@@ -43,7 +39,7 @@ jobs:
             ~/Library/Caches/electron-builder
             ~/AppData/Local/electron/Cache
             ~/AppData/Local/electron-builder/Cache
-          key: electron-builder-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json', 'electron-builder.yml') }}
+          key: electron-builder-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('agent/package-lock.json', 'electron-builder.yml') }}
           restore-keys: |
             electron-builder-${{ runner.os }}-${{ runner.arch }}-node22-
       - name: Cache bundled Untrunc
@@ -69,8 +65,6 @@ jobs:
         if: matrix.platform == 'win'
         shell: pwsh
         run: ./scripts/prepare-untrunc-windows.ps1
-      - name: Install packaging dependencies
-        run: npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund
       - name: Check macOS signing credentials
         if: matrix.platform == 'mac'
         env:
@@ -99,8 +93,14 @@ jobs:
           AGENT_LICENSE_SERVER_URL: ${{ vars.AGENT_LICENSE_SERVER_URL }}
         shell: bash
         run: node scripts/stage-agent-license-server-url.mjs
+      - name: Stage agent-only packaging directory
+        run: node scripts/stage-agent-package.mjs
+      - name: Install agent-only packaging dependencies
+        working-directory: .agent-build
+        run: npm ci --prefer-offline --no-audit --no-fund
       - name: Package macOS installer
         if: matrix.platform == 'mac'
+        working-directory: .agent-build
         env:
           CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
@@ -113,23 +113,25 @@ jobs:
           if [ -n "${CSC_LINK:-}" ] && [ -n "${CSC_KEY_PASSWORD:-}" ] && \
              [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ] && \
              [ -n "${APPLE_TEAM_ID:-}" ]; then
-            npm run agent:package -- --mac --publish never
+            npx --no-install electron-builder --config electron-builder.yml --mac --publish never
           else
             unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
-            npm run agent:package -- --mac --publish never
+            npx --no-install electron-builder --config electron-builder.yml --mac --publish never
           fi
       - name: Package Linux installer target
         if: matrix.platform == 'linux'
-        run: npm run agent:package -- --linux ${{ matrix.linux-target }} --publish never
+        working-directory: .agent-build
+        run: npx --no-install electron-builder --config electron-builder.yml --linux AppImage deb --publish never
       - name: Package Windows installer
         if: matrix.platform == 'win'
-        run: npm run agent:package -- --win --publish never
+        working-directory: .agent-build
+        run: npx --no-install electron-builder --config electron-builder.yml --win --publish never
       - name: Stage installer files
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p upload
-          find release -maxdepth 1 -type f \( \
+          find .agent-build/release -maxdepth 1 -type f \( \
             -name '*.dmg' -o \
             -name '*.zip' -o \
             -name '*.exe' -o \

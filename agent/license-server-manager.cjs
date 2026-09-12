@@ -75,23 +75,37 @@ function createLicenseServerManager({
   let lastError = "";
   const entryPath = path.join(moduleDirectory, "..", "license-server", "index.js");
   const url = `http://${host}:${port}`;
+  let ownerMarkerPath = "";
+  try {
+    const userDataPath = app?.getPath?.("userData");
+    if (userDataPath) ownerMarkerPath = path.join(userDataPath, "license-server-owner.marker");
+  } catch {
+    ownerMarkerPath = "";
+  }
 
   function publicUrl() {
     return String(process.env.LICENSE_SERVER_PUBLIC_URL || process.env.AGENT_LICENSE_SERVER_URL || process.env.NEXT_PUBLIC_LICENSE_SERVER_URL || "").trim().replace(/\/$/, "");
   }
 
   function storageState() {
+    const ssdMounted = Boolean(existsSync(mountPath));
+    const ownerMarker = Boolean(ownerMarkerPath && existsSync(ownerMarkerPath));
     return {
       dataDir: dataDirectory,
-      ssdMounted: Boolean(existsSync(mountPath)),
+      ssdMounted,
       storageReady: Boolean(existsSync(dataDirectory)),
+      // The SSD is the first-run owner signal. After the owner starts the
+      // service once, the marker keeps the owner controls discoverable even
+      // while the SSD is temporarily disconnected. Client installations do
+      // not show an SSD prompt merely because they contain the server code.
+      ownerConfigured: ssdMounted || ownerMarker,
     };
   }
 
   async function getState() {
     const healthy = await healthCheck(`${url}/v1/health`);
     const storage = storageState();
-    return {
+    const state = {
       available: Boolean(existsSync(entryPath)),
       healthy,
       running: healthy,
@@ -100,8 +114,19 @@ function createLicenseServerManager({
       publicUrl: publicUrl(),
       ...storage,
       runtime: useElectronRuntime ? "packaged Electron runtime" : (nodeExecutable ? nodeExecutable : "Node 22 required"),
-      error: lastError || (!storage.ssdMounted ? "Connect the licensing SSD before starting the server." : ""),
+      error: lastError || (storage.ownerConfigured && !storage.ssdMounted ? "Connect the licensing SSD before starting the server." : ""),
     };
+    return state;
+  }
+
+  function rememberOwnerMachine() {
+    if (!ownerMarkerPath) return;
+    try {
+      fs.mkdirSync(path.dirname(ownerMarkerPath), { recursive: true });
+      fs.writeFileSync(ownerMarkerPath, `${new Date().toISOString()}\n`, { mode: 0o600 });
+    } catch (error) {
+      logger.warn?.(`The licensing-server owner marker could not be saved: ${error.message}`);
+    }
   }
 
   async function waitForHealth(childProcess) {
@@ -163,6 +188,7 @@ function createLicenseServerManager({
 
     try {
       await waitForHealth(nextChild);
+      rememberOwnerMachine();
       return { ...(await getState()), started: true, message: "The licensing server is running." };
     } catch (error) {
       if (isAlive(nextChild)) nextChild.kill?.("SIGTERM");

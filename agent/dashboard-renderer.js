@@ -141,8 +141,9 @@
   function renderLicenseServer(value = {}, visible = false) {
     licenseServerState = value || {};
     const panel = el("license-server-panel");
-    if (panel) panel.classList.toggle("hidden", !visible);
-    if (!visible) return;
+    const ownerMachine = value.ownerConfigured === true;
+    if (panel) panel.classList.toggle("hidden", !visible || !ownerMachine);
+    if (!visible || !ownerMachine) return;
     const badge = el("license-server-badge");
     const message = el("license-server-message");
     const startButton = el("start-license-server");
@@ -196,9 +197,11 @@
     const mode = currentState?.authorization?.mode || "locked";
     const legalAccepted = Boolean(currentState?.authorization?.legalAccepted);
     const available = Boolean(licenseRequestConfig?.available);
-    block.classList.toggle("hidden", mode !== "locked" || Boolean(currentState?.authorization?.activationId));
+    // Admin can request a license for another user from this dashboard. An
+    // active activation already has access, so keep the request form focused
+    // on locked, trial, and Admin states.
+    block.classList.toggle("hidden", mode === "activation");
     if (!originInput.value && licenseRequestConfig?.suggestedOrigins?.length) originInput.value = licenseRequestConfig.suggestedOrigins[0];
-    if (mode !== "locked") return;
     if (!available) {
       button.disabled = true;
       status.className = "license-request-status";
@@ -577,6 +580,22 @@
     } catch (error) {
       renderUpdate({ status: "error", error: error.message || "The agent update could not be completed." });
     } finally { button.disabled = false; }
+  });
+  el("check-updates-bottom")?.addEventListener("click", async () => {
+    const button = el("check-updates-bottom");
+    button.disabled = true;
+    button.textContent = "Checking…";
+    try {
+      const nextState = await api.checkForUpdates();
+      renderUpdate(nextState);
+      showNotice(nextState.status === "available" ? `Agent update available${nextState.version ? ` · v${nextState.version}` : ""}.` : nextState.status === "up-to-date" ? "The agent is up to date." : nextState.error || "Update status checked.");
+    } catch (error) {
+      renderUpdate({ status: "error", error: error.message || "The agent update check failed." });
+      showNotice(error.message || "The agent update check failed.");
+    } finally {
+      button.disabled = false;
+      button.textContent = "Check for updates";
+    }
   });
   el("run-self-test").addEventListener("click", async () => {
     const button = el("run-self-test");

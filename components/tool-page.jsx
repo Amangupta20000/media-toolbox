@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock3, Download, FileCheck2, Info, LoaderCircle, RotateCcw, ShieldCheck, Sparkles, Zap } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Download, FileCheck2, Info, LoaderCircle, RotateCcw, ShieldCheck, Sparkles, Zap } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { FileDropzone, formatBytes } from "./file-dropzone.jsx";
 import { clipboardImageFile, isSupportedImageFile } from "../lib/image-input.js";
@@ -35,6 +35,9 @@ export function ToolPage({ tool }) {
   const [source, setSource] = useState(null);
   const [imageFiles, setImageFiles] = useState([]);
   const [imageSettings, setImageSettings] = useState([]);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [sameConversion, setSameConversion] = useState(false);
+  const [sameSize, setSameSize] = useState(false);
   const [reference, setReference] = useState(null);
   const [method, setMethod] = useState("auto");
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -135,7 +138,25 @@ export function ToolPage({ tool }) {
   const defaultImageSettings = () => ({ format: "original", maxSizeKb: "", jpegConfirmed: false });
 
   const updateImageSetting = (index, key, value) => {
-    setImageSettings((current) => current.map((setting, settingIndex) => settingIndex === index ? { ...setting, [key]: value, ...(key === "format" && value !== "jpeg" ? { jpegConfirmed: false } : {}) } : setting));
+    setImageSettings((current) => current.map((setting, settingIndex) => {
+      const applyToSetting = settingIndex === index || (key === "format" && sameConversion) || (key === "maxSizeKb" && sameSize) || (key === "jpegConfirmed" && sameConversion);
+      if (!applyToSetting) return setting;
+      return { ...setting, [key]: value, ...(key === "format" && value !== "jpeg" ? { jpegConfirmed: false } : {}) };
+    }));
+  };
+
+  const toggleSameConversion = (checked) => {
+    setSameConversion(checked);
+    if (!checked || !imageSettings.length) return;
+    const current = imageSettings[activeImageIndex] || { format: "original", jpegConfirmed: false };
+    setImageSettings((settings) => settings.map((setting) => ({ ...setting, format: current.format, jpegConfirmed: current.format === "jpeg" ? current.jpegConfirmed : false })));
+  };
+
+  const toggleSameSize = (checked) => {
+    setSameSize(checked);
+    if (!checked || !imageSettings.length) return;
+    const current = imageSettings[activeImageIndex] || { maxSizeKb: "" };
+    setImageSettings((settings) => settings.map((setting) => ({ ...setting, maxSizeKb: current.maxSizeKb })));
   };
 
   const handleImageFiles = (candidates, replace = false) => {
@@ -149,6 +170,8 @@ export function ToolPage({ tool }) {
     const next = [...existing, ...additions];
     if (next.length > maxImageFiles) { setError(`Choose up to ${maxImageFiles} images per request.`); return; }
     setImageFiles(next);
+    setActiveImageIndex((current) => replace ? 0 : Math.min(current, Math.max(next.length - 1, 0)));
+    if (replace) { setSameConversion(false); setSameSize(false); }
     setImageSettings((current) => {
       const base = replace ? [] : current.slice(0, existing.length);
       return [...base, ...additions.map(defaultImageSettings)];
@@ -159,6 +182,7 @@ export function ToolPage({ tool }) {
   };
 
   const removeImageFile = (index) => {
+    setActiveImageIndex((active) => Math.min(active, Math.max(imageFiles.length - 2, 0)));
     setImageFiles((current) => current.filter((_, fileIndex) => fileIndex !== index));
     setImageSettings((current) => current.filter((_, settingIndex) => settingIndex !== index));
     setError("");
@@ -176,7 +200,7 @@ export function ToolPage({ tool }) {
   const reset = () => {
     if (jobId && job && (job.status === "queued" || job.status === "processing")) deleteProcessingJob(jobMode, jobId).catch(() => undefined);
     if (batchJobs) batchJobs.filter((entry) => entry.status === "queued" || entry.status === "processing").forEach((entry) => deleteProcessingJob(jobMode, entry.id).catch(() => undefined));
-    setSource(null); setImageFiles([]); setImageSettings([]); setReference(null); setMethod("auto"); setUploadProgress(0); setJobId(null); setJob(null); setBatchJobs(null); setError(""); setPreviewUrl(""); setPreviewError(false); setKeepResult(false);
+    setSource(null); setImageFiles([]); setImageSettings([]); setActiveImageIndex(0); setSameConversion(false); setSameSize(false); setReference(null); setMethod("auto"); setUploadProgress(0); setJobId(null); setJob(null); setBatchJobs(null); setError(""); setPreviewUrl(""); setPreviewError(false); setKeepResult(false);
   };
 
   useEffect(() => {
@@ -250,8 +274,8 @@ export function ToolPage({ tool }) {
     <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />
     <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${capabilities?.status === "ready" ? "ready" : ""}`} /><span>{capabilities?.status === "ready" ? `${processingMode === "local" ? "Local agent" : "Server"} worker online` : "Connecting to processing worker"}</span></div>{isImage ? <span>{heicReady ? (capabilities?.image?.heic ? "HEIC enabled" : "HEIC enabled via local fallback") : capabilities?.status === "ready" ? "HEIC unavailable" : "HEIC capability checking"}</span> : <span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery + fallback" : "Reference recovery · upload a reference") : capabilities?.status === "ready" ? "FFmpeg recovery enabled · reference recovery unavailable" : "Video capabilities checking"}</span>}</div>
     {job ? <JobStatusCard job={job} isImage={isImage} mode={jobMode} keepResult={keepResult} onReset={reset} /> : batchJobs ? <BatchJobStatusCard jobs={batchJobs} mode={jobMode} onReset={reset} /> : <div className="workspace-grid">
-      <section className="tool-card primary-card"><div className="card-heading"><div><span className="card-index">01</span><h2>{isImage ? "Add up to 5 images" : "Add a damaged video"}</h2></div><span className="required-label">Required</span></div><FileDropzone files={isImage ? imageFiles : undefined} file={isImage ? undefined : source} onFiles={isImage ? handleImageFiles : undefined} onFile={isImage ? undefined : (file) => { setSource(file); setError(""); }} onRemoveFile={isImage ? removeImageFile : undefined} onClear={() => { setSource(null); setImageFiles([]); setImageSettings([]); setPreviewUrl(""); setPreviewError(false); }} multiple={isImage} variant={isImage ? "image" : "video"} accept={isImage ? imageAccept : "video/*,.mkv,.webm,.avi,.3gp"} label={isImage ? "Drop up to 5 images here" : "Drop a video here"} hint={isImage ? "or click to browse · paste an image directly" : "or click to browse from your device"} required={isImage} disabled={Boolean(uploadProgress)} />{isImage && imageFiles[0] && previewUrl && <div className="image-preview-card"><div className="preview-heading"><span>First image preview</span><small>Local only · not uploaded</small></div><div className="image-preview-frame">{previewError ? <div className="preview-unavailable"><AlertTriangle size={18} /><span>This browser cannot preview this image format, but the file can still be processed.</span></div> : <img src={previewUrl} alt={`Preview of ${imageFiles[0].name}`} onError={() => setPreviewError(true)} />}</div></div>}<div className="limit-row"><span>Maximum file size</span><strong>{isImage ? "25 MB each · 5 per request" : "2 GB"}</strong></div>{processingMode === "local" && <label className="keep-result-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label>}</section>
-    {isImage ? <ImageSettingsCard files={imageFiles} settings={imageSettings} method={method} capabilities={capabilities} imageMagickReady={imageMagickReady} sipsReady={sipsReady} onChange={updateImageSetting} onMethodChange={setMethod} /> : <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Reference video</h2></div><span className={serverReferenceReady ? "optional-label" : "required-label"}>{serverReferenceReady ? "Optional server fallback" : "Upload for damaged MP4"}</span></div><p className="card-description">A healthy recording from the same device or app can rebuild missing MP4 metadata when it was recorded with the same settings.</p><FileDropzone file={reference} onFile={setReference} onClear={() => setReference(null)} variant="video" accept="video/*,.mkv,.webm,.avi,.3gp" label="Drop a reference video" hint={serverReferenceReady ? "or continue without one" : "required when MP4 metadata is missing"} disabled={Boolean(uploadProgress)} /><div className="info-note"><Info size={16} /><span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery is available. If you do not upload one, the configured server reference will be tried." : "No server-side reference is configured. Upload a healthy recording from the same device or app; readable containers can still be repaired without one.") : "FFmpeg can repair readable containers. Missing MP4 metadata requires Untrunc and a matching healthy reference."}</span></div></section>}
+      <section className="tool-card primary-card"><div className="card-heading"><div><span className="card-index">01</span><h2>{isImage ? "Add up to 5 images" : "Add a damaged video"}</h2></div><span className="required-label">Required</span></div><FileDropzone files={isImage ? imageFiles : undefined} file={isImage ? undefined : source} onFiles={isImage ? handleImageFiles : undefined} onFile={isImage ? undefined : (file) => { setSource(file); setError(""); }} onRemoveFile={isImage ? removeImageFile : undefined} onClear={() => { setSource(null); setImageFiles([]); setImageSettings([]); setActiveImageIndex(0); setSameConversion(false); setSameSize(false); setPreviewUrl(""); setPreviewError(false); }} multiple={isImage} variant={isImage ? "image" : "video"} accept={isImage ? imageAccept : "video/*,.mkv,.webm,.avi,.3gp"} label={isImage ? "Drop up to 5 images here" : "Drop a video here"} hint={isImage ? "or click to browse · paste an image directly" : "or click to browse from your device"} required={isImage} disabled={Boolean(uploadProgress)} />{isImage && imageFiles[0] && previewUrl && <div className="image-preview-card"><div className="preview-heading"><span>First image preview</span><small>Local only · not uploaded</small></div><div className="image-preview-frame">{previewError ? <div className="preview-unavailable"><AlertTriangle size={18} /><span>This browser cannot preview this image format, but the file can still be processed.</span></div> : <img src={previewUrl} alt={`Preview of ${imageFiles[0].name}`} onError={() => setPreviewError(true)} />}</div></div>}<div className="limit-row"><span>Maximum file size</span><strong>{isImage ? "25 MB each · 5 per request" : "2 GB"}</strong></div>{processingMode === "local" && <label className="keep-result-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label>}</section>
+    {isImage ? <ImageSettingsCard files={imageFiles} settings={imageSettings} activeIndex={activeImageIndex} sameConversion={sameConversion} sameSize={sameSize} method={method} capabilities={capabilities} imageMagickReady={imageMagickReady} sipsReady={sipsReady} onChange={updateImageSetting} onActiveIndexChange={setActiveImageIndex} onSameConversionChange={toggleSameConversion} onSameSizeChange={toggleSameSize} onMethodChange={setMethod} /> : <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Reference video</h2></div><span className={serverReferenceReady ? "optional-label" : "required-label"}>{serverReferenceReady ? "Optional server fallback" : "Upload for damaged MP4"}</span></div><p className="card-description">A healthy recording from the same device or app can rebuild missing MP4 metadata when it was recorded with the same settings.</p><FileDropzone file={reference} onFile={setReference} onClear={() => setReference(null)} variant="video" accept="video/*,.mkv,.webm,.avi,.3gp" label="Drop a reference video" hint={serverReferenceReady ? "or continue without one" : "required when MP4 metadata is missing"} disabled={Boolean(uploadProgress)} /><div className="info-note"><Info size={16} /><span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery is available. If you do not upload one, the configured server reference will be tried." : "No server-side reference is configured. Upload a healthy recording from the same device or app; readable containers can still be repaired without one.") : "FFmpeg can repair readable containers. Missing MP4 metadata requires Untrunc and a matching healthy reference."}</span></div></section>}
       <section className="tool-card action-card"><div className="action-copy"><div className="action-icon"><Zap size={19} /></div><div><h2>Ready when you are</h2><p>{isImage ? "Your output will be created as a new file." : "The worker will try the safest recovery method first."}</p></div></div><button className="primary-button" onClick={submit} disabled={!canSubmit}>{uploadProgress ? <><LoaderCircle className="spin" size={18} /> Uploading {uploadProgress}%</> : <><Sparkles size={18} /> {isImage ? "Convert image" : "Repair video"}</>}</button></section>
     </div>}
     {!job && !isImage && <VideoRecoverySummary hasServerReference={serverReferenceReady} hasUntrunc={capabilities?.video?.untrunc} />}
@@ -261,23 +285,31 @@ export function ToolPage({ tool }) {
   </AppShell>;
 }
 
-function ImageSettingsCard({ files, settings, method, capabilities, imageMagickReady, sipsReady, onChange, onMethodChange }) {
+function ImageSettingsCard({ files, settings, activeIndex, sameConversion, sameSize, method, capabilities, imageMagickReady, sipsReady, onChange, onActiveIndexChange, onSameConversionChange, onSameSizeChange, onMethodChange }) {
+  const activeFile = files[activeIndex];
+  const activeSetting = settings[activeIndex] || { format: "original", maxSizeKb: "", jpegConfirmed: false };
+  const selectImage = (index) => onActiveIndexChange(Math.max(0, Math.min(index, files.length - 1)));
   return <section className="tool-card settings-card image-batch-settings-card">
-    <div className="card-heading"><div><span className="card-index">02</span><h2>{files.length ? "Set output per image" : "Choose output"}</h2></div><span className="optional-label">Per-image target</span></div>
-    <p className="card-description">Choose a different extension and KB target for every selected image. Pixel dimensions stay unchanged.</p>
-    {!files.length ? <div className="batch-settings-empty"><Info size={18} /><span>Add images above to configure each output.</span></div> : <div className="image-batch-settings-list">
-      {files.map((file, index) => {
-        const setting = settings[index] || { format: "original", maxSizeKb: "", jpegConfirmed: false };
-        return <article className="image-batch-setting" key={`${file.name}-${file.size}-${index}`}>
-          <div className="image-batch-setting-heading"><strong title={file.name}>{index + 1}. {file.name}</strong><span>{formatBytes(file.size)}</span></div>
-          <div className="image-batch-setting-fields">
-            <label className="batch-field"><span className="batch-field-label">Extension</span><select className="batch-format-select" value={setting.format} onChange={(event) => onChange(index, "format", event.target.value)}>{imageFormats.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-            <label className="batch-field"><span className="batch-field-label">Target size <small>KB</small></span><div className="input-with-suffix"><input type="text" inputMode="numeric" value={setting.maxSizeKb} onChange={(event) => onChange(index, "maxSizeKb", event.target.value.replace(/[^0-9]/g, ""))} placeholder="Optional" aria-label={`Target size for ${file.name}`} /><span>KB</span></div></label>
-          </div>
-          {setting.format === "jpeg" && <label className="warning-check"><input type="checkbox" checked={Boolean(setting.jpegConfirmed)} onChange={(event) => onChange(index, "jpegConfirmed", event.target.checked)} /><span><AlertTriangle size={16} /><span>JPEG flattens transparent pixels.</span></span></label>}
-        </article>;
-      })}
-    </div>}
+    <div className="card-heading"><div><span className="card-index">02</span><h2>{files.length ? "Set output" : "Choose output"}</h2></div><span className="optional-label">{files.length > 1 ? `${activeIndex + 1} of ${files.length}` : "Per-image target"}</span></div>
+    <p className="card-description">Choose a conversion and optional KB target for the selected image. Pixel dimensions stay unchanged.</p>
+    {!files.length ? <div className="batch-settings-empty"><Info size={18} /><span>Add images above to configure each output.</span></div> : <>
+      <div className="image-settings-pager" aria-label="Select image to configure">
+        <button className="image-settings-pager-arrow" type="button" onClick={() => selectImage(activeIndex - 1)} disabled={activeIndex === 0} aria-label="Previous image" title="Previous image"><ChevronLeft size={16} /></button>
+        <div className="image-settings-page-buttons" role="tablist" aria-label="Images">
+          {files.map((file, index) => <button className={`image-settings-page-button ${index === activeIndex ? "active" : ""}`} type="button" role="tab" aria-selected={index === activeIndex} aria-label={`Configure image ${index + 1}: ${file.name}`} title={file.name} onClick={() => selectImage(index)} key={`${file.name}-${file.size}-${index}`}>{index + 1}</button>)}
+        </div>
+        <button className="image-settings-pager-arrow" type="button" onClick={() => selectImage(activeIndex + 1)} disabled={activeIndex === files.length - 1} aria-label="Next image" title="Next image"><ChevronRight size={16} /></button>
+      </div>
+      <div className="image-settings-current-file"><strong title={activeFile.name}>{activeFile.name}</strong><span>{formatBytes(activeFile.size)} · Image {activeIndex + 1} of {files.length}</span></div>
+      {files.length > 1 && <div className="image-settings-sync" aria-label="Apply settings to all images">
+        <label><input type="checkbox" checked={sameConversion} onChange={(event) => onSameConversionChange(event.target.checked)} /><span><strong>Conversion</strong> Make it same for all images</span></label>
+        <label><input type="checkbox" checked={sameSize} onChange={(event) => onSameSizeChange(event.target.checked)} /><span><strong>Size</strong> Keep it same for all images</span></label>
+      </div>}
+      <div className="format-grid">{imageFormats.map(([value, label, detail]) => <button type="button" key={value} className={`format-option ${activeSetting.format === value ? "selected" : ""}`} onClick={() => onChange(activeIndex, "format", value)}><span className="format-radio" /><strong>{label}</strong><small>{detail}</small></button>)}</div>
+      <label className="field-label" htmlFor="active-image-size">Target size <span>KB</span></label>
+      <div className="input-with-suffix"><input id="active-image-size" type="text" inputMode="numeric" value={activeSetting.maxSizeKb} onChange={(event) => onChange(activeIndex, "maxSizeKb", event.target.value.replace(/[^0-9]/g, ""))} placeholder="Leave blank for normal quality" aria-label={`Target size for ${activeFile.name}`} /><span>KB target</span></div>
+      {activeSetting.format === "jpeg" && <label className="warning-check"><input type="checkbox" checked={Boolean(activeSetting.jpegConfirmed)} onChange={(event) => onChange(activeIndex, "jpegConfirmed", event.target.checked)} /><span><AlertTriangle size={16} /><span>JPEG flattens transparent pixels.{sameConversion ? " I understand for all images." : " I understand."}</span></span></label>}
+    </>}
     {files.length > 0 && <><label className="field-label">Processing method <span>Worker engine for all images</span></label><div className="method-list">{imageMethods.map(([value, label, detail, tag]) => { const unavailable = (value === "imagemagick" && capabilities?.status === "ready" && !imageMagickReady) || (value === "sips" && capabilities?.status === "ready" && !sipsReady); return <button type="button" key={value} className={`method-option ${method === value ? "selected" : ""} ${unavailable ? "unavailable" : ""}`} disabled={unavailable} onClick={() => onMethodChange(value)}><span className="method-copy"><strong>{label}</strong><small>{detail}</small></span><span className="method-tag">{unavailable ? "Unavailable" : tag}</span></button>; })}</div></>}
   </section>;
 }

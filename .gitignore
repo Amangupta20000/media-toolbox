@@ -9,6 +9,7 @@ data/*
 vendor/untrunc-macos/
 vendor/untrunc/
 release/
+.agent-build/
 license-data/*
 !license-data/.gitkeep
 npm-debug.log*

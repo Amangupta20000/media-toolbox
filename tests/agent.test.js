@@ -155,16 +155,18 @@ if (getAuthorizationState().trialStartedAt !== state.trialStartedAt) process.exi
   assert.equal(child.status, 0, `The explicit dashboard trial action failed: ${child.stdout}${child.stderr}`);
 });
 
-test("dashboard exposes the trial action in the bottom-right tray with subdued admin access", async () => {
+test("dashboard exposes the trial, update, and admin actions in the bottom bar", async () => {
   const dashboardHtml = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard.html"), "utf8");
   const dashboardCss = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard.css"), "utf8");
   const dashboardRenderer = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard-renderer.js"), "utf8");
   const dashboardPreload = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "preload.cjs"), "utf8");
+  const agentPackage = JSON.parse(await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "package.json"), "utf8"));
   const builderConfig = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "electron-builder.yml"), "utf8");
   const updateConfig = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "build", "app-update.yml"), "utf8");
   const releaseWorkflow = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".github", "workflows", "agent-release.yml"), "utf8");
   assert.match(dashboardHtml, /id="start-trial-button"/);
   assert.match(dashboardHtml, /id="admin-control-button"/);
+  assert.match(dashboardHtml, /id="check-updates-bottom"/);
   assert.match(dashboardHtml, /id="start-license-server"/);
   assert.match(dashboardHtml, /id="check-license-server"/);
   assert.match(dashboardHtml, /id="license-server-panel" class="panel license-server-panel hidden"/);
@@ -187,6 +189,7 @@ test("dashboard exposes the trial action in the bottom-right tray with subdued a
   assert.match(dashboardHtml, /id="agent-update-panel"/);
   assert.match(dashboardRenderer, /Restart and install/);
   assert.match(dashboardRenderer, /downloadUpdate/);
+  assert.match(dashboardRenderer, /check-updates-bottom/);
   assert.match(builderConfig, /provider: github/);
   assert.match(builderConfig, /to: app-update\.yml/);
   assert.match(updateConfig, /repo: media-toolbox/);
@@ -195,12 +198,25 @@ test("dashboard exposes the trial action in the bottom-right tray with subdued a
   assert.match(releaseWorkflow, /Cache Electron packaging downloads/);
   assert.match(releaseWorkflow, /electron-builder-\$\{\{ runner\.os \}\}-\$\{\{ runner\.arch \}\}-node22-/);
   assert.match(releaseWorkflow, /~\/\.cache\/electron-builder/);
-  assert.match(releaseWorkflow, /npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund/);
+  assert.match(releaseWorkflow, /cache-dependency-path: agent\/package-lock\.json/);
+  assert.match(releaseWorkflow, /hashFiles\('agent\/package-lock\.json', 'electron-builder\.yml'\)/);
+  assert.match(releaseWorkflow, /Stage agent-only packaging directory/);
+  assert.match(releaseWorkflow, /node scripts\/stage-agent-package\.mjs/);
+  assert.match(releaseWorkflow, /working-directory: \.agent-build/);
+  assert.match(releaseWorkflow, /npm ci --prefer-offline --no-audit --no-fund/);
+  assert.doesNotMatch(releaseWorkflow, /npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund/);
   assert.match(builderConfig, /nativeRebuilder: parallel/);
-  assert.match(releaseWorkflow, /linux-target: AppImage/);
-  assert.match(releaseWorkflow, /linux-target: deb/);
+  assert.doesNotMatch(releaseWorkflow, /linux-target:/);
+  assert.match(releaseWorkflow, /--linux AppImage deb --publish never/);
+  assert.match(releaseWorkflow, /find \.agent-build\/release -maxdepth 1/);
   assert.match(releaseWorkflow, /name: media-toolbox-agent-\$\{\{ matrix\.artifact \}\}/);
+  assert.deepEqual(Object.keys(agentPackage.dependencies).sort(), ["@ffmpeg-installer/ffmpeg", "@ffprobe-installer/ffprobe", "better-sqlite3", "busboy", "electron-updater", "pdf-lib", "selfsigned", "sharp"]);
+  assert.equal(agentPackage.dependencies.next, undefined);
+  assert.equal(agentPackage.dependencies.react, undefined);
+  assert.equal(agentPackage.dependencies["pdfjs-dist"], undefined);
   assert.match(dashboardRenderer, /setLicenseServerNotice/);
+  assert.match(dashboardRenderer, /value\.ownerConfigured === true/);
+  assert.match(dashboardRenderer, /block\.classList\.toggle\("hidden", mode === "activation"\)/);
   assert.match(dashboardHtml, /id="activation-session-access"/);
   assert.match(dashboardRenderer, /activationReloginAvailable/);
   assert.match(dashboardRenderer, /render\(await api\.logout\(\)\); closeAdminModal\(\); showNotice\(""\);/);
@@ -299,6 +315,21 @@ test("dashboard licensing server manager starts and stops the loopback service",
   const stopped = await manager.stop();
   assert.equal(stopped.healthy, false);
   assert.equal(stopped.managed, false);
+});
+
+test("client installations do not advertise the owner-only SSD licensing server", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(root, "agent"),
+    dataDirectory: path.join(testRoot, "client-license-data"),
+    mountPath: path.join(testRoot, "missing-licensing-ssd"),
+    existsSync: (value) => value.endsWith(path.join("license-server", "index.js")),
+    healthCheck: async () => false,
+  });
+  const state = await manager.getState();
+  assert.equal(state.ownerConfigured, false);
+  assert.equal(state.error, "");
 });
 
 test("website local-agent setup does not expose license-request controls", async () => {
