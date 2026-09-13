@@ -9,7 +9,7 @@ import { appendJobLog, claimNextJob, deleteJob, getJob, listExpiredJobs, updateJ
 import { commandExists, firstAvailable, runCommand } from "../lib/command.js";
 import { applyPdfTextEdits } from "../lib/pdf-text-editor.js";
 import { applyPdfOcrEdits } from "../lib/pdf-ocr.js";
-import { pdfCompressionSettings, recompressPdfImages } from "../lib/pdf-compressor.js";
+import { pdfCompressionSettings, rasterizeImageOnlyPdf, recompressPdfImages } from "../lib/pdf-compressor.js";
 import { rotatedImageDrawPlacement } from "../lib/pdf-image-placement.js";
 import { layoutPdfTextRuns, textBoxColor, textBoxDrawPlacement, textBoxFontDefinition, textBoxFontName, textBoxTextRuns } from "../lib/pdf-text-box.js";
 import { safePdfOutputFilename } from "../lib/job-intake.js";
@@ -807,7 +807,36 @@ async function processPdfCompressor(job) {
     warnings.push("Some embedded images could not be re-encoded; the best validated PDF pass was used instead.");
   }
 
-  update(job.id, 82, "Validating PDF", "Checking that every page remains readable.");
+  // PDFs made from scans are often image-only but use a codec (JPX, CCITT,
+  // JBIG2, or inline image data) that pdf-lib cannot safely decode. When the
+  // lossless/resource passes barely help, use a visual fallback for those
+  // pages. It is intentionally gated on the absence of searchable text so a
+  // normal text/vector PDF never gets flattened and loses its text layer.
+  if (bestBytes && bestBytes.length > input.length * 0.88) {
+    update(job.id, 80, "Applying visual compression", "The PDF has not reduced enough; checking for image-only pages.");
+    try {
+      const rasterResult = await rasterizeImageOnlyPdf(input, profile, {
+        onProgress: (done, total) => {
+          if (!total) return;
+          const progress = Math.min(88, 80 + Math.round((done / total) * 8));
+          updateJob(job.id, { progress, stage: "Applying visual compression", message: `Optimizing page ${done} of ${total}.` });
+        },
+      });
+      if (rasterResult.changed) {
+        await chooseCandidate(rasterResult.bytes, `Bundled visual page recompression (${rasterResult.pageCount} pages)`);
+        appendJobLog(job.id, `Rebuilt ${rasterResult.pageCount} image-only page${rasterResult.pageCount === 1 ? "" : "s"} at the selected quality to remove unsupported image encoding overhead.`, "info");
+        warnings.push("This PDF had no searchable text, so the aggressive image-only pass rebuilt its pages as optimized images. The visual layout is preserved, but text is not selectable in this result.");
+      } else if (rasterResult.imageOnly === false && rasterResult.pageCount) {
+        appendJobLog(job.id, "Visual page compression was skipped because searchable text was detected; text and vector content were preserved.", "info");
+      } else if (rasterResult.reason) {
+        appendJobLog(job.id, `Visual page compression was skipped: ${rasterResult.reason}`, "warning");
+      }
+    } catch (error) {
+      appendJobLog(job.id, `Visual page compression was skipped: ${error instanceof Error ? error.message : "unknown error"}`, "warning");
+    }
+  }
+
+  update(job.id, 90, "Validating PDF", "Checking that every page remains readable.");
   if (!bestBytes) throw new Error("The compressed PDF could not be validated.");
   let outputBytes = bestBytes;
   await fsp.writeFile(workPath, outputBytes);

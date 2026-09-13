@@ -273,9 +273,17 @@
     // process is deliberately not killable from here; only the child spawned
     // by this agent can be stopped safely.
     stopButton.classList.toggle("hidden", !ownerMachine || !serverRunning);
-    stopButton.disabled = !managedByAgent;
-    stopButton.textContent = managedByAgent ? "Stop server" : "Stop unavailable";
-    stopButton.title = managedByAgent ? "Stop the licensing server managed by this agent." : "This licensing server was started outside this agent. Stop that process first.";
+    // Automatic startup may still be between the SSD/Tailscale checks and
+    // child-process creation. Keep Stop active throughout that window so an
+    // owner can cancel startup instead of waiting for a server they did not
+    // ask to run.
+    stopButton.disabled = !managedByAgent && !starting;
+    stopButton.textContent = starting ? "Stop starting server" : managedByAgent ? "Stop server" : "Stop unavailable";
+    stopButton.title = starting
+      ? "Cancel the automatic licensing-server start."
+      : managedByAgent
+        ? "Stop the licensing server managed by this agent."
+        : "This licensing server was started outside this agent. Stop that process first.";
     if (recoverButton) {
       const recoverable = ownerMachine && database.status === "malformed" && database.recoverable !== false;
       recoverButton.classList.toggle("hidden", !recoverable);

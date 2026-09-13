@@ -7,9 +7,10 @@ import zlib from "node:zlib";
 import { once } from "node:events";
 import { PassThrough } from "node:stream";
 import test, { after, before } from "node:test";
-import { PDFDocument, StandardFonts } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { commandExists, firstAvailable, runCommand } from "../lib/command.js";
+import { rasterizeImageOnlyPdf } from "../lib/pdf-compressor.js";
 
 const projectDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-test-"));
@@ -472,6 +473,54 @@ test("PDF compressor re-encodes embedded page images when structural compression
   assert.match(result.method, /image|Ghostscript/i);
   assert.equal(await sha256(sourcePath), sourceHash);
   assert.equal(db.getJobForPublic(job.id).logs.some((entry) => entry.message.includes("embedded image")), true);
+});
+
+test("PDF compressor reaches images nested inside form XObjects", async () => {
+  const sharp = (await import("sharp")).default;
+  const sourcePath = path.join(testRoot, "nested-form-compress-source.pdf");
+  const pixels = crypto.randomBytes(1200 * 800 * 3);
+  const jpeg = await sharp(pixels, { raw: { width: 1200, height: 800, channels: 3 } }).jpeg({ quality: 96 }).toBuffer();
+  const sourceDocument = await PDFDocument.create();
+  const sourceImage = await sourceDocument.embedJpg(jpeg);
+  const sourcePage = sourceDocument.addPage([1200, 800]);
+  sourcePage.drawImage(sourceImage, { x: 0, y: 0, width: 1200, height: 800 });
+  const embeddedPage = await sourceDocument.embedPage(sourcePage);
+  const formPage = sourceDocument.addPage([1200, 800]);
+  formPage.drawPage(embeddedPage);
+  await fs.writeFile(sourcePath, await sourceDocument.save());
+  const inputBytes = (await fs.stat(sourcePath)).size;
+  const sourceHash = await sha256(sourcePath);
+  const jobDir = path.join(testRoot, "pdf-nested-form-compressor-job");
+  await fs.mkdir(jobDir, { recursive: true });
+  const intakeResult = await createJobFromMultipart({
+    id: crypto.randomUUID(),
+    jobDir,
+    fields: { tool: "pdf-compressor", compressionProfile: "small" },
+    files: [{ field: "source", name: "nested-form-compress-source.pdf", mime: "application/pdf", path: sourcePath, size: inputBytes }],
+  });
+  const job = db.getJob(intakeResult.ids[0]);
+  await worker.processJob(job);
+
+  const completed = db.getJob(job.id);
+  const result = JSON.parse(completed.result_json);
+  const output = await PDFDocument.load(await fs.readFile(result.path));
+  assert.equal(completed.status, "completed");
+  assert.equal(output.getPageCount(), 2);
+  assert.ok(result.bytes < inputBytes * 0.9, `expected nested image compression, got ${result.reductionPercent}%`);
+  assert.match(result.method, /image|Ghostscript/i);
+  assert.equal(await sha256(sourcePath), sourceHash);
+});
+
+test("image-only visual fallback renders valid pages without searchable text", async () => {
+  const sourceDocument = await PDFDocument.create();
+  const page = sourceDocument.addPage([320, 240]);
+  page.drawRectangle({ x: 24, y: 24, width: 272, height: 192, color: rgb(0.2, 0.6, 0.8) });
+  const result = await rasterizeImageOnlyPdf(await sourceDocument.save(), "small");
+  assert.equal(result.changed, true);
+  assert.equal(result.imageOnly, true);
+  assert.equal(result.pageCount, 1);
+  const output = await PDFDocument.load(result.bytes);
+  assert.equal(output.getPageCount(), 1);
 });
 
 test("PDF editor exports styled text boxes on blank pages", async () => {

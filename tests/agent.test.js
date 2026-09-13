@@ -296,7 +296,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardRenderer, /value\.ownerConfigured === true/);
   assert.match(dashboardRenderer, /panel\.classList\.toggle\("hidden", !adminAuthenticated\)/);
   assert.match(dashboardRenderer, /state\.authorization\?\.mode === "admin"/);
-  assert.match(dashboardRenderer, /stopButton\.textContent = managedByAgent \? "Stop server" : "Stop unavailable"/);
+  assert.match(dashboardRenderer, /stopButton\.textContent = starting \? "Stop starting server" : managedByAgent \? "Stop server" : "Stop unavailable"/);
   assert.match(dashboardRenderer, /started outside this agent/);
   assert.match(electronMain, /installedRuntimeDirectory/);
   assert.match(electronMain, /dashboardDirectory/);
@@ -412,6 +412,47 @@ test("dashboard licensing server manager starts and stops the loopback service",
   const stopped = await manager.stop();
   assert.equal(stopped.healthy, false);
   assert.equal(stopped.managed, false);
+});
+
+test("licensing server manager uses its built-in health probe when starting", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const temporaryMount = path.join(testRoot, "license-server-default-health");
+  const dataDirectory = path.join(temporaryMount, "MediaToolboxLicensing");
+  let healthy = false;
+  const healthServer = http.createServer((request, response) => {
+    if (request.url !== "/v1/health") {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: healthy }));
+  });
+  await new Promise((resolve) => healthServer.listen(0, "127.0.0.1", resolve));
+  const port = healthServer.address().port;
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.killed = false;
+  child.kill = () => { child.killed = true; child.exitCode = 0; healthy = false; child.emit("exit", 0, "SIGTERM"); };
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(root, "agent"),
+    dataDirectory,
+    mountPath: temporaryMount,
+    port,
+    nodeExecutable: "/node22/bin/node",
+    existsSync: (value) => value === temporaryMount || value === dataDirectory || value.endsWith(path.join("license-server", "index.js")),
+    spawnImpl: () => { healthy = true; return child; },
+    logger: { log() {}, warn() {} },
+  });
+  try {
+    const started = await manager.start();
+    assert.equal(started.healthy, true);
+    assert.equal(started.started, true);
+  } finally {
+    await manager.stop();
+    healthServer.close();
+  }
 });
 
 test("dashboard licensing server manager opens Tailscale before starting when the app is closed", async () => {
@@ -623,6 +664,45 @@ test("licensing server manager waits for the SSD and starts after it appears", a
   }
 });
 
+test("manual Stop cancels an automatic licensing-server start before it spawns", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const mountPath = path.join(testRoot, "auto-start-cancelled");
+  let releaseTailscale;
+  let tailscaleChecked = false;
+  let spawned = 0;
+  const tailscaleReady = new Promise((resolve) => { releaseTailscale = resolve; });
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(root, "agent"),
+    dataDirectory: path.join(mountPath, "MediaToolboxLicensing"),
+    mountPath,
+    nodeExecutable: "/node22/bin/node",
+    platform: "darwin",
+    tailscaleAppPath: "/Applications/Tailscale.app",
+    autoStartIntervalMs: 10,
+    existsSync: (value) => value === mountPath || value === "/Applications/Tailscale.app" || value.endsWith(path.join("license-server", "index.js")),
+    healthCheck: async () => false,
+    tailscaleRunningCheck: async () => { tailscaleChecked = true; return tailscaleReady; },
+    spawnImpl: () => { spawned += 1; throw new Error("The automatic start should have been cancelled."); },
+    logger: { log() {}, warn() {} },
+  });
+  try {
+    const automaticStart = manager.watchForStorage();
+    for (let attempt = 0; attempt < 20 && !tailscaleChecked; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(tailscaleChecked, true);
+    const stop = manager.stop();
+    releaseTailscale(true);
+    await stop;
+    await automaticStart.catch(() => {});
+    assert.equal(spawned, 0);
+    assert.equal((await manager.getState()).autoStartStatus, "stopped");
+  } finally {
+    manager.stopWatching();
+    releaseTailscale(true);
+    await manager.stop();
+  }
+});
+
 test("manual licensing-server stop suppresses automatic restart until explicitly started", async () => {
   const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -825,6 +905,7 @@ test("Admin dashboard shows licensing-server status on non-owner installations w
   assert.match(source, /Recover database/);
   assert.match(source, /Not applicable/);
   assert.match(source, /!ownerMachine \|\| !mounted/);
+  assert.match(source, /stopButton\.disabled = !managedByAgent && !starting/);
 });
 
 test("website local-agent setup does not expose license-request controls", async () => {

@@ -486,17 +486,24 @@ function createLicenseServerManager({
   async function waitForHealth(childProcess) {
     const startedAt = Date.now();
     while (Date.now() - startedAt < START_TIMEOUT_MS) {
+      if (manuallyStopped) throw new Error("The licensing server start was cancelled.");
       if (childProcess && childProcess.exitCode !== null) {
         throw new Error(lastError || "The licensing server exited before becoming healthy.");
       }
-      if (await healthCheck(`${url}/v1/health`)) return;
+      // Use the normalized health probe so packaged and development managers
+      // work even when the caller does not inject a test-specific checker.
+      if (await localHealthCheck(`${url}/v1/health`)) return;
       await wait(250);
     }
     throw new Error(`The licensing server did not become healthy at ${url}.`);
   }
 
-  async function start() {
-    manuallyStopped = false;
+  async function start({ automatic = false } = {}) {
+    // A user-initiated Start clears the manual stop latch. Automatic retries
+    // must not clear it, otherwise a Stop click racing with an SSD watcher
+    // can immediately launch the server again.
+    if (!automatic) manuallyStopped = false;
+    if (automatic && manuallyStopped) return getState();
     if (startRun) return startRun;
     startRun = startInternal().finally(() => { startRun = null; });
     return startRun;
@@ -504,9 +511,11 @@ function createLicenseServerManager({
 
   async function startInternal() {
     const current = await getState();
+    if (manuallyStopped) throw new Error("The licensing server start was cancelled.");
     if (!current.ssdMounted) throw new Error("Connect the Sandisk Exf licensing SSD before starting the server.");
     if (!current.available) throw new Error("This agent release does not include the licensing server runtime.");
     const tailscale = await ensureTailscaleRunning();
+    if (manuallyStopped) throw new Error("The licensing server start was cancelled.");
     const currentWithTailscale = tailscale.opened || tailscale.error
       ? { ...current, tailscale }
       : current;
@@ -550,6 +559,7 @@ function createLicenseServerManager({
     };
     const command = useElectronRuntime ? electronExecutable : nodeExecutable;
     if (!command) throw new Error("Node 22 was not found. Open a new Terminal after installing Node 22, then try again.");
+    if (manuallyStopped) throw new Error("The licensing server start was cancelled.");
     const args = [entryPath];
     if (useElectronRuntime) {
       environment.ELECTRON_RUN_AS_NODE = "1";
@@ -613,7 +623,13 @@ function createLicenseServerManager({
 
   async function stop() {
     manuallyStopped = true;
-    return stopProcess();
+    await stopProcess();
+    // A stop request can arrive while automatic startup is still checking
+    // Tailscale or the SSD, before the child process exists. Wait for that
+    // start promise to settle so it cannot spawn a new server after Stop was
+    // clicked and the button can immediately reflect the stopped state.
+    if (startRun) await startRun.catch(() => {});
+    return getState();
   }
 
   async function attemptAutoStart() {
@@ -629,7 +645,7 @@ function createLicenseServerManager({
     try {
       const current = await getState();
       if (current.healthy || manuallyStopped) return current;
-      return await start();
+      return await start({ automatic: true });
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error || "The licensing server could not be started.");
       logger.warn?.(`Automatic licensing-server start is waiting: ${lastError}`);
