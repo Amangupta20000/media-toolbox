@@ -47,6 +47,7 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /operatorOrdinal: run.ordinal/);
   assert.match(shell, /operatorOrdinals: run.operatorOrdinals/);
   assert.match(shell, /mergeVisualDuplicateRuns/);
+  assert.match(shell, /mergeAdjacentTextRuns/);
   assert.match(shell, /operatorGroups/);
   assert.match(shell, /streamText.indexOf/);
   assert.doesNotMatch(shell, /if \(!item && textContent\.items\[itemCursor\]\) item =/);

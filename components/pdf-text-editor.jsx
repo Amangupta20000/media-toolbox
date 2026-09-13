@@ -10,6 +10,7 @@ import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { deleteProcessingJob, getProcessingJob, inspectPdfWithOcr, isProcessingLocationReady, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 import { applyRasterTextEdits } from "../lib/pdf-ocr-raster.js";
 import { MAX_PDF_BYTES } from "../lib/pdf-limits.js";
+import { mergeAdjacentTextRuns } from "../lib/pdf-text-runs.js";
 
 async function loadPdfLibrary() {
   const library = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -148,7 +149,8 @@ async function inspectPage(pdfPage, pageIndex, pdfLibrary, sourceHash) {
   const streamText = normalizedStream.join("");
   let streamCursor = 0;
   const runs = [];
-  for (const item of textContent.items) {
+  for (let itemIndex = 0; itemIndex < textContent.items.length; itemIndex += 1) {
+    const item = textContent.items[itemIndex];
     const text = String(item?.str || "");
     const normalizedText = normalizeText(text);
     if (!normalizedText) continue;
@@ -176,12 +178,14 @@ async function inspectPage(pdfPage, pageIndex, pdfLibrary, sourceHash) {
       originalTextHash: await textHash(sourceText),
       runId: await runId(pageIndex, operator.ordinal, sourceText, sourceHash),
       item,
+      itemIndex,
       color: operator.color,
       editable: Boolean(text && !text.includes("\ufffd")),
       reason: text ? "This text run could not be mapped safely to the PDF text layer." : "This page does not expose selectable text.",
     });
   }
-  const visibleRuns = runs.filter((run) => !fullPageImageIndexes.some((imageIndex) => imageIndex > run.operatorEndIndex));
+  const logicalRuns = mergeAdjacentTextRuns(runs, textContent.items);
+  const visibleRuns = logicalRuns.filter((run) => !fullPageImageIndexes.some((imageIndex) => imageIndex > run.operatorEndIndex));
   const hasTextItems = textContent.items.some((item) => normalizeText(item?.str));
   return {
     pageIndex,

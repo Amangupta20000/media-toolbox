@@ -4,6 +4,7 @@ import { degrees, PDFArray, PDFDict, PDFDocument, PDFName, StandardFonts, decode
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { applyPdfTextEdits, extractPdfTextRuns } from "../lib/pdf-text-editor.js";
 import { createPdfTextPreview } from "../lib/pdf-text-preview.js";
+import { mergeAdjacentTextRuns } from "../lib/pdf-text-runs.js";
 
 const samplePng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
 
@@ -98,6 +99,25 @@ test("PDF text extraction creates stable, distinct run IDs for duplicate text", 
   assert.equal(duplicates[0].originalTextHash, duplicates[1].originalTextHash);
   assert.ok(first.pages[0].runs.every((run) => run.runId.startsWith("p0-o")));
   assert.equal(first.pages[1].runs[0].pageIndex, 1);
+});
+
+test("PDF.js glyph fragments merge into one logical word without merging real spaces", () => {
+  const items = [
+    { str: "अ", transform: [19.5, 0, 0, 19.5, 259.5, 760.92], width: 15, height: 19.5, fontName: "g_d0_f1" },
+    { str: "स्व", transform: [19.5, 0, 0, 19.5, 274.5, 760.92], width: 0, height: 19.5, fontName: "g_d0_f1" },
+    { str: " ", transform: [19.5, 0, 0, 19.5, 274.5, 760.92], width: 24.9, height: 19.5, fontName: "g_d0_f1" },
+    { str: "ी", transform: [19.5, 0, 0, 19.5, 293.2, 760.92], width: 5.77, height: 19.5, fontName: "g_d0_f1" },
+    { str: "करण", transform: [19.5, 0, 0, 19.5, 298.97, 760.92], width: 37, height: 19.5, fontName: "g_d0_f1" },
+    { str: "यह", transform: [11.25, 0, 0, 11.25, 54, 709.92], width: 11.65, height: 11.25, fontName: "g_d0_f2" },
+    { str: " ", transform: [11.25, 0, 0, 11.25, 65.65, 709.92], width: 7.38, height: 11.25, fontName: "g_d0_f2" },
+    { str: "शब्द", transform: [11.25, 0, 0, 11.25, 71.19, 709.92], width: 24, height: 11.25, fontName: "g_d0_f2" },
+  ];
+  let ordinal = 0;
+  const runs = items.flatMap((item, itemIndex) => item.str.trim() ? [{ item, itemIndex, ordinal: ordinal++, operatorIndex: itemIndex, operatorOrdinals: [ordinal - 1], operatorEndIndex: itemIndex, text: item.str, originalText: item.str, operatorText: item.str, editable: true, reason: "" }] : []);
+  const merged = mergeAdjacentTextRuns(runs, items);
+  assert.deepEqual(merged.map((run) => run.text), ["अस्वीकरण", "यह", "शब्द"]);
+  assert.deepEqual(merged[0].operatorOrdinals, [0, 1, 2, 3]);
+  assert.equal(Math.round(merged[0].item.width), 76);
 });
 
 test("PDF text edits support multiple pages, same-font characters, overflow warnings, and searchable output", async () => {
