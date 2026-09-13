@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Bold, CheckCircle2, Copy, Download, FilePlus2, FileText, GripVertical, ImagePlus, Italic, Keyboard, LoaderCircle, Lock, MoreHorizontal, Plus, Printer, RotateCcw, RotateCw, Trash2, Type, Underline, Unlock, UploadCloud, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertTriangle, Bold, CheckCircle2, Copy, Download, FilePlus2, FileText, GripVertical, ImagePlus, Italic, Keyboard, LoaderCircle, Lock, MoreHorizontal, Plus, Printer, Redo2, RotateCcw, RotateCw, Trash2, Type, Underline, Undo2, Unlock, UploadCloud, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
 import { formatBytes } from "./file-dropzone.jsx";
@@ -645,6 +645,7 @@ export function PdfEditor() {
   const [previewZoom, setPreviewZoom] = useState(1);
   const [activeView, setActiveView] = useState("tool");
   const [moreToolsOpen, setMoreToolsOpen] = useState(false);
+  const [, setHistoryRevision] = useState(0);
   const pdfInputRef = useRef(null);
   const imageInputRef = useRef(null);
   const pageListRef = useRef(null);
@@ -664,6 +665,11 @@ export function PdfEditor() {
   const historyEditLoadedRef = useRef(false);
   const moreToolsRef = useRef(null);
   const keepResultTouchedRef = useRef(false);
+  const pagesRef = useRef([]);
+  const pdfFilesRef = useRef([]);
+  const historyRef = useRef({ past: [], future: [] });
+  const pendingHistoryRef = useRef(null);
+  const historyTimerRef = useRef(null);
 
   const ensurePdfLibrary = () => {
     if (!pdfLibraryPromiseRef.current) {
@@ -708,14 +714,107 @@ export function PdfEditor() {
     for (const url of imageUrlsRef.current) URL.revokeObjectURL(url);
     if (dropAnimationTimerRef.current) window.clearTimeout(dropAnimationTimerRef.current);
     if (dragScrollFrameRef.current) window.cancelAnimationFrame(dragScrollFrameRef.current);
+    if (historyTimerRef.current) window.clearTimeout(historyTimerRef.current);
   }, []);
 
   const selectedPage = useMemo(() => pages.find((page) => page.id === selectedId) || pages[0] || null, [pages, selectedId]);
   const selectedPageImages = useMemo(() => getPageImages(selectedPage), [selectedPage]);
 
+  const notifyHistoryChange = () => setHistoryRevision((current) => current + 1);
+
+  const pushHistorySnapshot = (snapshot) => {
+    const history = historyRef.current;
+    const previous = history.past.at(-1);
+    if (previous?.pages === snapshot.pages && previous?.pdfFiles === snapshot.pdfFiles) return;
+    history.past.push(snapshot);
+    if (history.past.length > 100) history.past.shift();
+    history.future = [];
+    notifyHistoryChange();
+  };
+
+  const flushPendingHistory = () => {
+    if (historyTimerRef.current) window.clearTimeout(historyTimerRef.current);
+    historyTimerRef.current = null;
+    const pending = pendingHistoryRef.current;
+    pendingHistoryRef.current = null;
+    if (pending && (pending.pages !== pagesRef.current || pending.pdfFiles !== pdfFilesRef.current)) pushHistorySnapshot(pending);
+  };
+
+  const schedulePendingHistoryFlush = () => {
+    if (historyTimerRef.current) window.clearTimeout(historyTimerRef.current);
+    historyTimerRef.current = window.setTimeout(() => {
+      historyTimerRef.current = null;
+      flushPendingHistory();
+    }, 350);
+  };
+
+  const clearDocumentHistory = () => {
+    if (historyTimerRef.current) window.clearTimeout(historyTimerRef.current);
+    historyTimerRef.current = null;
+    pendingHistoryRef.current = null;
+    historyRef.current = { past: [], future: [] };
+    notifyHistoryChange();
+  };
+
+  const commitDocument = (nextPages, nextPdfFiles = pdfFilesRef.current, { history = "discrete" } = {}) => {
+    const currentPages = pagesRef.current;
+    const currentPdfFiles = pdfFilesRef.current;
+    if (nextPages === currentPages && nextPdfFiles === currentPdfFiles) return false;
+    if (history === "coalesce") {
+      if (!pendingHistoryRef.current) {
+        pendingHistoryRef.current = { pages: currentPages, pdfFiles: currentPdfFiles };
+        historyRef.current.future = [];
+        notifyHistoryChange();
+      }
+      schedulePendingHistoryFlush();
+    } else if (history === "discrete") {
+      flushPendingHistory();
+      pushHistorySnapshot({ pages: currentPages, pdfFiles: currentPdfFiles });
+    }
+    pagesRef.current = nextPages;
+    pdfFilesRef.current = nextPdfFiles;
+    setPages(nextPages);
+    if (nextPdfFiles !== currentPdfFiles) setPdfFiles(nextPdfFiles);
+    return true;
+  };
+
+  const restoreDocumentSnapshot = (snapshot) => {
+    pagesRef.current = snapshot.pages;
+    pdfFilesRef.current = snapshot.pdfFiles;
+    setPages(snapshot.pages);
+    setPdfFiles(snapshot.pdfFiles);
+    setSelectedId((current) => snapshot.pages.some((page) => page.id === current) ? current : snapshot.pages[0]?.id || null);
+  };
+
+  const undoDocument = () => {
+    flushPendingHistory();
+    const history = historyRef.current;
+    const snapshot = history.past.pop();
+    if (!snapshot) return;
+    history.future.push({ pages: pagesRef.current, pdfFiles: pdfFilesRef.current });
+    restoreDocumentSnapshot(snapshot);
+    notifyHistoryChange();
+    setError("");
+  };
+
+  const redoDocument = () => {
+    flushPendingHistory();
+    const history = historyRef.current;
+    const snapshot = history.future.pop();
+    if (!snapshot) return;
+    history.past.push({ pages: pagesRef.current, pdfFiles: pdfFilesRef.current });
+    if (history.past.length > 100) history.past.shift();
+    restoreDocumentSnapshot(snapshot);
+    notifyHistoryChange();
+    setError("");
+  };
+
+  const canUndo = Boolean(pendingHistoryRef.current) || historyRef.current.past.length > 0;
+  const canRedo = historyRef.current.future.length > 0 && !pendingHistoryRef.current;
+
   useEffect(() => {
-    if (!selectedPage) setMoreToolsOpen(false);
-  }, [selectedPage]);
+    if (!selectedPage && !canUndo && !canRedo) setMoreToolsOpen(false);
+  }, [canRedo, canUndo, selectedPage]);
 
   const changePreviewZoom = (delta) => setPreviewZoom((current) => Math.min(3, Math.max(0.6, Math.round((current + delta) * 10) / 10)));
   const resetPreviewZoom = () => setPreviewZoom(1);
@@ -750,12 +849,10 @@ export function PdfEditor() {
       return clone;
     }));
     const duplicate = { ...selectedPage, id: makeId(), images: clonedImages, textBoxes: getPageTextBoxes(selectedPage).map((textBox) => ({ ...textBox, id: makeId() })) };
-    setPages((current) => {
-      const selectedIndex = current.findIndex((page) => page.id === selectedPage.id);
-      const next = [...current];
-      next.splice(selectedIndex >= 0 ? selectedIndex + 1 : next.length, 0, duplicate);
-      return next;
-    });
+    const selectedIndex = pagesRef.current.findIndex((page) => page.id === selectedPage.id);
+    const next = [...pagesRef.current];
+    next.splice(selectedIndex >= 0 ? selectedIndex + 1 : next.length, 0, duplicate);
+    commitDocument(next);
     setSelectedId(duplicate.id);
     setError("");
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
@@ -794,7 +891,7 @@ export function PdfEditor() {
           if (processingMode === "browser") throw libraryError;
         }
       }
-      let pdfIndex = pdfFiles.length;
+      let pdfIndex = pdfFilesRef.current.length;
       const newFiles = [];
       const newPages = [];
       let thumbnailFailures = 0;
@@ -830,12 +927,10 @@ export function PdfEditor() {
         }
         pdfIndex += 1;
       }
-      setPdfFiles((current) => [...current, ...newFiles]);
-      setPages((current) => {
-        const next = [...current, ...newPages];
-        if (!selectedId && next[0]) setSelectedId(next[0].id);
-        return next;
-      });
+      const nextPdfFiles = [...pdfFilesRef.current, ...newFiles];
+      const nextPages = [...pagesRef.current, ...newPages];
+      commitDocument(nextPages, nextPdfFiles);
+      if (!selectedId && nextPages[0]) setSelectedId(nextPages[0].id);
       if (browserFallbacks || serverFallbacks || thumbnailFailures || passwordProtectedFiles) {
         const messages = [];
         if (browserFallbacks) messages.push("PDF preview was unavailable, so a safe PDF parser was used");
@@ -892,17 +987,15 @@ export function PdfEditor() {
     addPdfFiles(event.dataTransfer.files);
   };
 
-  const updatePage = (pageId, changes) => setPages((current) => current.map((page) => page.id === pageId ? { ...page, ...changes } : page));
+  const updatePage = (pageId, changes, history = "discrete") => commitDocument(pagesRef.current.map((page) => page.id === pageId ? { ...page, ...changes } : page), pdfFilesRef.current, { history });
 
   const addBlankPage = () => {
     const dimensions = selectedPage ? { width: selectedPage.width, height: selectedPage.height, rotation: selectedPage.rotation || 0 } : A4;
     const page = { id: makeId(), kind: "blank", ...dimensions, images: [], textBoxes: [] };
-    setPages((current) => {
-      const selectedIndex = selectedPage ? current.findIndex((item) => item.id === selectedPage.id) : -1;
-      const next = [...current];
-      next.splice(selectedIndex >= 0 ? selectedIndex + 1 : next.length, 0, page);
-      return next;
-    });
+    const selectedIndex = selectedPage ? pagesRef.current.findIndex((item) => item.id === selectedPage.id) : -1;
+    const next = [...pagesRef.current];
+    next.splice(selectedIndex >= 0 ? selectedIndex + 1 : next.length, 0, page);
+    commitDocument(next);
     setSelectedId(page.id);
     setError("");
   };
@@ -911,12 +1004,10 @@ export function PdfEditor() {
     const previousPage = pages.find((item) => item.id === previousPageId);
     const dimensions = previousPage ? { width: previousPage.width, height: previousPage.height, rotation: previousPage.rotation || 0 } : A4;
     const page = { id: makeId(), kind: "blank", ...dimensions, images: [], textBoxes: [] };
-    setPages((current) => {
-      const previousIndex = current.findIndex((item) => item.id === previousPageId);
-      const next = [...current];
-      next.splice(previousIndex >= 0 ? previousIndex + 1 : next.length, 0, page);
-      return next;
-    });
+    const previousIndex = pagesRef.current.findIndex((item) => item.id === previousPageId);
+    const next = [...pagesRef.current];
+    next.splice(previousIndex >= 0 ? previousIndex + 1 : next.length, 0, page);
+    commitDocument(next);
     setSelectedId(page.id);
     setError("");
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
@@ -926,32 +1017,28 @@ export function PdfEditor() {
   };
 
   const deletePage = (pageId) => {
-    setPages((current) => {
-      const index = current.findIndex((page) => page.id === pageId);
-      const next = current.filter((page) => page.id !== pageId);
-      for (const image of getPageImages(current[index])) {
-        if (image.url) { URL.revokeObjectURL(image.url); imageUrlsRef.current.delete(image.url); }
-      }
-      if (pageId === selectedId) setSelectedId(next[Math.min(index, next.length - 1)]?.id || null);
-      return next;
-    });
+    const current = pagesRef.current;
+    const index = current.findIndex((page) => page.id === pageId);
+    if (index === -1) return;
+    const next = current.filter((page) => page.id !== pageId);
+    commitDocument(next);
+    if (pageId === selectedId) setSelectedId(next[Math.min(index, next.length - 1)]?.id || null);
   };
 
   const reorderPages = (sourceId, targetId, position = "before") => {
     if (!sourceId || !targetId || sourceId === targetId) return;
     const beforeRects = new Map();
     for (const [pageId, element] of pageElementRefs.current.entries()) beforeRects.set(pageId, element.getBoundingClientRect());
-    setPages((current) => {
-      const sourceIndex = current.findIndex((page) => page.id === sourceId);
-      const targetIndex = current.findIndex((page) => page.id === targetId);
-      if (sourceIndex === -1 || targetIndex === -1) return current;
-      const next = [...current];
-      const [moved] = next.splice(sourceIndex, 1);
-      let insertionIndex = targetIndex + (position === "after" ? 1 : 0);
-      if (sourceIndex < insertionIndex) insertionIndex -= 1;
-      next.splice(insertionIndex, 0, moved);
-      return next;
-    });
+    const current = pagesRef.current;
+    const sourceIndex = current.findIndex((page) => page.id === sourceId);
+    const targetIndex = current.findIndex((page) => page.id === targetId);
+    if (sourceIndex === -1 || targetIndex === -1) return;
+    const next = [...current];
+    const [moved] = next.splice(sourceIndex, 1);
+    let insertionIndex = targetIndex + (position === "after" ? 1 : 0);
+    if (sourceIndex < insertionIndex) insertionIndex -= 1;
+    next.splice(insertionIndex, 0, moved);
+    commitDocument(next);
     setSelectedId(sourceId);
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => scrollPreviewIntoView(sourceId)));
     setDropTargetId(null);
@@ -1182,7 +1269,7 @@ export function PdfEditor() {
   const addImages = async (fileList, targetPageId = selectedPage?.id) => {
     const files = Array.from(fileList || []).filter(Boolean);
     if (!files.length) return;
-    const targetPage = pages.find((page) => page.id === targetPageId) || selectedPage;
+    const targetPage = pagesRef.current.find((page) => page.id === targetPageId) || selectedPage;
     if (!targetPage) { setError("Select a PDF page before adding images."); return; }
     for (const file of files) {
       if (!isImage(file)) { setError(`${file.name} is not a supported image. Choose PNG, JPG, JPEG, HEIC, TIFF, GIF, or BMP.`); return; }
@@ -1237,24 +1324,14 @@ export function PdfEditor() {
   }, [activeView, job, selectedPage]);
 
   const removeImage = (pageId, imageId) => {
-    const page = pages.find((item) => item.id === pageId);
+    const page = pagesRef.current.find((item) => item.id === pageId);
     const images = getPageImages(page);
-    const image = images.find((item) => item.id === imageId);
-    if (image?.url) {
-      URL.revokeObjectURL(image.url);
-      imageUrlsRef.current.delete(image.url);
-    }
+    // Keep removed image URLs alive until the document history is cleared so
+    // undo can restore the exact image without rebuilding its object URL.
     updatePage(pageId, { images: images.filter((item) => item.id !== imageId) });
   };
 
   const removeAllImages = (pageId) => {
-    const page = pages.find((item) => item.id === pageId);
-    for (const image of getPageImages(page)) {
-      if (image.url) {
-        URL.revokeObjectURL(image.url);
-        imageUrlsRef.current.delete(image.url);
-      }
-    }
     updatePage(pageId, { images: [] });
   };
 
@@ -1271,7 +1348,7 @@ export function PdfEditor() {
   };
 
   const removeTextBox = (pageId, textBoxId) => {
-    const page = pages.find((item) => item.id === pageId);
+    const page = pagesRef.current.find((item) => item.id === pageId);
     updatePage(pageId, { textBoxes: getPageTextBoxes(page).filter((textBox) => textBox.id !== textBoxId) });
   };
 
@@ -1281,6 +1358,9 @@ export function PdfEditor() {
     documentsRef.current = [];
     if (browserResultUrlRef.current) URL.revokeObjectURL(browserResultUrlRef.current);
     browserResultUrlRef.current = "";
+    clearDocumentHistory();
+    pdfFilesRef.current = [];
+    pagesRef.current = [];
     setPdfFiles([]); setPages([]); setSelectedId(null); setJob(null); setContinuingFile(null); setError(""); setPreviewError(""); setUploadProgress(0);
   };
 
@@ -1294,6 +1374,9 @@ export function PdfEditor() {
       documentsRef.current = [];
       if (browserResultUrlRef.current) URL.revokeObjectURL(browserResultUrlRef.current);
       browserResultUrlRef.current = "";
+      clearDocumentHistory();
+      pdfFilesRef.current = [];
+      pagesRef.current = [];
       setPdfFiles([]); setPages([]); setSelectedId(null); setJob(null); setError(""); setPreviewError(""); setUploadProgress(0);
       setContinuingFile(file);
     } catch (continueError) {
@@ -1379,6 +1462,12 @@ export function PdfEditor() {
       const target = event.target;
       if (target instanceof HTMLElement && target.closest("input, textarea, select, button, [contenteditable=\"true\"]")) return;
       const command = event.metaKey || event.ctrlKey;
+      if (command && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) redoDocument();
+        else undoDocument();
+        return;
+      }
       if (command && event.key.toLowerCase() === "d") {
         event.preventDefault();
         void duplicateSelectedPage();
@@ -1422,7 +1511,7 @@ export function PdfEditor() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeView, job, loadingFiles, selectedPage, previewZoom, pages, pdfFiles, processingMode]);
+  }, [activeView, job, loadingFiles, selectedPage, previewZoom, pages, pdfFiles, processingMode, canRedo, canUndo]);
 
   return <AppShell>
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools · Beta <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · 200 MB total</span></div><h1>PDF editor</h1><p>Merge documents, reorder pages, remove pages, add images, or place styled text boxes on PDF pages and new blank pages.</p></div></div>
@@ -1437,30 +1526,36 @@ export function PdfEditor() {
           <button className="secondary-button" type="button" onClick={addBlankPage}><FilePlus2 size={17} /> Blank page</button>
           <button className="secondary-button" type="button" onClick={addTextBox} disabled={!selectedPage} title={selectedPage ? "Add a text box to the selected page" : "Add a page first"}><Type size={17} /> Text box</button>
           <div ref={moreToolsRef} className="pdf-more-tools">
-            <button className="icon-button pdf-more-tools-trigger" type="button" aria-label="Open other PDF tools" aria-haspopup="menu" aria-expanded={Boolean(selectedPage) && moreToolsOpen} title={selectedPage ? "Other tools" : "Add a page to use other tools"} disabled={!selectedPage} onClick={() => setMoreToolsOpen((current) => !current)}><MoreHorizontal size={20} /></button>
-            {selectedPage && moreToolsOpen && <div className="pdf-more-tools-menu" role="menu" aria-label="Other PDF tools">
-              <div className="pdf-more-tools-heading">Page tools</div>
-              <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); rotateSelectedPage(-90); }}><RotateCcw size={16} /><span>Rotate left</span><kbd>←</kbd></button>
-              <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); rotateSelectedPage(90); }}><RotateCw size={16} /><span>Rotate right</span><kbd>→</kbd></button>
-              <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); void duplicateSelectedPage(); }}><Copy size={16} /><span>Duplicate page</span><kbd>⌘/Ctrl+D</kbd></button>
-              <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); imageInputRef.current?.click(); }}><ImagePlus size={16} /><span>Add images</span></button>
-              <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); addTextBox(); }}><Type size={16} /><span>Add text box</span></button>
-              {selectedPageImages.length > 0 && <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); removeAllImages(selectedPage.id); }}><Trash2 size={16} /><span>Remove images</span></button>}
-              <div className="pdf-more-tools-divider" />
-              <button className="pdf-more-tools-danger" type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); deletePage(selectedPage.id); }}><Trash2 size={16} /><span>Delete page</span><kbd>Delete</kbd></button>
+            <button className="icon-button pdf-more-tools-trigger" type="button" aria-label="Open other PDF tools" aria-haspopup="menu" aria-expanded={moreToolsOpen} title={selectedPage ? "Other tools" : canUndo || canRedo ? "Undo or redo document changes" : "Add a page to use other tools"} disabled={!selectedPage && !canUndo && !canRedo} onClick={() => setMoreToolsOpen((current) => !current)}><MoreHorizontal size={20} /></button>
+            {moreToolsOpen && (selectedPage || canUndo || canRedo) && <div className="pdf-more-tools-menu" role="menu" aria-label="Other PDF tools">
+              <div className="pdf-more-tools-heading">History</div>
+              <button type="button" role="menuitem" disabled={!canUndo} onClick={() => { setMoreToolsOpen(false); undoDocument(); }}><Undo2 size={16} /><span>Undo</span><kbd>⌘/Ctrl+Z</kbd></button>
+              <button type="button" role="menuitem" disabled={!canRedo} onClick={() => { setMoreToolsOpen(false); redoDocument(); }}><Redo2 size={16} /><span>Redo</span><kbd>⇧⌘/Ctrl+Z</kbd></button>
+              {selectedPage && <>
+                <div className="pdf-more-tools-divider" />
+                <div className="pdf-more-tools-heading">Page tools</div>
+                <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); rotateSelectedPage(-90); }}><RotateCcw size={16} /><span>Rotate left</span><kbd>←</kbd></button>
+                <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); rotateSelectedPage(90); }}><RotateCw size={16} /><span>Rotate right</span><kbd>→</kbd></button>
+                <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); void duplicateSelectedPage(); }}><Copy size={16} /><span>Duplicate page</span><kbd>⌘/Ctrl+D</kbd></button>
+                <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); imageInputRef.current?.click(); }}><ImagePlus size={16} /><span>Add images</span></button>
+                <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); addTextBox(); }}><Type size={16} /><span>Add text box</span></button>
+                {selectedPageImages.length > 0 && <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); removeAllImages(selectedPage.id); }}><Trash2 size={16} /><span>Remove images</span></button>}
+                <div className="pdf-more-tools-divider" />
+                <button className="pdf-more-tools-danger" type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); deletePage(selectedPage.id); }}><Trash2 size={16} /><span>Delete page</span><kbd>Delete</kbd></button>
+              </>}
             </div>}
           </div>
           <div className="pdf-zoom-controls" aria-label="Preview zoom"><button className="icon-button" type="button" onClick={() => changePreviewZoom(-0.1)} aria-label="Zoom out" title="Zoom out (-)"><ZoomOut size={16} /></button><button className="pdf-zoom-value" type="button" onClick={resetPreviewZoom} title="Reset zoom (0)">{Math.round(previewZoom * 100)}%</button><button className="icon-button" type="button" onClick={() => changePreviewZoom(0.1)} aria-label="Zoom in" title="Zoom in (+)"><ZoomIn size={16} /></button></div>
           <button className="primary-button" type="button" onClick={submit} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles}><WandSparkles size={17} /> {uploadProgress ? `Uploading ${uploadProgress}%` : "Export PDF"}</button>
         </div>
-        <div className="pdf-shortcuts"><Keyboard size={14} /> ←/→ rotate · ⌘/Ctrl+D duplicate · Delete remove · +/- zoom · ⌘/Ctrl+Enter export</div>
+        <div className="pdf-shortcuts"><Keyboard size={14} /> ←/→ rotate · ⌘/Ctrl+D duplicate · ⌘/Ctrl+Z undo · ⇧⌘/Ctrl+Z redo · Delete remove · +/- zoom · ⌘/Ctrl+Enter export</div>
       </div>
       <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { addPdfFiles(event.target.files); event.target.value = ""; }} />
       <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/heic,image/heif,image/tiff,image/gif,image/bmp,.png,.jpg,.jpeg,.heic,.heif,.tif,.tiff,.gif,.bmp" multiple hidden onChange={(event) => { const targetPageId = imageTargetPageIdRef.current; imageTargetPageIdRef.current = null; addImages(event.target.files, targetPageId || undefined); event.target.value = ""; }} />
       {processingMode === "local" && <label className="keep-result-check pdf-retention-check"><input type="checkbox" checked={keepResult} onChange={(event) => { keepResultTouchedRef.current = true; setKeepResult(event.target.checked); }} /><span>Keep final result on this device</span></label>}
       {!pdfFiles.length && !pages.length ? <PdfEmptyState onBrowse={() => pdfInputRef.current?.click()} onBlank={addBlankPage} loading={loadingFiles} dragActive={pdfDragActive} /> : !pages.length ? <PdfNoPagesState onBrowse={() => pdfInputRef.current?.click()} onBlank={addBlankPage} /> : <div className="pdf-editor-layout">
         <aside className="pdf-page-rail"><div className="pdf-rail-heading"><span>Pages</span><small>Pages load as you scroll</small></div><div ref={pageListRef} className="pdf-page-list" onDragOver={handlePageListDragOver} onDrop={handlePageListDrop}>{renderPageList()}</div></aside>
-        <section className="pdf-selected-panel"><div className="pdf-selected-heading"><div><span>Selected page {selectedPage ? pages.findIndex((page) => page.id === selectedPage.id) + 1 : "—"}</span><small>{selectedPage?.kind === "blank" ? "Blank page" : selectedPage?.sourceName || "Choose a page"}{selectedPage?.kind === "source" ? ` · Original page ${selectedPage.pageNumber}` : ""}</small></div></div><div ref={previewScrollRef} className="pdf-document-preview" onScroll={handlePreviewScroll}>{pages.map((page, index) => <Fragment key={page.id}><PdfPreviewPage page={page} index={index} selected={page.id === selectedPage?.id} previewZoom={previewZoom} pdfDocument={documentsRef.current[page.pdfIndex]} previewRootRef={previewScrollRef} elementRef={(element) => { if (element) previewElementRefs.current.set(page.id, element); else previewElementRefs.current.delete(page.id); }} onChange={(images) => updatePage(page.id, { images })} onRemove={(imageId) => removeImage(page.id, imageId)} onChangeTextBoxes={(textBoxes) => updatePage(page.id, { textBoxes })} onRemoveTextBox={(textBoxId) => removeTextBox(page.id, textBoxId)} onAddImages={() => openImagePickerForPage(page.id)} onError={setPreviewError} /><PdfInsertPageButton pageNumber={index + 1} onClick={() => addBlankPageAfter(page.id)} /></Fragment>)}</div>{previewError && <DismissibleMessage className="pdf-preview-error" resetKey={previewError}><AlertTriangle size={16} /><span>{previewError}</span></DismissibleMessage>}<p className="pdf-editor-tip"><GripVertical size={15} /> Scroll the preview to select a page. Click + Add page between previews to insert a blank page. Use Text box to add editable text to the selected page.</p></section>
+        <section className="pdf-selected-panel"><div className="pdf-selected-heading"><div><span>Selected page {selectedPage ? pages.findIndex((page) => page.id === selectedPage.id) + 1 : "—"}</span><small>{selectedPage?.kind === "blank" ? "Blank page" : selectedPage?.sourceName || "Choose a page"}{selectedPage?.kind === "source" ? ` · Original page ${selectedPage.pageNumber}` : ""}</small></div></div><div ref={previewScrollRef} className="pdf-document-preview" onScroll={handlePreviewScroll}>{pages.map((page, index) => <Fragment key={page.id}><PdfPreviewPage page={page} index={index} selected={page.id === selectedPage?.id} previewZoom={previewZoom} pdfDocument={documentsRef.current[page.pdfIndex]} previewRootRef={previewScrollRef} elementRef={(element) => { if (element) previewElementRefs.current.set(page.id, element); else previewElementRefs.current.delete(page.id); }} onChange={(images, history) => updatePage(page.id, { images }, history)} onRemove={(imageId) => removeImage(page.id, imageId)} onChangeTextBoxes={(textBoxes, history) => updatePage(page.id, { textBoxes }, history)} onRemoveTextBox={(textBoxId) => removeTextBox(page.id, textBoxId)} onAddImages={() => openImagePickerForPage(page.id)} onError={setPreviewError} /><PdfInsertPageButton pageNumber={index + 1} onClick={() => addBlankPageAfter(page.id)} /></Fragment>)}</div>{previewError && <DismissibleMessage className="pdf-preview-error" resetKey={previewError}><AlertTriangle size={16} /><span>{previewError}</span></DismissibleMessage>}<p className="pdf-editor-tip"><GripVertical size={15} /> Scroll the preview to select a page. Click + Add page between previews to insert a blank page. Use Text box to add editable text to the selected page.</p></section>
       </div>}
       {error && <DismissibleMessage className="error-banner" resetKey={error}><AlertTriangle size={18} /><span>{error}</span></DismissibleMessage>}
     </section>}
@@ -1700,7 +1795,7 @@ function ImageOverlayLayer({ page, onChange, onRemove }) {
     const dx = rotation === 90 ? displayDy : rotation === 180 ? -displayDx : rotation === 270 ? -displayDy : displayDx;
     const dy = rotation === 90 ? -displayDx : rotation === 180 ? -displayDy : rotation === 270 ? displayDx : displayDy;
     if (interaction.mode === "move") {
-      onChange(images.map((item) => item.id === interaction.imageId ? { ...item, x: Math.max(-MAX_IMAGE_COORDINATE, Math.min(MAX_IMAGE_COORDINATE - item.width, interaction.image.x + dx)), y: Math.max(-MAX_IMAGE_COORDINATE, Math.min(MAX_IMAGE_COORDINATE - item.height, interaction.image.y + dy)) } : item));
+      onChange(images.map((item) => item.id === interaction.imageId ? { ...item, x: Math.max(-MAX_IMAGE_COORDINATE, Math.min(MAX_IMAGE_COORDINATE - item.width, interaction.image.x + dx)), y: Math.max(-MAX_IMAGE_COORDINATE, Math.min(MAX_IMAGE_COORDINATE - item.height, interaction.image.y + dy)) } : item), "coalesce");
     } else {
       const widthDelta = rotation === 90 || rotation === 270 ? displayDy : displayDx;
       const heightDelta = rotation === 90 || rotation === 270 ? displayDx : displayDy;
@@ -1709,7 +1804,7 @@ function ImageOverlayLayer({ page, onChange, onRemove }) {
       const height = interaction.image.lockAspectRatio === false
         ? Math.max(24, Math.min(MAX_IMAGE_COORDINATE, interaction.image.height + heightDelta))
         : Math.max(24, Math.min(MAX_IMAGE_COORDINATE, width * ratio));
-      onChange(images.map((item) => item.id === interaction.imageId ? { ...item, width, height } : item));
+      onChange(images.map((item) => item.id === interaction.imageId ? { ...item, width, height } : item), "coalesce");
     }
   };
   const onPointerUp = () => { interactionRef.current = null; };
@@ -1753,7 +1848,7 @@ function TextBoxOverlayLayer({ page, onChange, onRemove }) {
     restoreTextSelection(editor, selection);
     restoreSelectionRef.current = false;
   }, [page]);
-  const updateTextBox = (textBoxId, changes) => onChange?.(textBoxes.map((textBox) => textBox.id === textBoxId ? { ...textBox, ...changes } : textBox));
+  const updateTextBox = (textBoxId, changes, history = "discrete") => onChange?.(textBoxes.map((textBox) => textBox.id === textBoxId ? { ...textBox, ...changes } : textBox), history);
   const captureSelection = (textBoxId) => {
     const editor = editorRefs.current.get(textBoxId);
     const offsets = textSelectionOffsets(editor);
@@ -1794,7 +1889,7 @@ function TextBoxOverlayLayer({ page, onChange, onRemove }) {
       selectionRef.current = { textBoxId: textBox.id, ...offsets };
       restoreSelectionRef.current = true;
     }
-    updateTextBox(textBox.id, { text: nextText, runs });
+    updateTextBox(textBox.id, { text: nextText, runs }, "coalesce");
   };
   const handleTextBoxKeyDown = (textBox, event) => {
     const command = event.metaKey || event.ctrlKey;
@@ -1825,14 +1920,14 @@ function TextBoxOverlayLayer({ page, onChange, onRemove }) {
     const dx = rotation === 90 ? displayDy : rotation === 180 ? -displayDx : rotation === 270 ? -displayDy : displayDx;
     const dy = rotation === 90 ? -displayDx : rotation === 180 ? -displayDy : rotation === 270 ? displayDx : displayDy;
     if (interaction.mode === "move") {
-      onChange?.(textBoxes.map((item) => item.id === interaction.textBoxId ? { ...item, x: Math.max(-MAX_IMAGE_COORDINATE, Math.min(MAX_IMAGE_COORDINATE - item.width, interaction.textBox.x + dx)), y: Math.max(-MAX_IMAGE_COORDINATE, Math.min(MAX_IMAGE_COORDINATE - item.height, interaction.textBox.y + dy)) } : item));
+      onChange?.(textBoxes.map((item) => item.id === interaction.textBoxId ? { ...item, x: Math.max(-MAX_IMAGE_COORDINATE, Math.min(MAX_IMAGE_COORDINATE - item.width, interaction.textBox.x + dx)), y: Math.max(-MAX_IMAGE_COORDINATE, Math.min(MAX_IMAGE_COORDINATE - item.height, interaction.textBox.y + dy)) } : item), "coalesce");
       return;
     }
     const widthDelta = rotation === 90 || rotation === 270 ? displayDy : displayDx;
     const heightDelta = rotation === 90 || rotation === 270 ? displayDx : displayDy;
     const width = Math.max(24, Math.min(MAX_IMAGE_COORDINATE, interaction.textBox.width + widthDelta));
     const height = Math.max(24, Math.min(MAX_IMAGE_COORDINATE, interaction.textBox.height + heightDelta));
-    onChange?.(textBoxes.map((item) => item.id === interaction.textBoxId ? { ...item, width, height } : item));
+    onChange?.(textBoxes.map((item) => item.id === interaction.textBoxId ? { ...item, width, height } : item), "coalesce");
   };
   const onPointerUp = () => { interactionRef.current = null; };
   return <div ref={layerRef} className="pdf-text-box-overlay-layer" onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>{textBoxes.map((textBox, index) => {

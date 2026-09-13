@@ -29,6 +29,13 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /Text size for text box/);
   assert.match(shell, /Background color for text box/);
   assert.match(shell, /onChangeTextBoxes/);
+  assert.match(shell, /History/);
+  assert.match(shell, /undoDocument/);
+  assert.match(shell, /redoDocument/);
+  assert.match(shell, /⌘\/Ctrl\+Z undo/);
+  assert.match(shell, /history === "coalesce"/);
+  assert.match(shell, /Delete page/);
+  assert.match(shell, /Drop here/);
   assert.match(shell, /textBoxFontName/);
   assert.match(shell, /textBoxFontDefinition/);
   assert.match(shell, /contentEditable/);

@@ -319,6 +319,8 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .pdf-more-tools-heading { padding: 5px 9px 7px; color: #8a9ba9; font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .pdf-more-tools-menu button { width: 100%; min-height: 35px; display: flex; align-items: center; gap: 9px; padding: 0 9px; color: #47657a; background: transparent; border: 0; border-radius: 8px; font-size: 11px; font-weight: 700; text-align: left; }
 .pdf-more-tools-menu button:hover { color: var(--navy); background: #f1f8f9; }
+.pdf-more-tools-menu button:disabled { opacity: .42; cursor: not-allowed; }
+.pdf-more-tools-menu button:disabled:hover { color: inherit; background: transparent; }
 .pdf-more-tools-menu button > svg { flex: 0 0 auto; color: #5a8d95; }
 .pdf-more-tools-menu button > span { min-width: 0; flex: 1; color: inherit; font-size: inherit; }
 .pdf-more-tools-menu kbd { flex: 0 0 auto; color: #94a3ae; font: inherit; font-size: 9px; font-weight: 650; }
