@@ -8,6 +8,7 @@ import { ProcessingMode } from "./processing-mode.jsx";
 import { ResultDownloadNote } from "./result-download-note.jsx";
 import { downloadFilename, downloadUrlWithFilename, filenameStem, ResultFilenameField } from "./result-filename.jsx";
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
+import { DismissibleMessage } from "./dismissible-message.jsx";
 import { deleteProcessingJob, getProcessingJob, inspectPdfWithOcr, isProcessingLocationReady, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 import { applyRasterTextEdits } from "../lib/pdf-ocr-raster.js";
 import { MAX_PDF_BYTES } from "../lib/pdf-limits.js";
@@ -211,11 +212,17 @@ async function inspectPage(pdfPage, pageIndex, pdfLibrary, sourceHash) {
   };
 }
 
+const PDF_TEXT_THUMBNAIL_QUALITY = 1.25;
+
 function PdfTextThumbnail({ model, onSelect }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     let renderTask;
-    const viewport = model.page.getViewport({ scale: Math.min(0.22, 100 / model.page.getViewport({ scale: 1 }).width) });
+    const baseViewport = model.page.getViewport({ scale: 1 });
+    // Render slightly larger than the displayed thumbnail, then downsample
+    // it in CSS so small text and page artwork stay sharper.
+    const scale = Math.min(0.22 * PDF_TEXT_THUMBNAIL_QUALITY, (100 * PDF_TEXT_THUMBNAIL_QUALITY) / baseViewport.width);
+    const viewport = model.page.getViewport({ scale });
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
     canvas.width = Math.ceil(viewport.width);
@@ -281,7 +288,10 @@ function useEstimatedPreviewPageHeight() {
     const update = () => {
       const mobile = window.matchMedia("(max-width: 760px)").matches;
       const frameHeight = Math.min(window.innerHeight * (mobile ? 0.68 : 0.7), mobile ? 520 : 760);
-      setHeight(Math.max(mobile ? 620 : 520, Math.ceil(frameHeight + (mobile ? 125 : 130))));
+      // The virtual slot only needs to cover the page heading, frame, and
+      // the page card's padding. The old 125/130px allowance left a large
+      // empty gap after every rendered page, especially on mobile.
+      setHeight(Math.max(mobile ? 560 : 580, Math.ceil(frameHeight + 60)));
     };
     update();
     window.addEventListener("resize", update);
@@ -523,7 +533,7 @@ const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview(
     <div className="pdf-text-virtual-content" style={{ height: `${Math.max(0, pages.length * stride - gap)}px` }}>
       {pages.slice(windowed.start, windowed.end).map((model, offset) => {
         const index = windowed.start + offset;
-        return <div key={`${model.pageIndex}-${previewRevision}`} className="pdf-text-virtual-item" style={{ top: `${index * stride}px`, height: `${pageHeight}px` }}>
+        return <div key={`${model.pageIndex}-${previewRevision}`} className="pdf-text-virtual-item" style={{ top: `${index * stride}px`, left: 0, width: "100%", height: `${pageHeight}px` }}>
           <PdfTextPage model={model} selectedRunId={selectedRunId} edits={edits} textOffsets={textOffsets} pdfLibrary={pdfLibrary} previewZoom={previewZoom} onSelectRun={onSelectRun} onMoveRun={onMoveRun} onMoveRunEnd={onMoveRunEnd} />
         </div>;
       })}
@@ -558,7 +568,7 @@ function VirtualizedPdfTextRail({ pages, onSelect }) {
 function TextEditPopover({ run, value, onChange, onSave, onCancel, onRestore }) {
   if (!run) return null;
   const overflow = graphemeCount(value) > graphemeCount(run.text);
-  return <div className="pdf-text-edit-popover" role="dialog" aria-label={`Edit ${run.text} on page ${run.pageIndex + 1}`}><div className="pdf-text-edit-heading"><div><span>Selected text · Page {run.pageIndex + 1}</span><strong title={run.text}>{run.text}</strong></div><button className="icon-button" type="button" onClick={onCancel} aria-label="Close text editor" title="Close"><X size={17} /></button></div><input autoFocus value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onSave(); if (event.key === "Escape") onCancel(); }} aria-label="Replacement text" /><div className="pdf-text-edit-actions"><button className="primary-button" type="button" onClick={onSave}><Save size={15} /> Save text</button><button className="secondary-button" type="button" onClick={onRestore}><RotateCcw size={15} /> Restore original</button><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button></div>{overflow && <div className="pdf-text-overflow-warning"><AlertTriangle size={15} /><span>This replacement is longer. It will overflow if necessary; surrounding content will not reflow.</span></div>}</div>;
+  return <div className="pdf-text-edit-popover" role="dialog" aria-label={`Edit ${run.text} on page ${run.pageIndex + 1}`}><div className="pdf-text-edit-heading"><div><span>Selected text · Page {run.pageIndex + 1}</span><strong title={run.text}>{run.text}</strong></div><button className="icon-button" type="button" onClick={onCancel} aria-label="Close text editor" title="Close"><X size={17} /></button></div><input autoFocus value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onSave(); if (event.key === "Escape") onCancel(); }} aria-label="Replacement text" /><div className="pdf-text-edit-actions"><button className="primary-button" type="button" onClick={onSave}><Save size={15} /> Save text</button><button className="secondary-button" type="button" onClick={onRestore}><RotateCcw size={15} /> Restore original</button><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button></div>{overflow && <DismissibleMessage className="pdf-text-overflow-warning" resetKey={run.runId}><AlertTriangle size={15} /><span>This replacement is longer. It will overflow if necessary; surrounding content will not reflow.</span></DismissibleMessage>}</div>;
 }
 
 function formatLogTime(value) {
@@ -622,7 +632,7 @@ function PdfTextJobCard({ initialJob, mode, onReset, onContinue, keepResult }) {
       setPrintError(error instanceof Error ? error.message : "The PDF could not be opened for printing.");
     } finally { setPrinting(false); }
   };
-  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be edited" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<PdfTextJobLog logs={job.logs || []} />{job.warnings?.length > 0 && <div className="pdf-text-export-warnings"><AlertTriangle size={16} /><div>{job.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div></div>}{done && job.result && <><div className="pdf-text-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>{job.result.pageCount} pages</small></div><iframe src={`${job.result.downloadUrl}${job.result.downloadUrl.includes("?") ? "&" : "?"}preview=1`} title={`Preview of ${job.result.filename}`} /></div><div className="result-summary"><div><span>Output</span><strong title={job.result.filename}>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Edits</span><strong>{job.result.editCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div><ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={downloadName} /><ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} /></>}{printError && <div className="error-banner"><AlertTriangle size={17} /><span>{printError}</span></div>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, downloadName)} download={downloadName}><Download size={17} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button></>}{(done || failed) && <button className="secondary-button" type="button" onClick={onContinue}><Pencil size={17} /> Continue editing</button>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
+  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be edited" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<PdfTextJobLog logs={job.logs || []} />{job.warnings?.length > 0 && <DismissibleMessage className="pdf-text-export-warnings" resetKey={job.warnings.join("\n")}><AlertTriangle size={16} /><div>{job.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div></DismissibleMessage>}{done && job.result && <><div className="pdf-text-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>{job.result.pageCount} pages</small></div><iframe src={`${job.result.downloadUrl}${job.result.downloadUrl.includes("?") ? "&" : "?"}preview=1`} title={`Preview of ${job.result.filename}`} /></div><div className="result-summary"><div><span>Output</span><strong title={job.result.filename}>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Edits</span><strong>{job.result.editCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div><ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={downloadName} /><ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} /></>}{printError && <DismissibleMessage className="error-banner" resetKey={printError}><AlertTriangle size={17} /><span>{printError}</span></DismissibleMessage>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, downloadName)} download={downloadName}><Download size={17} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button></>}{(done || failed) && <button className="secondary-button" type="button" onClick={onContinue}><Pencil size={17} /> Continue editing</button>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
 }
 
 export function PdfTextEditor() {
@@ -927,7 +937,7 @@ export function PdfTextEditor() {
                     </button>
                   </div>
                 </div>
-                {ocrDetected && <div className="pdf-text-ocr-notice"><AlertTriangle size={17} /><div><strong>{nativePages ? "Mixed text mode" : "OCR mode"}</strong><span>{nativePages ? `${ocrPageScope}. The other ${nativePages} page${nativePages === 1 ? " stays" : "s stay"} on the original selectable text path.` : "OCR is used because the PDF does not expose a usable visible text layer or its text is hidden behind page artwork. OCR regions are reconstructed visually with an approximate font; exact original font, opacity, and hidden pixels cannot be recovered."}</span></div></div>}
+                {ocrDetected && <DismissibleMessage className="pdf-text-ocr-notice" resetKey={`${nativePages}-${ocrPageScope}`}><AlertTriangle size={17} /><div><strong>{nativePages ? "Mixed text mode" : "OCR mode"}</strong><span>{nativePages ? `${ocrPageScope}. The other ${nativePages} page${nativePages === 1 ? " stays" : "s stay"} on the original selectable text path.` : "OCR is used because the PDF does not expose a usable visible text layer or its text is hidden behind page artwork. OCR regions are reconstructed visually with an approximate font; exact original font, opacity, and hidden pixels cannot be recovered."}</span></div></DismissibleMessage>}
                 <div className="pdf-text-editor-layout">
                   <VirtualizedPdfTextRail pages={pages} onSelect={scrollToPage} />
                   <section className="pdf-text-workspace">
@@ -940,7 +950,7 @@ export function PdfTextEditor() {
               </div>
             </>
           )}
-          {error && <div className="error-banner"><AlertTriangle size={17} /><span>{error}</span></div>}
+          {error && <DismissibleMessage className="error-banner" resetKey={error}><AlertTriangle size={17} /><span>{error}</span></DismissibleMessage>}
           {!job && <div className="trust-row"><div><FileText size={16} /> {ocrDetected && !nativePages ? "OCR regions are visual reconstructions" : ocrDetected ? "Native text stays searchable" : "Searchable text stays searchable"}</div><div><ShieldCheck size={16} /> {ocrDetected ? "Original untouched pages stay unchanged" : "No rasterization or white masking"}</div><div><Pencil size={16} /> Longer text may overflow</div></div>}
         </>
       )}

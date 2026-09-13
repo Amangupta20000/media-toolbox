@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Download, Eye, FileText, Film, FolderOpen, Image as ImageIcon, Pencil, RefreshCw, Trash2, X } from "lucide-react";
 import { formatBytes } from "./file-dropzone.jsx";
+import { DismissibleMessage } from "./dismissible-message.jsx";
 import { rememberHistoryEdit } from "./history-edit.js";
 import { deleteDownloadedFile, deleteLocalHistory, deleteServerHistory, getLocalHistory, getServerHistory, openLocalResultsFolder, probeServer } from "./processing-client.js";
 
@@ -205,7 +206,7 @@ export function ToolHistory({ tool }) {
       </article>;
     })}</div>}
     {!loading && <p className="history-note">Server Delete first asks the authorized Local agent to remove the named file from the Downloads folder, then removes the server copy and listing. If the file is missing or the agent is unavailable, the listing stays.</p>}
-    {message && <div className="error-banner"><AlertTriangle size={17} /><span>{message}</span></div>}
+    {message && <DismissibleMessage className="error-banner" resetKey={message}><AlertTriangle size={17} /><span>{message}</span></DismissibleMessage>}
     {previewItem && <HistoryPreviewModal item={previewItem} onClose={() => setPreviewItem(null)} onDelete={() => removeItem(previewItem)} onEdit={() => editItem(previewItem)} deleting={deletingId === previewItem.id} />}
   </section>;
 }
@@ -241,9 +242,9 @@ function HistoryPreviewModal({ item, onClose, onDelete, onEdit, deleting }) {
     <div className="history-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="history-preview-title">
       <div className="history-preview-header"><div><span>Saved result preview</span><strong id="history-preview-title" title={result.filename}>{result.filename || "Saved result"}</strong><small>{item.storage === "local" ? "Local agent result" : "Server result"} · {formatBytes(result.bytes || 0)}</small></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close preview" title="Close preview"><X size={20} /></button></div>
       <div className="history-preview-body">
-        {!previewUrl && <div className="preview-unavailable"><AlertTriangle size={18} /><span>This saved result is no longer available for preview.</span></div>}
-        {previewUrl && tool === "image-converter" && (previewError ? <div className="preview-unavailable"><AlertTriangle size={18} /><span>This image cannot be previewed in this browser, but it can still be downloaded.</span></div> : <img className="history-preview-image" src={previewUrl} alt={`Preview of ${result.filename || "saved image"}`} onError={() => setPreviewError(true)} />)}
-        {previewUrl && tool === "video-repair" && (previewError ? <div className="preview-unavailable"><AlertTriangle size={18} /><span>This video cannot be previewed in this browser, but it can still be downloaded.</span></div> : <video className="history-preview-video" controls autoPlay={false} preload="metadata" playsInline onError={() => setPreviewError(true)} aria-label={`Preview of ${result.filename || "saved video"}`}><source src={previewUrl} /></video>)}
+        {!previewUrl && <DismissibleMessage className="preview-unavailable" resetKey="missing-preview"><AlertTriangle size={18} /><span>This saved result is no longer available for preview.</span></DismissibleMessage>}
+        {previewUrl && tool === "image-converter" && (previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${result.filename}-image-preview`}><AlertTriangle size={18} /><span>This image cannot be previewed in this browser, but it can still be downloaded.</span></DismissibleMessage> : <img className="history-preview-image" src={previewUrl} alt={`Preview of ${result.filename || "saved image"}`} onError={() => setPreviewError(true)} />)}
+        {previewUrl && tool === "video-repair" && (previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${result.filename}-video-preview`}><AlertTriangle size={18} /><span>This video cannot be previewed in this browser, but it can still be downloaded.</span></DismissibleMessage> : <video className="history-preview-video" controls autoPlay={false} preload="metadata" playsInline onError={() => setPreviewError(true)} aria-label={`Preview of ${result.filename || "saved video"}`}><source src={previewUrl} /></video>)}
         {(previewUrl && (tool === "pdf-editor" || tool === "pdf-text-editor")) && <iframe className="history-preview-pdf" src={previewUrl} title={`Preview of ${result.filename || "saved PDF"}`} />}
       </div>
       <div className="history-preview-actions"><button className="secondary-button history-modal-delete" type="button" onClick={handleDelete} disabled={deleting}><Trash2 size={16} /> {deleting ? "Deleting…" : "Delete file"}</button><a className="primary-button" href={result.downloadUrl} download={result.filename}><Download size={17} /> Download</a><button className="secondary-button" type="button" onClick={onEdit}><Pencil size={16} /> Edit file</button></div>
