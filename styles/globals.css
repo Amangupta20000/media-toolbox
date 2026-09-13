@@ -292,7 +292,7 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .planned-tool-card[href] { cursor: pointer; transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
 .planned-tool-card[href]:hover { transform: translateY(-2px); border-color: #a7d9d9; box-shadow: 0 12px 26px rgba(37, 62, 88, .08); }
 .planned-tool-status.beta { color: #237f86; background: #dff7f3; }
-.pdf-editor-shell { position: relative; overflow: visible; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 12px 30px rgba(37, 62, 88, .045); }
+.pdf-editor-shell { position: relative; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 12px 30px rgba(37, 62, 88, .045); }
 .pdf-editor-shell.pdf-drop-active { border-color: #55bfc0; box-shadow: 0 0 0 4px rgba(85, 191, 192, .15), 0 12px 30px rgba(37, 62, 88, .045); }
 .pdf-editor-toolbar { display: grid; grid-template-columns: minmax(165px, 1fr) minmax(0, 2.5fr); align-items: start; gap: 14px 20px; padding: 17px 20px 14px; border-bottom: 1px solid var(--line); background: #fbfdfe; }
 .pdf-editor-toolbar-heading { min-width: 0; display: flex; align-items: baseline; gap: 12px; padding-top: 11px; }
@@ -627,6 +627,7 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .pdf-editor-shell { background: var(--surface); border-color: var(--line); box-shadow: 0 12px 30px rgba(0, 0, 0, .16); }
 [data-theme="dark"] .pdf-capacity-note { color: #9db0c0; }
 [data-theme="dark"] .pdf-editor-toolbar, [data-theme="dark"] .pdf-selected-panel { background: #132535; border-color: var(--line); }
+[data-theme="dark"] .pdf-retention-check { background: #132535; border-color: var(--line); }
 [data-theme="dark"] .pdf-editor-toolbar-heading > span, [data-theme="dark"] .pdf-shortcuts, [data-theme="dark"] .pdf-rail-heading small, [data-theme="dark"] .pdf-selected-heading small, [data-theme="dark"] .thumbnail-meta, [data-theme="dark"] .blank-page-help, [data-theme="dark"] .pdf-editor-tip { color: #9aafbd; }
 [data-theme="dark"] .pdf-page-rail { background: #102230; border-color: var(--line); }
 [data-theme="dark"] .pdf-page-thumbnail { background: #172c3c; border-color: #2f4859; }
@@ -845,6 +846,8 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .processing-mode-help a { color: var(--teal); font-weight: 750; }
 .keep-result-check { display: flex; align-items: center; gap: 8px; margin-top: 15px; color: #708394; font-size: 11px; font-weight: 650; }
 .keep-result-check input { accent-color: var(--teal); }
+.pdf-retention-check { box-sizing: border-box; min-height: 56px; margin: 0; padding: 15px 20px; gap: 10px; border-bottom: 1px solid var(--line); color: #5f7585; font-size: 13px; font-weight: 700; line-height: 1.4; }
+.pdf-retention-check input { width: 18px; height: 18px; margin: 0; flex: 0 0 auto; }
 .agent-status-card, .agent-pair-card, .agent-capabilities-card, .agent-install-card, .agent-sessions-card { display: flex; gap: 18px; margin-bottom: 16px; padding: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 10px 24px rgba(26, 52, 77, .04); }
 .agent-status-card { align-items: center; }
 .agent-status-card.connected { border-color: #55bfc0; background: #f2fbfa; }
