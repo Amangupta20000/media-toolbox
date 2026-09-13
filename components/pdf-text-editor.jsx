@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Download, FileText, Keyboard, LoaderCircle, Pencil, Printer, RotateCcw, RotateCw, Save, ShieldCheck, UploadCloud, X, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileText, Keyboard, LoaderCircle, Pencil, Printer, RotateCcw, Save, ShieldCheck, UploadCloud, X, ZoomIn, ZoomOut } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { FileDropzone, formatBytes } from "./file-dropzone.jsx";
 import { ProcessingMode } from "./processing-mode.jsx";
@@ -348,11 +348,53 @@ function TextSelectionControls({ run, appearance, onChange, position }) {
     <output aria-label="Selected text size">{Math.round(transform.scale * 100)}%</output>
     <button type="button" className="pdf-text-selection-button" onClick={() => update({ scale: transform.scale + 0.1 })} aria-label="Increase selected text size" title="Increase size"><ZoomIn size={13} /></button>
     <span className="pdf-text-selection-divider" aria-hidden="true" />
-    <button type="button" className="pdf-text-selection-button" onClick={() => update({ rotation: transform.rotation - 15 })} aria-label="Rotate selected text counterclockwise" title="Rotate left 15 degrees"><RotateCcw size={13} /></button>
-    <output aria-label="Selected text rotation">{Math.round(transform.rotation)}°</output>
-    <button type="button" className="pdf-text-selection-button" onClick={() => update({ rotation: transform.rotation + 15 })} aria-label="Rotate selected text clockwise" title="Rotate right 15 degrees"><RotateCw size={13} /></button>
     <button type="button" className="pdf-text-selection-reset" onClick={() => update({ scale: 1, rotation: 0 })} aria-label="Reset selected text size and rotation" title="Reset size and rotation">Reset</button>
   </div>;
+}
+
+function pointerAngle(event, center) {
+  return Math.atan2(event.clientY - center.y, event.clientX - center.x) * 180 / Math.PI;
+}
+
+function shortestAngleDelta(value) {
+  return ((value + 540) % 360) - 180;
+}
+
+function TextRotationHandle({ run, appearance, surfaceRef, position, onPreviewChange, onChange }) {
+  const dragRef = useRef(null);
+  const transform = textTransform(appearance);
+  const endRotation = (event) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    if (drag.moved) onChange?.(run.runId, textTransform({ ...transform, rotation: drag.rotation }));
+    onPreviewChange?.(run.runId, null);
+  };
+  const startRotation = (event) => {
+    if (event.button !== 0) return;
+    const surface = surfaceRef.current;
+    const bounds = surface?.getBoundingClientRect();
+    if (!bounds) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const center = { x: bounds.left + run.left + Math.max(4, run.width || 0) / 2, y: bounds.top + run.top + Math.max(7, run.height || 0) / 2 };
+    const angle = pointerAngle(event, center);
+    dragRef.current = { pointerId: event.pointerId, center, lastAngle: angle, rotation: transform.rotation, moved: false };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+  const moveRotation = (event) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const angle = pointerAngle(event, drag.center);
+    const delta = shortestAngleDelta(angle - drag.lastAngle);
+    if (Math.abs(delta) < 0.01) return;
+    drag.lastAngle = angle;
+    drag.rotation += delta;
+    drag.moved = true;
+    onPreviewChange?.(run.runId, drag.rotation);
+  };
+  return <button type="button" className="pdf-text-rotation-handle" style={position} aria-label={`Rotate selected text ${run.text}`} title="Drag to rotate" onPointerDown={startRotation} onPointerMove={moveRotation} onPointerUp={endRotation} onPointerCancel={endRotation} />;
 }
 
 function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms, pdfLibrary, previewZoom, onSelectRun, onMoveRun, onMoveRunEnd, onAppearanceChange, pageRef }) {
@@ -363,8 +405,10 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
   const rerenderRef = useRef(false);
   const [viewport, setViewport] = useState(null);
   const [surfaceSize, setSurfaceSize] = useState(null);
+  const [rotationPreview, setRotationPreview] = useState(null);
   const rasterPreviewOffsets = model.ocr ? textOffsets : null;
   const rasterPreviewTransforms = model.ocr ? textTransforms : null;
+  useEffect(() => setRotationPreview(null), [selectedRunId]);
   useEffect(() => {
     let active = true;
     const render = async () => {
@@ -511,12 +555,18 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
       onMoveRunEnd?.(run.runId, { x: drag.startOffset.x + (event.clientX - drag.startX) / pageScale, y: drag.startOffset.y + (event.clientY - drag.startY) / pageScale });
     }
   };
+  const previewRotation = (runId, rotation) => setRotationPreview(rotation === null ? null : { runId, rotation });
+  const commitRotation = (runId, value) => {
+    setRotationPreview(null);
+    const current = textTransform(textTransforms[runId]);
+    onAppearanceChange?.(runId, textTransform({ ...current, rotation: value.rotation }));
+  };
   const renderRun = (run) => (
     <Fragment key={run.runId}>
       <button
         type="button"
         className={`pdf-text-run ${run.mode === "ocr" ? "ocr" : ""} ${selectedRunId === run.runId ? "selected" : ""} ${edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]) ? "edited" : ""} ${!run.editable ? "not-editable" : ""}`}
-        style={{ left: run.left, top: run.top, width: run.width || undefined, height: run.height || undefined, transform: `rotate(${textTransform(textTransforms[run.runId]).rotation}deg) scale(${textTransform(textTransforms[run.runId]).scale})`, transformOrigin: "center center" }}
+        style={{ left: run.left, top: run.top, width: run.width || undefined, height: run.height || undefined, transform: `rotate(${rotationPreview?.runId === run.runId ? rotationPreview.rotation : textTransform(textTransforms[run.runId]).rotation}deg) scale(${textTransform(textTransforms[run.runId]).scale})`, transformOrigin: "center center" }}
         onClick={() => { if (suppressClickRef.current) { suppressClickRef.current = false; return; } onSelectRun(run); }}
         onPointerDown={(event) => startTextDrag(event, run)}
         onPointerMove={(event) => moveTextDrag(event, run)}
@@ -525,7 +575,10 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
         title={run.editable ? `Edit “${run.text}”` : run.reason}
         aria-label={run.editable ? `Edit text ${run.text}` : `Text not editable: ${run.reason}`}
       />
-      {selectedRunId === run.runId && run.editable && <TextSelectionControls run={run} appearance={textTransforms[run.runId]} onChange={onAppearanceChange} position={{ left: run.left + Math.max(4, run.width || 0) / 2, top: run.top >= 48 ? run.top - 42 : run.top + Math.max(12, run.height || 0) + 8, transform: "translateX(-50%)" }} />}
+      {selectedRunId === run.runId && run.editable && <>
+        <TextRotationHandle run={run} appearance={textTransforms[run.runId]} surfaceRef={surfaceRef} onPreviewChange={previewRotation} onChange={commitRotation} position={{ left: run.left + Math.max(4, run.width || 0) / 2, top: run.top >= 32 ? run.top - 12 : run.top + Math.max(12, run.height || 0) + 12 }} />
+        <TextSelectionControls run={run} appearance={textTransforms[run.runId]} onChange={onAppearanceChange} position={{ left: run.left + Math.max(4, run.width || 0) / 2, top: run.top >= 58 ? run.top - 48 : run.top + Math.max(12, run.height || 0) + 38, transform: "translateX(-50%)" }} />
+      </>}
     </Fragment>
   );
   return <article ref={pageRef} className="pdf-text-page" aria-label={model.pageLabel}>

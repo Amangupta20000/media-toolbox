@@ -991,6 +991,11 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .pdf-text-selection-button, .pdf-text-selection-reset { display: inline-flex; align-items: center; justify-content: center; min-width: 25px; min-height: 25px; padding: 4px 6px; color: var(--navy); background: #edf7f7; border: 1px solid #c4dfe1; border-radius: 5px; cursor: pointer; font: inherit; font-size: 9px; font-weight: 750; }
 .pdf-text-selection-button:hover, .pdf-text-selection-reset:hover { color: var(--teal-dark); background: #dff1f1; border-color: #79c8c8; }
 .pdf-text-selection-divider { width: 1px; height: 18px; margin: 0 2px; background: #c7dfe2; }
+.pdf-text-rotation-handle { position: absolute; z-index: 31; width: 19px; height: 28px; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; user-select: none; transform: translate(-50%, -50%); }
+.pdf-text-rotation-handle::before { content: ""; position: absolute; left: 50%; top: 10px; width: 2px; height: 12px; background: #1e9fa3; transform: translateX(-50%); }
+.pdf-text-rotation-handle::after { content: ""; position: absolute; left: 50%; top: 2px; width: 13px; height: 13px; background: #f7fcfc; border: 2px solid #1e9fa3; border-radius: 50%; box-shadow: 0 2px 5px rgba(34,101,113,.25); transform: translateX(-50%); }
+.pdf-text-rotation-handle:hover::after, .pdf-text-rotation-handle:active::after { background: #dff1f1; border-color: #14777b; }
+.pdf-text-rotation-handle:active { cursor: grabbing; }
 .pdf-text-page-empty { display: flex; align-items: center; gap: 7px; max-width: 520px; padding: 10px 12px; color: #8b721e; background: var(--warning-bg); border: 1px solid #f2dfac; border-radius: 8px; font-size: 10px; line-height: 1.45; }
 .pdf-text-loading, .pdf-text-empty { min-height: 250px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 9px; color: #8294a3; text-align: center; }
 .pdf-text-loading strong, .pdf-text-empty strong { color: var(--navy); font-size: 13px; }
@@ -1029,6 +1034,9 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .pdf-text-selection-button, [data-theme="dark"] .pdf-text-selection-reset { color: #dcebf2; background: #183f4b; border-color: #2f6971; }
 [data-theme="dark"] .pdf-text-selection-button:hover, [data-theme="dark"] .pdf-text-selection-reset:hover { color: #83e0df; background: #205763; border-color: #4ab9ba; }
 [data-theme="dark"] .pdf-text-selection-divider { background: #2f5965; }
+[data-theme="dark"] .pdf-text-rotation-handle::before { background: #55cfd0; }
+[data-theme="dark"] .pdf-text-rotation-handle::after { background: #102b38; border-color: #55cfd0; }
+[data-theme="dark"] .pdf-text-rotation-handle:hover::after, [data-theme="dark"] .pdf-text-rotation-handle:active::after { background: #205763; border-color: #83e0df; }
 [data-theme="dark"] .pdf-text-ocr-notice { color: #f0d88a; background: #3e321b; border-color: #80651f; }
 [data-theme="dark"] .image-rotation-controls { color: #dcebf2; background: rgba(16,43,56,.96); border-color: #2c6970; }
 [data-theme="dark"] .image-rotate-button { color: #dcebf2; }
