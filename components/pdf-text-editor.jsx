@@ -9,8 +9,7 @@ import { ResultDownloadNote } from "./result-download-note.jsx";
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { deleteProcessingJob, getProcessingJob, inspectPdfWithOcr, isProcessingLocationReady, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 import { applyRasterTextEdits } from "../lib/pdf-ocr-raster.js";
-
-const MAX_PDF_BYTES = 15 * 1024 * 1024;
+import { MAX_PDF_BYTES } from "../lib/pdf-limits.js";
 
 async function loadPdfLibrary() {
   const library = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -340,7 +339,7 @@ export function PdfTextEditor() {
     setError("");
     if (!file) return;
     if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) { setError("Choose a PDF file."); return; }
-    if (file.size > MAX_PDF_BYTES) { setError("The PDF must be 15 MB or smaller."); return; }
+    if (file.size > MAX_PDF_BYTES) { setError("The PDF must be 50 MB or smaller."); return; }
     if (!pdfLibrary) { setError("PDF preview support is still loading. Try again in a moment."); return; }
     setLoading(true); setSource(file); setPages([]); setEdits({}); setSelectedRun(null); setOcrProgress(0); setOcrDetected(false); setLoadingMessage("Reading PDF text and building previews…"); sourcePasswordRef.current = "";
     let pdfPassword = "";
@@ -484,7 +483,7 @@ export function PdfTextEditor() {
               <span className={`capability-dot ${capabilities?.status === "ready" ? "ready" : ""}`} />
               <span>{capabilities?.status === "ready" ? `${processingMode === "local" ? "Local agent" : "Server"} worker online` : "Connecting to processing worker"}</span>
             </div>
-            <span>One PDF · 15 MB maximum · OCR fallback · Browser mode disabled</span>
+            <span>One PDF · 50 MB maximum · OCR fallback · Browser mode disabled</span>
           </div>
           {job ? <PdfTextJobCard initialJob={job} mode={jobMode} onReset={reset} onContinue={continueEditing} keepResult={keepResult} /> : (
             <>
@@ -494,7 +493,7 @@ export function PdfTextEditor() {
                   <span className="required-label">Required</span>
                 </div>
                 <FileDropzone file={source} onFile={selectFile} onClear={reset} variant="pdf" accept="application/pdf,.pdf" label="Drop a PDF here" hint="or click to browse · selectable text or OCR" disabled={loading || Boolean(job)} />
-                <div className="limit-row"><span>Maximum file size</span><strong>15 MB</strong></div>
+                <div className="limit-row"><span>Maximum file size</span><strong>50 MB</strong></div>
               </section>
               <div className="pdf-text-editor-shell">
                 <div className="pdf-text-toolbar">

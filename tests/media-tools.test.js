@@ -459,9 +459,25 @@ test("PDF editor rejects a sixth PDF and unsupported inserted images at upload v
       id: crypto.randomUUID(),
       jobDir: testRoot,
       fields: { tool: "pdf-editor", operations: JSON.stringify([{ kind: "source", pdfIndex: 0, pageIndex: 0 }]) },
-      files: [{ field: "pdf", name: "oversized.pdf", mime: "application/pdf", path: sourcePath, size: 15 * 1024 * 1024 + 1 }],
+      files: [{ field: "pdf", name: "oversized.pdf", mime: "application/pdf", path: sourcePath, size: 50 * 1024 * 1024 + 1 }],
     }),
-    /15 MB PDF limit/i,
+    /50 MB PDF limit/i,
+  );
+
+  await assert.rejects(
+    () => createJobFromMultipart({
+      id: crypto.randomUUID(),
+      jobDir: testRoot,
+      fields: { tool: "pdf-editor", operations: JSON.stringify([
+        { kind: "source", pdfIndex: 0, pageIndex: 0 },
+        { kind: "source", pdfIndex: 1, pageIndex: 0 },
+      ]) },
+      files: [
+        { field: "pdf", name: "first.pdf", mime: "application/pdf", path: sourcePath, size: 30 * 1024 * 1024 },
+        { field: "pdf", name: "second.pdf", mime: "application/pdf", path: sourcePath, size: 20 * 1024 * 1024 + 1 },
+      ],
+    }),
+    /combined PDF upload.*50 MB limit/i,
   );
 });
 

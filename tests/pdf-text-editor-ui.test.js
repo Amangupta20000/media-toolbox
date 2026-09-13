@@ -32,7 +32,7 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   const worker = await read("worker/index.js");
   assert.match(shell, /Browser mode disabled/);
   assert.doesNotMatch(shell, /value="browser"/);
-  assert.match(shell, /15 MB/);
+  assert.match(shell, /50 MB/);
   assert.match(shell, /originalTextHash/);
   assert.match(shell, /replacementText/);
   assert.match(shell, /Zoom out/);

@@ -9,9 +9,8 @@ import { ProcessingMode } from "./processing-mode.jsx";
 import { ResultDownloadNote } from "./result-download-note.jsx";
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
+import { MAX_PDF_COUNT, MAX_PDF_TOTAL_BYTES } from "../lib/pdf-limits.js";
 
-const MAX_PDFS = 5;
-const MAX_PDF_BYTES = 15 * 1024 * 1024;
 const MAX_IMAGE_COORDINATE = 100000;
 const ACCEPTED_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".heic", ".heif", ".tif", ".tiff", ".gif", ".bmp"]);
 const A4 = { width: 595.28, height: 841.89, rotation: 0 };
@@ -516,10 +515,15 @@ export function PdfEditor() {
     if (!selectedFiles.length) return;
     setError("");
     setPreviewError("");
-    if (pdfFiles.length + selectedFiles.length > MAX_PDFS) { setError(`You can add up to ${MAX_PDFS} PDFs.`); return; }
+    if (pdfFiles.length + selectedFiles.length > MAX_PDF_COUNT) { setError(`You can add up to ${MAX_PDF_COUNT} PDFs.`); return; }
     for (const file of selectedFiles) {
       if (!isPdf(file)) { setError(`${file.name} is not a PDF.`); return; }
-      if (file.size > MAX_PDF_BYTES) { setError(`${file.name} is larger than the 15 MB limit.`); return; }
+    }
+    const existingPdfBytes = pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0);
+    const selectedPdfBytes = selectedFiles.reduce((total, file) => total + Number(file.size || 0), 0);
+    if (existingPdfBytes + selectedPdfBytes > MAX_PDF_TOTAL_BYTES) {
+      setError("The combined PDF upload must be 50 MB or smaller. Remove a PDF before adding another.");
+      return;
     }
 
     setLoadingFiles(true);
@@ -1147,15 +1151,15 @@ export function PdfEditor() {
   }, [activeView, job, loadingFiles, selectedPage, previewZoom, pages, pdfFiles, processingMode]);
 
   return <AppShell>
-    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools · Beta <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · 15 MB each</span></div><h1>PDF editor</h1><p>Merge documents, reorder pages, remove pages, and add images to PDF pages or new blank pages.</p></div></div>
+    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools · Beta <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · 50 MB total</span></div><h1>PDF editor</h1><p>Merge documents, reorder pages, remove pages, and add images to PDF pages or new blank pages.</p></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
     {activeView === "history" ? <ToolHistory tool="pdf-editor" /> : <>
     {!job && <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />}
     {job ? <PdfJobCard job={job} mode={jobMode} keepResult={keepResult} onReset={reset} onContinue={continueEditing} /> : <section className={`pdf-editor-shell ${pdfDragActive ? "pdf-drop-active" : ""}`} onDragOver={handlePdfDragOver} onDragLeave={handlePdfDragLeave} onDrop={handlePdfDrop}>
       <div className="pdf-editor-toolbar">
-        <div className="pdf-editor-toolbar-heading"><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDFS} PDFs · {pages.length} pages</span></div>
+        <div className="pdf-editor-toolbar-heading"><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDF_COUNT} PDFs · {pages.length} pages · {Math.ceil(pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0) / (1024 * 1024)) || 0} MB of 50 MB</span></div>
         <div className="pdf-editor-actions">
-          <button className="secondary-button" type="button" onClick={() => pdfInputRef.current?.click()} disabled={loadingFiles || pdfFiles.length >= MAX_PDFS}><Plus size={17} /> Add PDF</button>
+          <button className="secondary-button" type="button" onClick={() => pdfInputRef.current?.click()} disabled={loadingFiles || pdfFiles.length >= MAX_PDF_COUNT}><Plus size={17} /> Add PDF</button>
           <button className="secondary-button" type="button" onClick={addBlankPage}><FilePlus2 size={17} /> Blank page</button>
           <div ref={moreToolsRef} className="pdf-more-tools">
             <button className="icon-button pdf-more-tools-trigger" type="button" aria-label="Open other PDF tools" aria-haspopup="menu" aria-expanded={Boolean(selectedPage) && moreToolsOpen} title={selectedPage ? "Other tools" : "Add a page to use other tools"} disabled={!selectedPage} onClick={() => setMoreToolsOpen((current) => !current)}><MoreHorizontal size={20} /></button>
@@ -1189,7 +1193,7 @@ export function PdfEditor() {
 }
 
 function PdfEmptyState({ onBrowse, loading, dragActive }) {
-  return <div className="pdf-empty-state"><div className="pdf-empty-icon"><UploadCloud size={28} /></div><h2>{loading ? "Reading PDF pages…" : dragActive ? "Drop your PDF files" : "Add your first PDF"}</h2><p>{loading ? "Creating page previews for the editor." : dragActive ? "Release to add the PDFs to your project." : "Upload one PDF to edit it, or add up to five PDFs to merge them."}</p><button className="primary-button" type="button" onClick={onBrowse} disabled={loading}><FilePlus2 size={18} /> Browse PDF files</button><small>PDF only · 15 MB maximum per file</small></div>;
+  return <div className="pdf-empty-state"><div className="pdf-empty-icon"><UploadCloud size={28} /></div><h2>{loading ? "Reading PDF pages…" : dragActive ? "Drop your PDF files" : "Add your first PDF"}</h2><p>{loading ? "Creating page previews for the editor." : dragActive ? "Release to add the PDFs to your project." : "Upload one PDF to edit it, or add up to five PDFs to merge them."}</p><button className="primary-button" type="button" onClick={onBrowse} disabled={loading}><FilePlus2 size={18} /> Browse PDF files</button><small>Up to 5 PDFs · 50 MB total</small></div>;
 }
 
 function PdfNoPagesState({ onBrowse, onBlank }) {
