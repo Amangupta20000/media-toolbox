@@ -109,6 +109,8 @@
     const pill = el("connection-pill");
     pill.textContent = state.running ? "Agent running" : "Agent stopped";
     pill.classList.toggle("ready", Boolean(state.running));
+    pill.classList.toggle("status-running", Boolean(state.running));
+    pill.classList.toggle("status-stopped", !state.running);
     el("authorization-title").textContent = labels[mode] || "Locked";
     el("authorization-message").textContent = !authorization.legalAccepted ? "Accept the Privacy Policy and Terms & Conditions below before starting processing or logging in." : mode === "locked" ? (authorization.activationReloginAvailable ? "The activation session is logged out. Log in again to continue; its original expiry time is unchanged." : authorization.activationSessionLimitReached ? "The real activation time is exhausted by the active browser sessions. End a session to restore the real remaining time." : authorization.trialAvailable ? "A five-minute trial is available and starts on the first local processing session." : "Admin login or a valid activation code is required for processing.") : mode === "trial" ? "Your one-time trial is active on this installation." : mode === "activation" ? "This installation is authorized by a signed license." : "Unlimited local processing is unlocked until logout.";
     el("countdown").textContent = mode === "admin" ? "Unlimited" : formatRemaining(authorization.remainingMs);
@@ -191,7 +193,8 @@
     const waitingForSsd = ownerMachine && autoStartStatus === "waiting-for-ssd";
     const starting = ownerMachine && autoStartStatus === "starting";
     badge.textContent = !ownerMachine ? "Owner machine not configured" : waitingForSsd ? "Waiting for licensing SSD" : starting ? "Starting" : !mounted ? "SSD not mounted" : !healthy ? "Stopped" : fullyReachable ? "Running" : "Public endpoint unavailable";
-    badge.className = `badge ${!ownerMachine ? "warning" : waitingForSsd || starting ? "warning" : !mounted || !healthy ? "error" : fullyReachable ? "ready" : "warning"}`;
+    const statusIndicator = !ownerMachine || waitingForSsd || starting ? "status-warning" : !mounted || !healthy ? "status-stopped" : fullyReachable ? "status-running" : "status-warning";
+    badge.className = `badge ${!ownerMachine ? "warning" : waitingForSsd || starting ? "warning" : !mounted || !healthy ? "error" : fullyReachable ? "ready" : "warning"} ${statusIndicator}`;
     message.textContent = !ownerMachine
       ? "This Admin session can inspect the licensing endpoint, but this installation is not configured as the owner machine. Connect the licensing SSD on the owner computer to start the server."
       : waitingForSsd

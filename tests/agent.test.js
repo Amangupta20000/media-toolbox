@@ -188,8 +188,15 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardHtml, /Copy this command only when using a source checkout/);
   assert.doesNotMatch(dashboardHtml, /bottom-left/);
   assert.match(dashboardRenderer, /el\("authorization-panel"\)\.classList\.toggle\("hidden", mode === "admin"\)/);
+  assert.match(dashboardRenderer, /status-running/);
+  assert.match(dashboardRenderer, /status-stopped/);
   assert.match(dashboardCss, /\.dashboard-actions\{position:fixed;left:0;right:0;bottom:0/);
   assert.match(dashboardCss, /\.authorization-panel\{grid-column:1 \/ -1\}/);
+  assert.match(dashboardCss, /\.license-owner-panel\{margin-top:18px\}/);
+  assert.match(dashboardCss, /\.pill\.status-running::before/);
+  assert.match(dashboardCss, /@keyframes agent-status-live/);
+  assert.match(dashboardCss, /@keyframes agent-status-alert/);
+  assert.match(dashboardCss, /prefers-reduced-motion:reduce/);
   assert.match(dashboardCss, /\.admin-action\{background:#102c3d;border:1px solid/);
   assert.match(dashboardPreload, /agent:start-license-server/);
   assert.match(dashboardPreload, /agent:get-license-server-state/);
