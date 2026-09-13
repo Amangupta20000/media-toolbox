@@ -986,6 +986,8 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .pdf-text-run.ocr:hover { background: rgba(214,170,39,.2); border-color: rgba(185,119,23,.72); }
 .pdf-text-run.ocr.edited { background: rgba(43,166,126,.2); border-color: rgba(37,145,111,.7); }
 .pdf-text-run.not-editable { cursor: not-allowed; background: rgba(185,119,23,.08); border-color: rgba(185,119,23,.28); }
+.pdf-text-selection-frame { position: absolute; z-index: 20; pointer-events: none; overflow: visible; }
+.pdf-text-selection-frame > .pdf-text-run, .pdf-text-selection-frame > .pdf-text-resize-handle, .pdf-text-selection-frame > .pdf-text-rotation-handle { pointer-events: auto; }
 .pdf-text-selection-controls { position: absolute; z-index: 30; display: inline-flex; align-items: center; gap: 3px; max-width: calc(100% - 8px); padding: 4px; color: var(--navy); background: rgba(247,252,252,.97); border: 1px solid #8bd1d0; border-radius: 8px; box-shadow: 0 6px 16px rgba(34,101,113,.2); white-space: nowrap; }
 .pdf-text-selection-button, .pdf-text-selection-reset { display: inline-flex; align-items: center; justify-content: center; min-width: 25px; min-height: 25px; padding: 4px 6px; color: var(--navy); background: #edf7f7; border: 1px solid #c4dfe1; border-radius: 5px; cursor: pointer; font: inherit; font-size: 9px; font-weight: 750; }
 .pdf-text-selection-button:hover, .pdf-text-selection-reset:hover { color: var(--teal-dark); background: #dff1f1; border-color: #79c8c8; }

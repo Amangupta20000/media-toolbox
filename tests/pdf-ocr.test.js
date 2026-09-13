@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import test from "node:test";
 import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
 import { PDFDocument } from "pdf-lib";
-import { applyPdfOcrEdits, recognizePdfText, sha256Hex } from "../lib/pdf-ocr.js";
+import { applyPdfOcrEdits, recognizePdfText, sha256Hex, wordsFromBlocks } from "../lib/pdf-ocr.js";
 import { applyRasterTextEdits } from "../lib/pdf-ocr-raster.js";
 
 async function rasterPdf(pageCount = 1) {
@@ -80,6 +80,18 @@ test("OCR can scan only the pages identified as visually text-bearing", async ()
   assert.equal(detected.scannedPageCount, 1);
   assert.deepEqual(detected.pages.map((page) => page.pageIndex), [1]);
   assert.ok(detected.totalRuns >= 2);
+});
+
+test("OCR treats symbol-only checkmarks and decorative marks as page graphics", () => {
+  const blocks = [{ paragraphs: [{ lines: [{ words: [
+    { text: "ow", confidence: 0, bbox: { x0: 10, y0: 10, x1: 44, y1: 40 } },
+    { text: "(®", confidence: 49, bbox: { x0: 46, y0: 10, x1: 80, y1: 40 } },
+    { text: "Thanks", confidence: 92, bbox: { x0: 67, y0: 12, x1: 147, y1: 35 } },
+    { text: "for", confidence: 96, bbox: { x0: 154, y0: 16, x1: 185, y1: 35 } },
+  ] }] }] }];
+  const words = wordsFromBlocks(blocks);
+  assert.deepEqual(words.map((word) => word.text), ["Thanks for"]);
+  assert.equal(words[0].bbox.x0, 67, "the editable region should begin after the graphic icon");
 });
 
 test("OCR export rejects stale source hashes and tampered text identities", async () => {

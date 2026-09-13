@@ -91,9 +91,12 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /moveOnly/);
   assert.match(shell, /moveOnly: true/);
   assert.match(shell, /pdf-text-selection-controls/);
+  assert.match(shell, /pdf-text-selection-frame/);
   assert.match(shell, /pdf-text-rotation-handle/);
   assert.match(shell, /pdf-text-resize-handle/);
   assert.match(shell, /resizeHandleDirections/);
+  assert.match(shell, /rasterPreviewTransforms/);
+  assert.match(shell, /selectionHandlePoint/);
   assert.match(shell, /startDistance/);
   assert.match(shell, /onPreviewChange=\{previewTransform\}/);
   assert.match(shell, /setPointerCapture/);
