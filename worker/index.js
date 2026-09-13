@@ -9,7 +9,7 @@ import { appendJobLog, claimNextJob, deleteJob, getJob, listExpiredJobs, updateJ
 import { commandExists, firstAvailable, runCommand } from "../lib/command.js";
 import { applyPdfTextEdits } from "../lib/pdf-text-editor.js";
 import { applyPdfOcrEdits } from "../lib/pdf-ocr.js";
-import { pdfCompressionSettings, rasterizeImageOnlyPdf, recompressPdfImages } from "../lib/pdf-compressor.js";
+import { pdfCompressionSettings, rasterizeImageHeavyPdf, recompressPdfImages } from "../lib/pdf-compressor.js";
 import { rotatedImageDrawPlacement } from "../lib/pdf-image-placement.js";
 import { layoutPdfTextRuns, textBoxColor, textBoxDrawPlacement, textBoxFontDefinition, textBoxFontName, textBoxTextRuns } from "../lib/pdf-text-box.js";
 import { safePdfOutputFilename } from "../lib/job-intake.js";
@@ -68,6 +68,35 @@ function commandFailure(result) {
     .slice(-3)
     .join(" ");
   return detail.slice(0, 500) || `process exited with code ${result.code}`;
+}
+
+async function refinePdfToTarget(baseBytes, targetBytes, pageCount, compressionOptions, reportProgress) {
+  const baseQuality = Math.max(25, Math.min(90, Number(compressionOptions.customQuality) || 72));
+  let low = baseBytes.length > targetBytes ? 25 : baseQuality;
+  let high = baseBytes.length > targetBytes ? baseQuality : 90;
+  let best = { bytes: baseBytes, quality: baseQuality, distance: Math.abs(baseBytes.length - targetBytes) };
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (best.distance <= 1_000_000) break;
+    const quality = Math.round((low + high) / 2);
+    if (quality === low || quality === high) break;
+    reportProgress?.(attempt + 1, 6, quality);
+    try {
+      const document = await PDFDocument.load(baseBytes, { updateMetadata: false, throwOnInvalidObject: false });
+      const result = await recompressPdfImages(document, "custom", { compressionOptions: { ...compressionOptions, customQuality: quality } });
+      const candidate = result.changed
+        ? await document.save({ useObjectStreams: true, addDefaultPage: false, objectsPerTick: 50 })
+        : baseBytes;
+      const validation = await PDFDocument.load(candidate, { updateMetadata: false, throwOnInvalidObject: false });
+      if (validation.getPageCount() !== pageCount) throw new Error("The target-size PDF page count changed.");
+      const distance = Math.abs(candidate.length - targetBytes);
+      if (distance < best.distance) best = { bytes: candidate, quality, distance };
+      if (candidate.length > targetBytes) high = quality;
+      else low = quality;
+    } catch {
+      break;
+    }
+  }
+  return best;
 }
 
 async function usableGhostscript() {
@@ -721,12 +750,18 @@ async function processPdfCompressor(job) {
   }
 
   const profile = options.compressionProfile || "balanced";
-  const profileSettings = pdfCompressionSettings(profile);
+  const compressionOptions = {
+    customQuality: options.customQuality,
+    removeColor: options.removeColor === true || options.removeColor === "1" || options.removeColor === "true",
+  };
+  const profileSettings = pdfCompressionSettings(profile, compressionOptions);
   if (!profileSettings) throw new Error("Choose a supported compression level.");
   const settings = {
     ...profileSettings,
-    pdfSettings: { balanced: "ebook", small: "screen", quality: "prepress" }[profile],
+    pdfSettings: { balanced: "ebook", small: "screen", quality: "prepress", custom: null }[profile],
   };
+  const customTargetMb = profile === "custom" && options.customTargetMb !== "" ? Number(options.customTargetMb) : 0;
+  const targetBytes = Number.isFinite(customTargetMb) && customTargetMb >= 1 ? Math.round(customTargetMb * 1000 * 1000) : 0;
   const outputName = safePdfOutputFilename(options.outputFilename, `${stem(job.source_name)}_compressed.pdf`);
   const jobDir = path.dirname(job.source_path);
   const outputPath = path.join(jobDir, outputName);
@@ -734,11 +769,16 @@ async function processPdfCompressor(job) {
   const warnings = [];
   let bestBytes = null;
   let method = "";
+  let targetCandidate = null;
+  let visualCandidate = null;
 
   const chooseCandidate = async (candidate, candidateMethod) => {
     try {
       const validation = await PDFDocument.load(candidate, { updateMetadata: false, throwOnInvalidObject: false });
       if (validation.getPageCount() !== inputDocument.getPageCount()) throw new Error("The compressed PDF page count changed.");
+      if (targetBytes && (!targetCandidate || Math.abs(candidate.length - targetBytes) < targetCandidate.distance)) {
+        targetCandidate = { bytes: candidate, method: candidateMethod, distance: Math.abs(candidate.length - targetBytes) };
+      }
       if (!bestBytes || candidate.length < bestBytes.length) {
         bestBytes = candidate;
         method = candidateMethod;
@@ -752,7 +792,7 @@ async function processPdfCompressor(job) {
 
   update(job.id, 10, "Inspecting PDF", `Opening ${inputDocument.getPageCount()} page${inputDocument.getPageCount() === 1 ? "" : "s"}.`);
   await fsp.rm(workPath, { force: true });
-  const ghostscript = await usableGhostscript();
+  const ghostscript = settings.pdfSettings ? await usableGhostscript() : null;
   if (ghostscript) {
     update(job.id, 28, "Compressing PDF", `${settings.label} with Ghostscript.`);
     const compressed = await runCommand(ghostscript, [
@@ -785,6 +825,7 @@ async function processPdfCompressor(job) {
     const imageDocument = await PDFDocument.load(input, { updateMetadata: false, throwOnInvalidObject: false });
     let lastImageProgress = 0;
     const imageResult = await recompressPdfImages(imageDocument, profile, {
+      compressionOptions,
       onProgress: (done, total) => {
         if (!total) return;
         const progress = Math.min(78, 56 + Math.round((done / total) * 22));
@@ -807,15 +848,16 @@ async function processPdfCompressor(job) {
     warnings.push("Some embedded images could not be re-encoded; the best validated PDF pass was used instead.");
   }
 
-  // PDFs made from scans are often image-only but use a codec (JPX, CCITT,
-  // JBIG2, or inline image data) that pdf-lib cannot safely decode. When the
-  // lossless/resource passes barely help, use a visual fallback for those
-  // pages. It is intentionally gated on the absence of searchable text so a
-  // normal text/vector PDF never gets flattened and loses its text layer.
+  // PDFs made from scans are often image-only or image-heavy but use a codec
+  // (JPX, CCITT, JBIG2, or inline image data) that pdf-lib cannot safely
+  // decode. When the lossless/resource passes barely help, use a visual
+  // fallback for image-heavy pages. Text/vector-only pages remain untouched;
+  // rasterized searchable pages receive an invisible text overlay.
   if (bestBytes && bestBytes.length > input.length * 0.88) {
-    update(job.id, 80, "Applying visual compression", "The PDF has not reduced enough; checking for image-only pages.");
+    update(job.id, 80, "Applying visual compression", "The PDF has not reduced enough; checking for image-heavy pages.");
     try {
-      const rasterResult = await rasterizeImageOnlyPdf(input, profile, {
+      const rasterResult = await rasterizeImageHeavyPdf(input, profile, {
+        compressionOptions,
         onProgress: (done, total) => {
           if (!total) return;
           const progress = Math.min(88, 80 + Math.round((done / total) * 8));
@@ -823,16 +865,64 @@ async function processPdfCompressor(job) {
         },
       });
       if (rasterResult.changed) {
-        await chooseCandidate(rasterResult.bytes, `Bundled visual page recompression (${rasterResult.pageCount} pages)`);
-        appendJobLog(job.id, `Rebuilt ${rasterResult.pageCount} image-only page${rasterResult.pageCount === 1 ? "" : "s"} at the selected quality to remove unsupported image encoding overhead.`, "info");
-        warnings.push("This PDF had no searchable text, so the aggressive image-only pass rebuilt its pages as optimized images. The visual layout is preserved, but text is not selectable in this result.");
-      } else if (rasterResult.imageOnly === false && rasterResult.pageCount) {
-        appendJobLog(job.id, "Visual page compression was skipped because searchable text was detected; text and vector content were preserved.", "info");
+        const visualMethod = `Bundled visual page recompression (${rasterResult.pageCount} pages)`;
+        visualCandidate = { bytes: rasterResult.bytes, method: visualMethod, quality: Number(compressionOptions.customQuality) || 72 };
+        await chooseCandidate(rasterResult.bytes, visualMethod);
+        const pageLabel = rasterResult.imageOnly ? "image-only" : "image-heavy";
+        appendJobLog(job.id, `Rebuilt ${rasterResult.rasterizedPages || rasterResult.pageCount} ${pageLabel} page${(rasterResult.rasterizedPages || rasterResult.pageCount) === 1 ? "" : "s"} at the selected quality${rasterResult.overlaidText ? "; retained a searchable text overlay" : ""}.`, "info");
+        warnings.push(rasterResult.imageOnly
+          ? "This PDF had no searchable text, so the aggressive image-only pass rebuilt its pages as optimized images. The visual layout is preserved, but text is not selectable in this result."
+          : `The aggressive image-heavy pass rebuilt ${rasterResult.rasterizedPages} page${rasterResult.rasterizedPages === 1 ? "" : "s"} as optimized images. Searchable text was retained as an invisible text layer; vector styling on those pages is visually approximated.`);
+      } else if (rasterResult.pageCount) {
+        appendJobLog(job.id, rasterResult.imageOnly === false && rasterResult.reason === "no image-heavy pages"
+          ? "Visual page compression was skipped because no image-heavy pages were detected; text and vector content were preserved."
+          : "Visual page compression was skipped because no eligible pages were found.", "info");
       } else if (rasterResult.reason) {
         appendJobLog(job.id, `Visual page compression was skipped: ${rasterResult.reason}`, "warning");
       }
     } catch (error) {
       appendJobLog(job.id, `Visual page compression was skipped: ${error instanceof Error ? error.message : "unknown error"}`, "warning");
+    }
+  }
+
+  if (targetBytes && targetBytes < input.length) {
+    let targetBase = visualCandidate
+      ? { ...visualCandidate, distance: Math.abs(visualCandidate.bytes.length - targetBytes) }
+      : targetCandidate || (bestBytes ? { bytes: bestBytes, method, distance: Math.abs(bestBytes.length - targetBytes) } : null);
+    if (targetBase && targetBytes > targetBase.bytes.length && visualCandidate) {
+      update(job.id, 87, "Tuning custom target", "The first visual pass is smaller than the requested target; trying a higher-quality pass.");
+      try {
+        const higherQuality = await rasterizeImageHeavyPdf(input, "custom", {
+          compressionOptions: { ...compressionOptions, customQuality: 90 },
+          onProgress: (done, total) => {
+            if (!total) return;
+            updateJob(job.id, { progress: Math.min(89, 87 + Math.round((done / total) * 2)), stage: "Tuning custom target", message: `Rebuilding target sample ${done} of ${total}.` });
+          },
+        });
+        if (higherQuality.changed) {
+          const higherMethod = `Custom target high-quality pass (${higherQuality.pageCount} pages)`;
+          await chooseCandidate(higherQuality.bytes, higherMethod);
+          const higherDistance = Math.abs(higherQuality.bytes.length - targetBytes);
+          if (higherDistance < targetBase.distance) targetBase = { bytes: higherQuality.bytes, method: higherMethod, distance: higherDistance, quality: 90 };
+        }
+      } catch (error) {
+        appendJobLog(job.id, `Higher-quality custom target pass was skipped: ${error instanceof Error ? error.message : "unknown error"}`, "warning");
+      }
+    }
+    if (targetBase) {
+      const refined = await refinePdfToTarget(targetBase.bytes, targetBytes, inputDocument.getPageCount(), { ...compressionOptions, customQuality: targetBase.quality || compressionOptions.customQuality }, (attempt, total, quality) => {
+        update(job.id, Math.min(89, 87 + Math.round((attempt / total) * 2)), "Tuning custom target", `Trying image quality ${quality} for the requested size.`);
+      });
+      if (refined && (!targetCandidate || refined.distance < targetCandidate.distance)) {
+        targetCandidate = { bytes: refined.bytes, method: `Custom target tuning (image quality ${refined.quality})`, distance: refined.distance };
+      }
+    }
+    if (targetCandidate) {
+      bestBytes = targetCandidate.bytes;
+      method = targetCandidate.method;
+      const targetDifference = Math.abs(targetCandidate.bytes.length - targetBytes);
+      appendJobLog(job.id, `Custom target ${customTargetMb} MB selected the nearest validated result at ${(targetCandidate.bytes.length / 1000 / 1000).toFixed(1)} MB.`, "info");
+      if (targetDifference > 1_000_000) warnings.push(`The requested ${customTargetMb} MB target could not be reached within 1 MB; the nearest validated result was ${(targetCandidate.bytes.length / 1000 / 1000).toFixed(1)} MB.`);
     }
   }
 

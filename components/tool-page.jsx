@@ -36,7 +36,186 @@ const pdfCompressionProfiles = [
   ["balanced", "Balanced", "Good size reduction for everyday sharing", "ebook"],
   ["small", "Smallest file", "More image compression for email and web", "screen"],
   ["quality", "Higher quality", "Preserve more image detail while optimizing", "prepress"],
+  ["custom", "Custom", "Choose image quality and color settings", "custom"],
 ];
+
+function compressionQualityLabel(value) {
+  const quality = Number(value) || 0;
+  if (quality < 40) return "Low";
+  if (quality < 60) return "Medium";
+  if (quality < 80) return "High";
+  return "Very high";
+}
+
+function estimatePdfCompression(source, profile, customQuality, removeColor, customTargetMb) {
+  if (!source?.size) return null;
+  const targetMb = Number(customTargetMb);
+  if (profile === "custom" && Number.isFinite(targetMb) && targetMb > 0) {
+    const originalBytes = Number(source.size);
+    const estimatedBytes = Math.max(1000, Math.round(targetMb * 1000 * 1000));
+    return { originalBytes, estimatedBytes, reductionPercent: Math.max(0, Math.round((1 - estimatedBytes / originalBytes) * 100)), target: true };
+  }
+  // This is only the instant fallback while the sampled estimate is being
+  // calculated. The ratios mirror the bundled worker's current visual pass,
+  // rather than promising the much smaller output of a different service.
+  let estimatedRatio = { balanced: 0.69, small: 0.46, quality: 0.80 }[profile] || 0.69;
+  if (profile === "custom") {
+    const quality = Math.max(25, Math.min(90, Number(customQuality) || 72));
+    estimatedRatio = 0.28 + ((quality - 25) / 65) * 0.50;
+  }
+  if (profile === "custom" && removeColor) estimatedRatio *= 0.86;
+  const originalBytes = Number(source.size);
+  const estimatedBytes = Math.max(1000, Math.round(originalBytes * estimatedRatio));
+  return { originalBytes, estimatedBytes, reductionPercent: Math.max(0, Math.round((1 - estimatedBytes / originalBytes) * 100)) };
+}
+
+let pdfEstimateLibraryPromise;
+
+async function loadPdfEstimateLibrary() {
+  if (!pdfEstimateLibraryPromise) {
+    pdfEstimateLibraryPromise = import("pdfjs-dist/legacy/build/pdf.mjs").then((library) => {
+      if (library.GlobalWorkerOptions) library.GlobalWorkerOptions.workerSrc = "/api/pdf/worker";
+      return library;
+    });
+  }
+  return pdfEstimateLibraryPromise;
+}
+
+function estimateCompressionSettings(profile, customQuality) {
+  if (profile === "small") return { quality: 58, maxImageDimension: 1600, rasterDpi: 72 };
+  if (profile === "quality") return { quality: 84, maxImageDimension: 3000, rasterDpi: 120 };
+  if (profile === "custom") {
+    const quality = Math.max(25, Math.min(90, Number(customQuality) || 72));
+    const qualityProgress = (quality - 25) / 65;
+    return { quality, maxImageDimension: Math.round(1200 + qualityProgress * 1800), rasterDpi: Math.round(72 + qualityProgress * 48) };
+  }
+  return { quality: 72, maxImageDimension: 2200, rasterDpi: 96 };
+}
+
+function pdfImageInfo(operatorList, OPS) {
+  const imageOperations = new Set([
+    "paintImageXObject",
+    "paintInlineImageXObject",
+    "paintImageXObjectRepeat",
+    "paintInlineImageXObjectGroup",
+    "paintImageMaskXObject",
+    "paintImageMaskXObjectGroup",
+    "paintImageMaskXObjectRepeat",
+  ].map((name) => OPS?.[name]).filter((value) => Number.isFinite(value)));
+  let count = 0;
+  let totalPixels = 0;
+  let largestPixels = 0;
+  for (const [index, operation] of operatorList.fnArray.entries()) {
+    if (!imageOperations.has(operation)) continue;
+    const args = operatorList.argsArray[index] || [];
+    const imageData = Array.isArray(args[0]) ? args[0][0] : args[0];
+    const width = Number(args[1] || imageData?.width || 0);
+    const height = Number(args[2] || imageData?.height || 0);
+    const pixels = width > 0 && height > 0 ? width * height : 0;
+    count += 1;
+    totalPixels += pixels;
+    largestPixels = Math.max(largestPixels, pixels);
+  }
+  return { count, totalPixels, largestPixels };
+}
+
+function isImageHeavyPdfPage(info) {
+  return info.count > 0 && (info.largestPixels >= 500_000 || info.totalPixels >= 1_000_000);
+}
+
+function jpegDataUrlBytes(dataUrl) {
+  const base64 = String(dataUrl || "").split(",", 2)[1] || "";
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor(base64.length * 0.75) - padding);
+}
+
+async function samplePdfPageJpegBytes(page, settings, removeColor) {
+  const scale = settings.rasterDpi / 72;
+  const viewport = page.getViewport({ scale, rotation: page.rotate || 0 });
+  const rendered = document.createElement("canvas");
+  rendered.width = Math.max(1, Math.ceil(viewport.width));
+  rendered.height = Math.max(1, Math.ceil(viewport.height));
+  const context = rendered.getContext("2d", { alpha: false });
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, rendered.width, rendered.height);
+  await page.render({ canvasContext: context, viewport }).promise;
+  const maxDimension = Math.max(rendered.width, rendered.height);
+  const target = maxDimension <= settings.maxImageDimension ? rendered : document.createElement("canvas");
+  if (target !== rendered) {
+    const ratio = settings.maxImageDimension / maxDimension;
+    target.width = Math.max(1, Math.round(rendered.width * ratio));
+    target.height = Math.max(1, Math.round(rendered.height * ratio));
+    const targetContext = target.getContext("2d", { alpha: false });
+    targetContext.fillStyle = "#ffffff";
+    targetContext.fillRect(0, 0, target.width, target.height);
+    if (removeColor) targetContext.filter = "grayscale(1)";
+    targetContext.drawImage(rendered, 0, 0, target.width, target.height);
+  } else if (removeColor) {
+    const grayscale = document.createElement("canvas");
+    grayscale.width = rendered.width;
+    grayscale.height = rendered.height;
+    const grayscaleContext = grayscale.getContext("2d", { alpha: false });
+    grayscaleContext.filter = "grayscale(1)";
+    grayscaleContext.drawImage(rendered, 0, 0);
+    rendered.width = grayscale.width;
+    rendered.height = grayscale.height;
+    rendered.getContext("2d", { alpha: false }).drawImage(grayscale, 0, 0);
+  }
+  const bytes = jpegDataUrlBytes(target.toDataURL("image/jpeg", Math.max(0.48, (settings.quality - 4) / 100)));
+  rendered.width = 0;
+  if (target !== rendered) target.width = 0;
+  return bytes;
+}
+
+async function calculatePdfCompressionEstimate(source, profile, customQuality, removeColor, customTargetMb) {
+  const fallback = estimatePdfCompression(source, profile, customQuality, removeColor, customTargetMb);
+  if (fallback?.target) return fallback;
+  const library = await loadPdfEstimateLibrary();
+  const bytes = new Uint8Array(await source.arrayBuffer());
+  const sourceByteLength = bytes.byteLength;
+  const pdf = await library.getDocument({ data: bytes }).promise;
+  try {
+    const heavyPages = [];
+    const pageCount = pdf.numPages;
+    for (let index = 1; index <= pageCount; index += 1) {
+      const page = await pdf.getPage(index);
+      const info = pdfImageInfo(await page.getOperatorList(), library.OPS);
+      if (isImageHeavyPdfPage(info)) heavyPages.push(index);
+      page.cleanup?.();
+    }
+    if (!heavyPages.length) return { ...fallback, pageCount, heavyPages: 0, sampledPages: 0, sampled: false };
+    const settings = estimateCompressionSettings(profile, customQuality);
+    const sampleIndexes = [...new Set(Array.from({ length: 8 }, (_, index) => Math.round((index * (heavyPages.length - 1)) / 7)))]
+      .map((index) => heavyPages[index])
+      .filter(Boolean);
+    const sampledBytes = [];
+    for (const pageNumber of sampleIndexes) {
+      const page = await pdf.getPage(pageNumber);
+      sampledBytes.push(await samplePdfPageJpegBytes(page, settings, profile === "custom" && removeColor));
+      page.cleanup?.();
+    }
+    const averagePageBytes = sampledBytes.reduce((total, value) => total + value, 0) / Math.max(1, sampledBytes.length);
+    const heavyFraction = heavyPages.length / pageCount;
+    const rasterizedBytes = averagePageBytes * heavyPages.length;
+    const preservedBytes = sourceByteLength * (1 - heavyFraction) * 0.78;
+    const pdfOverheadBytes = pageCount * 2800;
+    const sampledEstimate = Math.max(1000, Math.round(rasterizedBytes + preservedBytes + pdfOverheadBytes));
+    const structuralRatio = { balanced: 0.94, small: 0.90, quality: 0.97, custom: 0.92 }[profile] || 0.94;
+    const estimatedBytes = Math.min(sampledEstimate, Math.round(sourceByteLength * structuralRatio));
+    return {
+      originalBytes: sourceByteLength,
+      estimatedBytes,
+      reductionPercent: Math.max(0, Math.round((1 - estimatedBytes / sourceByteLength) * 100)),
+      pageCount,
+      heavyPages: heavyPages.length,
+      sampledPages: sampledBytes.length,
+      sampled: true,
+    };
+  } finally {
+    await pdf.cleanup?.();
+    await pdf.destroy?.();
+  }
+}
 
 export function ToolPage({ tool }) {
   const isImage = tool === "image-converter";
@@ -50,6 +229,10 @@ export function ToolPage({ tool }) {
   const [reference, setReference] = useState(null);
   const [method, setMethod] = useState("auto");
   const [compressionProfile, setCompressionProfile] = useState("balanced");
+  const [customQuality, setCustomQuality] = useState(72);
+  const [removeColor, setRemoveColor] = useState(false);
+  const [customTargetMb, setCustomTargetMb] = useState("");
+  const [compressionEstimate, setCompressionEstimate] = useState({ status: "idle", data: null });
   const [uploadProgress, setUploadProgress] = useState(0);
   const [jobId, setJobId] = useState(null);
   const [jobMode, setJobMode] = useState("server");
@@ -94,6 +277,22 @@ export function ToolPage({ tool }) {
     setPreviewUrl(objectUrl);
     return () => URL.revokeObjectURL(objectUrl);
   }, [isImage, imageFiles]);
+
+  useEffect(() => {
+    if (!isPdfCompressor || !source) {
+      setCompressionEstimate({ status: "idle", data: null });
+      return undefined;
+    }
+    let active = true;
+    const fallback = estimatePdfCompression(source, compressionProfile, customQuality, removeColor, customTargetMb);
+    setCompressionEstimate({ status: "loading", data: fallback });
+    calculatePdfCompressionEstimate(source, compressionProfile, customQuality, removeColor, customTargetMb).then((data) => {
+      if (active) setCompressionEstimate({ status: "ready", data });
+    }).catch(() => {
+      if (active) setCompressionEstimate({ status: "fallback", data: fallback });
+    });
+    return () => { active = false; };
+  }, [isPdfCompressor, source, compressionProfile, customQuality, removeColor, customTargetMb]);
 
   useEffect(() => {
     if (!jobId) return undefined;
@@ -211,7 +410,7 @@ export function ToolPage({ tool }) {
   const reset = () => {
     if (jobId && job && (job.status === "queued" || job.status === "processing")) deleteProcessingJob(jobMode, jobId).catch(() => undefined);
     if (batchJobs) batchJobs.filter((entry) => entry.status === "queued" || entry.status === "processing").forEach((entry) => deleteProcessingJob(jobMode, entry.id).catch(() => undefined));
-    setSource(null); setImageFiles([]); setImageSettings([]); setActiveImageIndex(0); setSameConversion(false); setSameSize(false); setReference(null); setMethod("auto"); setCompressionProfile("balanced"); setUploadProgress(0); setJobId(null); setJob(null); setBatchJobs(null); setError(""); setPreviewUrl(""); setPreviewError(false); setKeepResult(false);
+    setSource(null); setImageFiles([]); setImageSettings([]); setActiveImageIndex(0); setSameConversion(false); setSameSize(false); setReference(null); setMethod("auto"); setCompressionProfile("balanced"); setCustomQuality(72); setRemoveColor(false); setCustomTargetMb(""); setUploadProgress(0); setJobId(null); setJob(null); setBatchJobs(null); setError(""); setPreviewUrl(""); setPreviewError(false); setKeepResult(false);
   };
 
   useEffect(() => {
@@ -252,6 +451,8 @@ export function ToolPage({ tool }) {
     if (isImage && imageSettings.some((setting) => setting.maxSizeKb && (!/^\d+$/.test(setting.maxSizeKb) || Number(setting.maxSizeKb) <= 0))) { setError("Enter a positive whole number of KB for every image with a size target."); return; }
     if (isImage && imageSettings.some((setting) => setting.format === "jpeg" && !setting.jpegConfirmed)) { setError("Confirm the JPEG transparency warning for every JPG output."); return; }
     if (isPdfCompressor && !pdfCompressionProfiles.some(([value]) => value === compressionProfile)) { setError("Choose a supported compression level."); return; }
+    if (isPdfCompressor && compressionProfile === "custom" && (!Number.isFinite(Number(customQuality)) || Number(customQuality) < 25 || Number(customQuality) > 90)) { setError("Choose a custom image quality between 25 and 90."); return; }
+    if (isPdfCompressor && compressionProfile === "custom" && customTargetMb !== "" && (!Number.isFinite(Number(customTargetMb)) || Number(customTargetMb) < 1 || Number(customTargetMb) > 200)) { setError("Choose a custom target size between 1 and 200 MB."); return; }
     const form = new FormData();
     form.append("tool", tool);
     if (isImage) imageFiles.forEach((file) => form.append("source", file, file.name));
@@ -261,6 +462,9 @@ export function ToolPage({ tool }) {
       form.append("method", method);
     } else if (isPdfCompressor) {
       form.append("compressionProfile", compressionProfile);
+      form.append("customQuality", String(customQuality));
+      form.append("removeColor", removeColor ? "1" : "0");
+      form.append("customTargetMb", String(customTargetMb));
     } else if (reference) form.append("reference", reference, reference.name);
     if (processingMode === "local") form.append("retention", keepResult ? "keep" : "delete");
     try {
@@ -289,7 +493,7 @@ export function ToolPage({ tool }) {
     <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${capabilities?.status === "ready" ? "ready" : ""}`} /><span>{capabilities?.status === "ready" ? `${processingMode === "local" ? "Local agent" : "Server"} worker online` : "Connecting to processing worker"}</span></div>{isImage ? <span>{heicReady ? (capabilities?.image?.heic ? "HEIC enabled" : "HEIC enabled via local fallback") : capabilities?.status === "ready" ? "HEIC unavailable" : "HEIC capability checking"}</span> : isPdfCompressor ? <span>{capabilities?.status !== "ready" ? "PDF compression capability checking" : pdfCompressorReady ? "PDF compression ready" : "PDF structural optimization fallback"}</span> : <span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery + fallback" : "Reference recovery · upload a reference") : capabilities?.status === "ready" ? "FFmpeg recovery enabled · reference recovery unavailable" : "Video capabilities checking"}</span>}</div>
     {job ? <JobStatusCard job={job} isImage={isImage} isPdfCompressor={isPdfCompressor} mode={jobMode} keepResult={keepResult} onReset={reset} /> : batchJobs ? <BatchJobStatusCard jobs={batchJobs} mode={jobMode} onReset={reset} /> : <div className="workspace-grid">
       <section className="tool-card primary-card"><div className="card-heading"><div><span className="card-index">01</span><h2>{isImage ? "Add up to 5 images" : isPdfCompressor ? "Add a PDF" : "Add a damaged video"}</h2></div><span className="required-label">Required</span></div><FileDropzone files={isImage ? imageFiles : undefined} file={isImage ? undefined : source} onFiles={isImage ? handleImageFiles : undefined} onFile={isImage ? undefined : (file) => { setSource(file); setError(""); }} onRemoveFile={isImage ? removeImageFile : undefined} onClear={() => { setSource(null); setImageFiles([]); setImageSettings([]); setActiveImageIndex(0); setSameConversion(false); setSameSize(false); setPreviewUrl(""); setPreviewError(false); }} multiple={isImage} variant={isImage ? "image" : isPdfCompressor ? "pdf" : "video"} accept={isImage ? imageAccept : isPdfCompressor ? ".pdf,application/pdf" : "video/*,.mkv,.webm,.avi,.3gp"} label={isImage ? "Drop up to 5 images here" : isPdfCompressor ? "Drop a PDF here" : "Drop a video here"} hint={isImage ? "or click to browse · paste an image directly" : "or click to browse from your device"} required disabled={Boolean(uploadProgress)} />{isImage && imageFiles[0] && previewUrl && <div className="image-preview-card"><div className="preview-heading"><span>First image preview</span><small>Local only · not uploaded</small></div><div className="image-preview-frame">{previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${imageFiles[0].name}-preview`}><AlertTriangle size={18} /><span>This browser cannot preview this image format, but the file can still be processed.</span></DismissibleMessage> : <img src={previewUrl} alt={`Preview of ${imageFiles[0].name}`} onError={() => setPreviewError(true)} />}</div></div>}<div className="limit-row"><span>Maximum file size</span><strong>{isImage ? "25 MB each · 5 per request" : isPdfCompressor ? "200 MB" : "2 GB"}</strong></div>{processingMode === "local" && <label className="keep-result-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label>}</section>
-    {isImage ? <ImageSettingsCard files={imageFiles} settings={imageSettings} activeIndex={activeImageIndex} sameConversion={sameConversion} sameSize={sameSize} method={method} capabilities={capabilities} imageMagickReady={imageMagickReady} sipsReady={sipsReady} onChange={updateImageSetting} onActiveIndexChange={setActiveImageIndex} onSameConversionChange={toggleSameConversion} onSameSizeChange={toggleSameSize} onMethodChange={setMethod} /> : isPdfCompressor ? <PdfCompressionSettingsCard profile={compressionProfile} onChange={setCompressionProfile} capabilities={capabilities} /> : <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Reference video</h2></div><span className={serverReferenceReady ? "optional-label" : "required-label"}>{serverReferenceReady ? "Optional server fallback" : "Upload for damaged MP4"}</span></div><p className="card-description">A healthy recording from the same device or app can rebuild missing MP4 metadata when it was recorded with the same settings.</p><FileDropzone file={reference} onFile={setReference} onClear={() => setReference(null)} variant="video" accept="video/*,.mkv,.webm,.avi,.3gp" label="Drop a reference video" hint={serverReferenceReady ? "or continue without one" : "required when MP4 metadata is missing"} disabled={Boolean(uploadProgress)} /><div className="info-note"><Info size={16} /><span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery is available. If you do not upload one, the configured server reference will be tried." : "No server-side reference is configured. Upload a healthy recording from the same device or app; readable containers can still be repaired without one.") : "FFmpeg can repair readable containers. Missing MP4 metadata requires Untrunc and a matching healthy reference."}</span></div></section>}
+    {isImage ? <ImageSettingsCard files={imageFiles} settings={imageSettings} activeIndex={activeImageIndex} sameConversion={sameConversion} sameSize={sameSize} method={method} capabilities={capabilities} imageMagickReady={imageMagickReady} sipsReady={sipsReady} onChange={updateImageSetting} onActiveIndexChange={setActiveImageIndex} onSameConversionChange={toggleSameConversion} onSameSizeChange={toggleSameSize} onMethodChange={setMethod} /> : isPdfCompressor ? <PdfCompressionSettingsCard source={source} profile={compressionProfile} customQuality={customQuality} removeColor={removeColor} customTargetMb={customTargetMb} estimate={compressionEstimate} onChange={setCompressionProfile} onCustomQualityChange={setCustomQuality} onRemoveColorChange={setRemoveColor} onCustomTargetChange={setCustomTargetMb} capabilities={capabilities} /> : <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Reference video</h2></div><span className={serverReferenceReady ? "optional-label" : "required-label"}>{serverReferenceReady ? "Optional server fallback" : "Upload for damaged MP4"}</span></div><p className="card-description">A healthy recording from the same device or app can rebuild missing MP4 metadata when it was recorded with the same settings.</p><FileDropzone file={reference} onFile={setReference} onClear={() => setReference(null)} variant="video" accept="video/*,.mkv,.webm,.avi,.3gp" label="Drop a reference video" hint={serverReferenceReady ? "or continue without one" : "required when MP4 metadata is missing"} disabled={Boolean(uploadProgress)} /><div className="info-note"><Info size={16} /><span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery is available. If you do not upload one, the configured server reference will be tried." : "No server-side reference is configured. Upload a healthy recording from the same device or app; readable containers can still be repaired without one.") : "FFmpeg can repair readable containers. Missing MP4 metadata requires Untrunc and a matching healthy reference."}</span></div></section>}
       <section className="tool-card action-card"><div className="action-copy"><div className="action-icon"><Zap size={19} /></div><div><h2>Ready when you are</h2><p>{isImage ? "Your output will be created as a new file." : isPdfCompressor ? "The original PDF stays untouched; a smaller copy is created." : "The worker will try the safest recovery method first."}</p></div></div><button className="primary-button" onClick={submit} disabled={!canSubmit}>{uploadProgress ? <><LoaderCircle className="spin" size={18} /> Uploading {uploadProgress}%</> : <><Sparkles size={18} /> {isImage ? "Convert image" : isPdfCompressor ? "Compress PDF" : "Repair video"}</>}</button></section>
     </div>}
     {!job && !isImage && !isPdfCompressor && <VideoRecoverySummary hasServerReference={serverReferenceReady} hasUntrunc={capabilities?.video?.untrunc} />}
@@ -299,15 +503,45 @@ export function ToolPage({ tool }) {
   </AppShell>;
 }
 
-function PdfCompressionSettingsCard({ profile, onChange, capabilities }) {
+function PdfCompressionSettingsCard({ source, profile, customQuality, removeColor, customTargetMb, estimate, onChange, onCustomQualityChange, onRemoveColorChange, onCustomTargetChange, capabilities }) {
   const compressionReady = capabilities?.pdf?.compressor !== false;
   const compressionEngine = capabilities?.pdf?.compressorEngine || "the bundled PDF optimizer";
   return <section className="tool-card settings-card pdf-compression-settings-card">
     <div className="card-heading"><div><span className="card-index">02</span><h2>Choose compression</h2></div><span className="optional-label">PDF quality</span></div>
-    <p className="card-description">Choose the balance between file size and image detail. Text, page order, and the original file are kept safe.</p>
+    <p className="card-description">Choose the balance between file size and image detail. The original stays unchanged; image-heavy pages may be rebuilt as optimized images when direct compression cannot reduce them.</p>
     <div className="format-grid" aria-label="PDF compression profiles">{pdfCompressionProfiles.map(([value, label, detail]) => <button type="button" key={value} className={`format-option ${profile === value ? "selected" : ""}`} onClick={() => onChange(value)}><span className="format-radio" /><strong>{label}</strong><small>{detail}</small></button>)}</div>
-    <div className="info-note"><Info size={16} /><span>{compressionReady ? `The worker will use ${String(compressionEngine).toLowerCase()} and keep the original if the selected pass would make the file larger.` : "The worker can still create a safe structural PDF rewrite, but stronger embedded-image compression is unavailable."}</span></div>
+    {profile === "custom" && <div className="pdf-custom-controls">
+      <label className="field-label" htmlFor="pdf-custom-target"><span>Target file size</span><strong>Optional</strong></label>
+      <div className="input-with-suffix"><input id="pdf-custom-target" type="number" min="1" max="200" step="0.1" inputMode="decimal" value={customTargetMb} onChange={(event) => onCustomTargetChange(event.target.value.replace(/[^0-9.]/g, ""))} placeholder="e.g. 25" aria-label="Custom target PDF size in megabytes" /><span>MB target</span></div>
+      <label className="field-label" htmlFor="pdf-custom-quality"><span>Image quality</span><strong>{customQuality} · {compressionQualityLabel(customQuality)}</strong></label>
+      <input id="pdf-custom-quality" className="pdf-quality-range" type="range" min="25" max="90" step="1" value={customQuality} onChange={(event) => onCustomQualityChange(Number(event.target.value))} aria-label="Custom image quality" />
+      <label className="pdf-custom-toggle"><span><strong>Remove color from images</strong><small>Convert rasterized images to grayscale for a smaller result.</small></span><input type="checkbox" checked={removeColor} onChange={(event) => onRemoveColorChange(event.target.checked)} /></label>
+    </div>}
+    <PdfCompressionEstimate source={source} profile={profile} customQuality={customQuality} removeColor={removeColor} customTargetMb={customTargetMb} estimate={estimate} />
+    <div className="info-note"><Info size={16} /><span>{compressionReady ? `The worker will use ${String(compressionEngine).toLowerCase()}, preserve searchable text where possible, and keep the original if the selected pass would make the file larger.` : "The worker can still create a safe structural PDF rewrite, but stronger embedded-image compression is unavailable."}</span></div>
   </section>;
+}
+
+function PdfCompressionEstimate({ source, profile, customQuality, removeColor, customTargetMb, estimate: estimateState }) {
+  const fallback = estimatePdfCompression(source, profile, customQuality, removeColor, customTargetMb);
+  const estimate = estimateState?.data || fallback;
+  if (!estimate) return <div className="pdf-compression-estimate empty"><strong>Estimated new file size</strong><span>Add a PDF above to see an estimate.</span></div>;
+  const fillPercent = Math.max(5, Math.min(100, Math.round((estimate.estimatedBytes / estimate.originalBytes) * 100)));
+  const statusText = estimate.target
+    ? "Custom target; the worker will iterate validated compression passes."
+    : estimateState?.status === "loading"
+    ? "Analyzing page samples for a closer estimate..."
+    : estimateState?.status === "fallback"
+      ? "Quick estimate; detailed page sampling was unavailable."
+      : estimate.sampled
+        ? `Sampled ${estimate.sampledPages} page${estimate.sampledPages === 1 ? "" : "s"} from ${estimate.pageCount} pages.`
+        : "Based on the selected compression profile.";
+  return <div className="pdf-compression-estimate" aria-live="polite">
+    <strong>Estimated new file size</strong>
+    <div className="pdf-compression-estimate-value"><strong>~{formatBytes(estimate.estimatedBytes)}</strong><del>{formatBytes(estimate.originalBytes)}</del><span>(-{estimate.reductionPercent}%)</span></div>
+    <div className="pdf-compression-estimate-bar" aria-hidden="true"><span style={{ width: `${fillPercent}%` }} /></div>
+    <small>{statusText} Actual size depends on the content.</small>
+  </div>;
 }
 
 function ImageSettingsCard({ files, settings, activeIndex, sameConversion, sameSize, method, capabilities, imageMagickReady, sipsReady, onChange, onActiveIndexChange, onSameConversionChange, onSameSizeChange, onMethodChange }) {

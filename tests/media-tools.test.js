@@ -10,7 +10,7 @@ import test, { after, before } from "node:test";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { commandExists, firstAvailable, runCommand } from "../lib/command.js";
-import { rasterizeImageOnlyPdf } from "../lib/pdf-compressor.js";
+import { pdfCompressionSettings, rasterizeImageHeavyPdf, rasterizeImageOnlyPdf } from "../lib/pdf-compressor.js";
 
 const projectDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-test-"));
@@ -475,6 +475,40 @@ test("PDF compressor re-encodes embedded page images when structural compression
   assert.equal(db.getJobForPublic(job.id).logs.some((entry) => entry.message.includes("embedded image")), true);
 });
 
+test("PDF compressor tunes a custom target to the nearest validated size", async () => {
+  const sharp = (await import("sharp")).default;
+  const sourcePath = path.join(testRoot, "custom-target-compress-source.pdf");
+  const sourceDocument = await PDFDocument.create();
+  for (let index = 0; index < 6; index += 1) {
+    const pixels = crypto.randomBytes(900 * 650 * 3);
+    const jpeg = await sharp(pixels, { raw: { width: 900, height: 650, channels: 3 } }).jpeg({ quality: 96 }).toBuffer();
+    const image = await sourceDocument.embedJpg(jpeg);
+    const page = sourceDocument.addPage([900, 650]);
+    page.drawImage(image, { x: 0, y: 0, width: 900, height: 650 });
+    page.drawText(`Custom target page ${index + 1}`, { x: 20, y: 20, size: 16 });
+  }
+  await fs.writeFile(sourcePath, await sourceDocument.save());
+  const inputBytes = (await fs.stat(sourcePath)).size;
+  const jobDir = path.join(testRoot, "pdf-custom-target-compressor-job");
+  await fs.mkdir(jobDir, { recursive: true });
+  const targetMb = 1.5;
+  const intakeResult = await createJobFromMultipart({
+    id: crypto.randomUUID(),
+    jobDir,
+    fields: { tool: "pdf-compressor", compressionProfile: "custom", customQuality: "72", customTargetMb: String(targetMb) },
+    files: [{ field: "source", name: "custom-target-compress-source.pdf", mime: "application/pdf", path: sourcePath, size: inputBytes }],
+  });
+  const job = db.getJob(intakeResult.ids[0]);
+  await worker.processJob(job);
+
+  const completed = db.getJob(job.id);
+  const result = JSON.parse(completed.result_json);
+  assert.equal(completed.status, "completed");
+  assert.ok(result.bytes < inputBytes);
+  assert.ok(Math.abs(result.bytes - targetMb * 1000 * 1000) <= 1_000_000, `expected a result within 1 MB of ${targetMb} MB, got ${result.bytes / 1000 / 1000} MB`);
+  assert.equal(db.getJobForPublic(job.id).logs.some((entry) => entry.message.includes("Custom target")), true);
+});
+
 test("PDF compressor reaches images nested inside form XObjects", async () => {
   const sharp = (await import("sharp")).default;
   const sourcePath = path.join(testRoot, "nested-form-compress-source.pdf");
@@ -521,6 +555,46 @@ test("image-only visual fallback renders valid pages without searchable text", a
   assert.equal(result.pageCount, 1);
   const output = await PDFDocument.load(result.bytes);
   assert.equal(output.getPageCount(), 1);
+});
+
+test("custom PDF compression settings map quality and grayscale controls", () => {
+  const low = pdfCompressionSettings("custom", { customQuality: 30, removeColor: true });
+  const high = pdfCompressionSettings("custom", { customQuality: 84, removeColor: false });
+  assert.equal(low.quality, 30);
+  assert.equal(low.removeColor, true);
+  assert.equal(high.quality, 84);
+  assert.equal(high.removeColor, false);
+  assert.ok(low.maxImageDimension < high.maxImageDimension);
+  assert.ok(low.rasterDpi < high.rasterDpi);
+});
+
+test("image-heavy visual fallback keeps searchable text on rasterized pages", async () => {
+  const sharp = (await import("sharp")).default;
+  const sourceDocument = await PDFDocument.create();
+  const pixels = crypto.randomBytes(1200 * 800 * 3);
+  const jpeg = await sharp(pixels, { raw: { width: 1200, height: 800, channels: 3 } }).jpeg({ quality: 96 }).toBuffer();
+  const image = await sourceDocument.embedJpg(jpeg);
+  const page = sourceDocument.addPage([1200, 800]);
+  page.drawImage(image, { x: 0, y: 0, width: 1200, height: 800 });
+  page.drawText("Searchable image-heavy page", { x: 24, y: 24, size: 18 });
+  const textPage = sourceDocument.addPage([420, 300]);
+  textPage.drawText("Preserved vector page", { x: 24, y: 220, size: 18 });
+
+  const result = await rasterizeImageHeavyPdf(await sourceDocument.save(), "small");
+  const output = await PDFDocument.load(result.bytes);
+  const pdf = await getDocument({ data: new Uint8Array(result.bytes), disableWorker: true }).promise;
+  const content = await (await pdf.getPage(1)).getTextContent();
+  assert.equal(result.changed, true);
+  assert.equal(result.imageOnly, false);
+  assert.equal(result.imageHeavy, true);
+  assert.equal(result.rasterizedPages, 1);
+  assert.equal(result.preservedPages, 1);
+  assert.ok(result.overlaidText > 0);
+  assert.equal(output.getPageCount(), 2);
+  assert.match(content.items.map((item) => item.str).join(" "), /Searchable image-heavy page/);
+  const preservedPdf = await getDocument({ data: new Uint8Array(result.bytes), disableWorker: true }).promise;
+  const preservedContent = await (await preservedPdf.getPage(2)).getTextContent();
+  assert.match(preservedContent.items.map((item) => item.str).join(" "), /Preserved vector page/);
 });
 
 test("PDF editor exports styled text boxes on blank pages", async () => {
