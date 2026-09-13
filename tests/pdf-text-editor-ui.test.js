@@ -83,6 +83,11 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /inspectPdfWithOcr/);
   assert.match(shell, /requiresOcr/);
   assert.match(shell, /Running OCR on \$\{ocrPageIndexes.length\}/);
+  assert.match(shell, /OCR on \$\{ocrPages\.map/);
+  assert.match(shell, /Mixed text mode/);
+  assert.match(shell, /Selected text · Page \{run\.pageIndex \+ 1\}/);
+  assert.match(shell, /previewRequestRef/);
+  assert.match(shell, /previewPagesByIndex = new Map\(pages\.map/);
   assert.match(shell, /hidden behind page artwork/);
   assert.match(shell, /OCR fallback/);
   assert.match(await read("components/processing-client.js"), /application\/x-ndjson/);

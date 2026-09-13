@@ -455,7 +455,7 @@ function VirtualizedPdfTextRail({ pages, onSelect }) {
 function TextEditPopover({ run, value, onChange, onSave, onCancel, onRestore }) {
   if (!run) return null;
   const overflow = value.length > run.text.length;
-  return <div className="pdf-text-edit-popover" role="dialog" aria-label={`Edit ${run.text}`}><div className="pdf-text-edit-heading"><div><span>Selected text</span><strong title={run.text}>{run.text}</strong></div><button className="icon-button" type="button" onClick={onCancel} aria-label="Close text editor" title="Close"><X size={17} /></button></div><input autoFocus value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onSave(); if (event.key === "Escape") onCancel(); }} aria-label="Replacement text" /><div className="pdf-text-edit-actions"><button className="primary-button" type="button" onClick={onSave}><Save size={15} /> Save text</button><button className="secondary-button" type="button" onClick={onRestore}><RotateCcw size={15} /> Restore original</button><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button></div>{overflow && <div className="pdf-text-overflow-warning"><AlertTriangle size={15} /><span>This replacement is longer. It will overflow if necessary; surrounding content will not reflow.</span></div>}</div>;
+  return <div className="pdf-text-edit-popover" role="dialog" aria-label={`Edit ${run.text} on page ${run.pageIndex + 1}`}><div className="pdf-text-edit-heading"><div><span>Selected text · Page {run.pageIndex + 1}</span><strong title={run.text}>{run.text}</strong></div><button className="icon-button" type="button" onClick={onCancel} aria-label="Close text editor" title="Close"><X size={17} /></button></div><input autoFocus value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onSave(); if (event.key === "Escape") onCancel(); }} aria-label="Replacement text" /><div className="pdf-text-edit-actions"><button className="primary-button" type="button" onClick={onSave}><Save size={15} /> Save text</button><button className="secondary-button" type="button" onClick={onRestore}><RotateCcw size={15} /> Restore original</button><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button></div>{overflow && <div className="pdf-text-overflow-warning"><AlertTriangle size={15} /><span>This replacement is longer. It will overflow if necessary; surrounding content will not reflow.</span></div>}</div>;
 }
 
 function PdfTextJobCard({ initialJob, mode, onReset, onContinue, keepResult }) {
@@ -517,7 +517,6 @@ export function PdfTextEditor() {
   const [keepResult, setKeepResult] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(1);
   const [ocrProgress, setOcrProgress] = useState(0);
-  const [ocrDetected, setOcrDetected] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("Reading PDF text and building previews…");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [job, setJob] = useState(null);
@@ -527,6 +526,7 @@ export function PdfTextEditor() {
   const [previewUpdating, setPreviewUpdating] = useState(false);
   const [previewRevision, setPreviewRevision] = useState(0);
   const previewVirtualizerRef = useRef(null);
+  const previewRequestRef = useRef(0);
   const sourceBytesRef = useRef(null);
   const sourcePasswordRef = useRef("");
 
@@ -559,7 +559,8 @@ export function PdfTextEditor() {
     if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) { setError("Choose a PDF file."); return; }
     if (file.size > MAX_PDF_BYTES) { setError("The PDF must be 200 MB or smaller."); return; }
     if (!pdfLibrary) { setError("PDF preview support is still loading. Try again in a moment."); return; }
-    setLoading(true); setSource(file); setPages([]); setEdits({}); setSelectedRun(null); setOcrProgress(0); setOcrDetected(false); setLoadingMessage("Reading PDF text and building previews…"); sourcePasswordRef.current = "";
+    previewRequestRef.current += 1;
+    setLoading(true); setSource(file); setPages([]); setEdits({}); setSelectedRun(null); setOcrProgress(0); setLoadingMessage("Reading PDF text and building previews…"); sourcePasswordRef.current = "";
     let pdfPassword = "";
     try {
       const data = new Uint8Array(await file.arrayBuffer());
@@ -591,7 +592,6 @@ export function PdfTextEditor() {
           const ocrPage = ocrByPage.get(model.pageIndex);
           return ocrPage ? { ...ocrPage, page: model.page, textItemCount: model.textItemCount, ocr: true } : model;
         });
-        setOcrDetected(Number(ocrResult.totalRuns) > 0);
         setPages(mergedModels);
         if (!Number(ocrResult.totalRuns)) setError("OCR could not detect readable text on the affected PDF pages. Scanned pages may have low resolution or unsupported handwriting.");
       } else if (models.some((model) => model.runs.some((run) => run.editable))) {
@@ -609,7 +609,6 @@ export function PdfTextEditor() {
         for (const page of ocrResult.pages || []) {
           ocrModels.push({ ...page, page: await loaded.getPage(page.pageIndex + 1), textItemCount: 0, ocr: true });
         }
-        setOcrDetected(Number(ocrResult.totalRuns) > 0);
         setPages(ocrModels);
         if (!Number(ocrResult.totalRuns)) setError("OCR could not detect readable text in this PDF. Scanned pages may have low resolution or unsupported handwriting.");
       }
@@ -620,6 +619,12 @@ export function PdfTextEditor() {
   };
 
   const editableCount = pages.reduce((total, page) => total + page.runs.filter((run) => run.editable).length, 0);
+  const ocrPages = pages.filter((page) => page.ocr);
+  const nativePages = pages.length - ocrPages.length;
+  const ocrDetected = ocrPages.length > 0;
+  const ocrPageScope = ocrPages.length <= 3
+    ? `OCR on ${ocrPages.map((page) => `page ${page.pageIndex + 1}`).join(", ")}`
+    : `OCR on ${ocrPages.length} pages`;
   const changedEdits = Object.entries(edits).filter(([, value]) => value !== undefined);
   const canSubmit = Boolean(source && sourceHash && changedEdits.length && !loading && !uploadProgress && isProcessingLocationReady(locations, processingMode));
 
@@ -639,6 +644,8 @@ export function PdfTextEditor() {
   const resetPreviewZoom = () => setPreviewZoom(1);
   const refreshEditedPreview = async (nextEdits) => {
     if (!sourceBytesRef.current || !pdfLibrary) return;
+    const requestId = previewRequestRef.current + 1;
+    previewRequestRef.current = requestId;
     const previewEdits = pages.flatMap((page) => page.runs
       .filter((run) => nextEdits[run.runId] !== undefined)
       .map((run) => ({ pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), originalText: run.text || run.originalText, replacementText: nextEdits[run.runId], mode: run.mode || "native", ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) })));
@@ -659,16 +666,21 @@ export function PdfTextEditor() {
       // page model leaves the old canvas in place and prevents an empty
       // replacement from visibly removing the original text.
       const previewPages = await Promise.all(pages.map((page) => previewPdf.getPage(page.pageIndex + 1)));
-      setPages((current) => current.map((page) => ({ ...page, page: previewPages[page.pageIndex] })));
+      if (requestId !== previewRequestRef.current) return;
+      const previewPagesByIndex = new Map(pages.map((page, index) => [page.pageIndex, previewPages[index]]));
+      setPages((current) => current.map((page) => {
+        const previewPage = previewPagesByIndex.get(page.pageIndex);
+        return previewPage ? { ...page, page: previewPage } : page;
+      }));
       // Force each page renderer to mount against the new PDFDocumentProxy.
       // This avoids retaining a canvas painted from the original document when
       // the page index and layout are otherwise unchanged.
       setPreviewRevision((current) => current + 1);
       setError("");
     } catch (previewError) {
-      setError(previewError instanceof Error ? previewError.message : "The live PDF preview could not be rebuilt.");
+      if (requestId === previewRequestRef.current) setError(previewError instanceof Error ? previewError.message : "The live PDF preview could not be rebuilt.");
     } finally {
-      setPreviewUpdating(false);
+      if (requestId === previewRequestRef.current) setPreviewUpdating(false);
     }
   };
   const saveEdit = () => {
@@ -696,6 +708,7 @@ export function PdfTextEditor() {
     previewVirtualizerRef.current?.scrollToIndex(pageIndex);
   };
   const reset = () => {
+    previewRequestRef.current += 1;
     if (job && ["queued", "processing"].includes(job.status)) deleteProcessingJob(jobMode, job.id).catch(() => undefined);
     setSource(null); setSourceHash(""); setPages([]); setEdits({}); setSelectedRun(null); setJob(null); setError(""); setUploadProgress(0); setPreviewUpdating(false); sourceBytesRef.current = null; sourcePasswordRef.current = "";
   };
@@ -748,8 +761,8 @@ export function PdfTextEditor() {
               <div className="pdf-text-editor-shell">
                 <div className="pdf-text-toolbar">
                   <div>
-                    <strong>{ocrDetected ? "Replace OCR-detected text" : "Replace text in your PDF"}</strong>
-                    <span>{previewUpdating ? "Rebuilding the real PDF preview…" : source ? `${source.name} · ${pages.length} pages · ${editableCount} ${ocrDetected ? "OCR text regions" : "selectable runs"}` : "Upload one PDF to begin"}</span>
+                    <strong>{ocrDetected && !nativePages ? "Replace OCR-detected text" : "Replace text in your PDF"}</strong>
+                    <span>{previewUpdating ? "Rebuilding the real PDF preview…" : source ? `${source.name} · ${pages.length} pages · ${editableCount} editable text runs${ocrDetected && nativePages ? ` · ${ocrPageScope}` : ""}` : "Upload one PDF to begin"}</span>
                   </div>
                   <div className="pdf-text-toolbar-actions">
                     <div className="pdf-zoom-controls" aria-label="Preview zoom">
@@ -762,7 +775,7 @@ export function PdfTextEditor() {
                     </button>
                   </div>
                 </div>
-                {ocrDetected && <div className="pdf-text-ocr-notice"><AlertTriangle size={17} /><div><strong>OCR mode</strong><span>OCR is used only for pages where the embedded text is unavailable or hidden behind page artwork. OCR regions are reconstructed visually with an approximate font; exact original font, opacity, and hidden pixels cannot be recovered.</span></div></div>}
+                {ocrDetected && <div className="pdf-text-ocr-notice"><AlertTriangle size={17} /><div><strong>{nativePages ? "Mixed text mode" : "OCR mode"}</strong><span>{nativePages ? `${ocrPageScope}. The other ${nativePages} page${nativePages === 1 ? " stays" : "s stay"} on the original selectable text path.` : "OCR is used because the PDF does not expose a usable visible text layer or its text is hidden behind page artwork. OCR regions are reconstructed visually with an approximate font; exact original font, opacity, and hidden pixels cannot be recovered."}</span></div></div>}
                 <div className="pdf-text-editor-layout">
                   <VirtualizedPdfTextRail pages={pages} onSelect={scrollToPage} />
                   <section className="pdf-text-workspace">
@@ -776,7 +789,7 @@ export function PdfTextEditor() {
             </>
           )}
           {error && <div className="error-banner"><AlertTriangle size={17} /><span>{error}</span></div>}
-          {!job && <div className="trust-row"><div><FileText size={16} /> {ocrDetected ? "OCR regions are visual reconstructions" : "Searchable text stays searchable"}</div><div><ShieldCheck size={16} /> {ocrDetected ? "Original untouched pages stay unchanged" : "No rasterization or white masking"}</div><div><Pencil size={16} /> Longer text may overflow</div></div>}
+          {!job && <div className="trust-row"><div><FileText size={16} /> {ocrDetected && !nativePages ? "OCR regions are visual reconstructions" : ocrDetected ? "Native text stays searchable" : "Searchable text stays searchable"}</div><div><ShieldCheck size={16} /> {ocrDetected ? "Original untouched pages stay unchanged" : "No rasterization or white masking"}</div><div><Pencil size={16} /> Longer text may overflow</div></div>}
         </>
       )}
     </AppShell>
