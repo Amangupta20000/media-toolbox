@@ -1747,7 +1747,7 @@ function TextBoxOverlayLayer({ page, onChange, onRemove }) {
   }, [page.width, page.height, page.rotation]);
   useLayoutEffect(() => {
     const selection = selectionRef.current;
-    if (!restoreSelectionRef.current || !selection || selection.end <= selection.start) return;
+    if (!restoreSelectionRef.current || !selection || selection.start < 0 || selection.end < selection.start) return;
     const editor = editorRefs.current.get(selection.textBoxId);
     if (!editor) return;
     restoreTextSelection(editor, selection);

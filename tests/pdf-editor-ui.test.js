@@ -30,6 +30,8 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /textBoxFontName/);
   assert.match(shell, /textBoxFontDefinition/);
   assert.match(shell, /contentEditable/);
+  assert.match(shell, /selection.start < 0 \|\| selection.end < selection.start/);
+  assert.match(shell, /restoreTextSelection\(editor, selection\)/);
   assert.match(shell, /applyTextBoxRangeStyle/);
   assert.match(shell, /runs: Array\.isArray\(textBox\.runs\)/);
   assert.match(await read("lib/pdf-text-box.js"), /Roboto/);
