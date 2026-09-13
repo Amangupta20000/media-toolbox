@@ -182,36 +182,45 @@
     const message = el("license-server-message");
     const startButton = el("start-license-server");
     const stopButton = el("stop-license-server");
+    const recoverButton = el("recover-license-database");
     if (!badge || !message || !startButton || !stopButton) return;
     setLicenseServerNotice(licenseServerNotice, licenseServerNoticeKind);
     const healthy = Boolean(value.healthy);
     const publicConfigured = Boolean(value.publicUrl);
     const publicHealthy = value.publicHealthy === null || value.publicHealthy === undefined ? null : Boolean(value.publicHealthy);
+    const database = value.database || {};
+    const publicDatabase = value.publicDatabase || {};
     const mounted = Boolean(value.ssdMounted);
     const tailscale = value.tailscale || {};
+    const localDatabaseBroken = ownerMachine && database.healthy === false;
+    const publicDatabaseBroken = publicConfigured && publicDatabase.healthy === false;
     const fullyReachable = clientInstallation
-      ? publicHealthy === true
-      : healthy && (!publicConfigured || publicHealthy !== false);
+      ? publicHealthy === true && !publicDatabaseBroken
+      : healthy && !localDatabaseBroken && (!publicConfigured || (publicHealthy !== false && !publicDatabaseBroken));
     const autoStartStatus = value.autoStartStatus || "";
     const waitingForSsd = ownerMachine && autoStartStatus === "waiting-for-ssd";
     const starting = ownerMachine && autoStartStatus === "starting";
     badge.textContent = clientInstallation
       ? !publicConfigured ? "Online licensing not configured" : fullyReachable ? "Online licensing connected" : publicHealthy === null ? "Checking online licensing" : "Online licensing unavailable"
-      : waitingForSsd ? "Waiting for licensing SSD" : starting ? "Starting" : !mounted ? "SSD not mounted" : !healthy ? "Stopped" : fullyReachable ? "Running" : "Public endpoint unavailable";
+      : waitingForSsd ? "Waiting for licensing SSD" : starting ? "Starting" : database.status === "malformed" ? "Database needs recovery" : !mounted ? "SSD not mounted" : !healthy ? "Stopped" : fullyReachable ? "Running" : "Public endpoint unavailable";
     const statusIndicator = clientInstallation
       ? fullyReachable ? "status-running" : "status-warning"
-      : waitingForSsd || starting ? "status-warning" : !mounted || !healthy ? "status-stopped" : fullyReachable ? "status-running" : "status-warning";
-    badge.className = `badge ${clientInstallation ? fullyReachable ? "ready" : "warning" : waitingForSsd || starting ? "warning" : !mounted || !healthy ? "error" : fullyReachable ? "ready" : "warning"} ${statusIndicator}`;
+      : waitingForSsd || starting ? "status-warning" : database.status === "malformed" || !mounted || !healthy ? "status-stopped" : fullyReachable ? "status-running" : "status-warning";
+    badge.className = `badge ${clientInstallation ? fullyReachable ? "ready" : "warning" : waitingForSsd || starting ? "warning" : database.status === "malformed" || !mounted || !healthy ? "error" : fullyReachable ? "ready" : "warning"} ${statusIndicator}`;
     message.textContent = clientInstallation
       ? fullyReachable
         ? `This client installation is connected to the owner's licensing service${value.publicHealthSource === "website-proxy" ? " through the website fallback" : ""}. The SSD and Tailscale controls are available only on the owner's Mac.`
         : !publicConfigured
           ? "This client installation has no online licensing endpoint. Install the latest agent release or configure the owner's public HTTPS URL."
-          : "This client installation cannot reach the owner's licensing service right now. The agent will use the website fallback when direct Tailscale access is unavailable."
+          : publicDatabaseBroken
+            ? `The owner's public HTTPS endpoint is reachable, but its licensing database reported an error: ${publicDatabase.error || "database disk image is malformed"}.`
+            : "This client installation cannot reach the owner's licensing service right now. The agent will use the website fallback when direct Tailscale access is unavailable."
       : waitingForSsd
       ? "Waiting for the licensing SSD. The server will start automatically when the configured storage path becomes available."
       : starting
       ? "Starting the licensing server automatically. The dashboard will update when it is ready."
+      : database.status === "malformed"
+      ? `The licensing database is malformed. Use Recover database to create a validated replacement; the original file will be preserved as a backup.${database.error ? ` (${database.error})` : ""}`
       : healthy && !value.managed
       ? "The licensing service is reachable, but it was started outside this agent. Stop that process first, then start it here so this dashboard can manage it."
       : healthy
@@ -237,12 +246,26 @@
               : "Not running";
     el("license-server-public-url").textContent = value.publicUrl || "Configured by Tailscale Funnel";
     el("license-server-public-status").textContent = !publicConfigured ? "Not configured" : publicHealthy === true ? "Connected" : publicHealthy === false ? "Unavailable" : "Checking";
+    const proxyConfigured = publicConfigured && Boolean(value.publicProxyUrl);
+    const proxyHealthy = value.publicProxyHealthy === null || value.publicProxyHealthy === undefined ? null : Boolean(value.publicProxyHealthy);
+    const databaseLabel = (status) => {
+      if (status?.status === "healthy" || status?.healthy === true) return "Healthy";
+      if (status?.status === "malformed") return "Malformed · recovery available";
+      if (status?.status === "not-applicable") return "Not applicable";
+      if (status?.status === "not-created") return "Not created";
+      if (status?.status === "checking") return "Checking";
+      if (status?.status === "unavailable") return "Unavailable";
+      return status?.error ? "Error" : "Checking";
+    };
+    el("license-server-database-status").textContent = clientInstallation ? "Not applicable" : databaseLabel(database);
+    el("license-server-public-database-status").textContent = !publicConfigured ? "Not configured" : databaseLabel(publicDatabase);
+    el("license-server-proxy-status").textContent = !publicConfigured ? "Not applicable" : !proxyConfigured ? "Not configured" : proxyHealthy === true ? "Connected" : proxyHealthy === false ? "Unavailable" : "Checking";
     const dataDir = value.dataDir || "/Volumes/Sandisk Exf/MediaToolboxLicensing";
     const command = `LICENSE_DATA_DIR=${shellQuote(dataDir)} npm run license-server`;
     const commandElement = el("license-server-command");
     if (commandElement) commandElement.textContent = command;
-    startButton.disabled = healthy || starting || !ownerMachine || !mounted || value.available === false;
-    startButton.textContent = healthy ? "Licensing server running" : starting ? "Starting licensing server" : ownerMachine ? "Start licensing server" : "Owner machine only";
+    startButton.disabled = healthy || starting || database.status === "malformed" || !ownerMachine || !mounted || value.available === false;
+    startButton.textContent = healthy ? "Licensing server running" : starting ? "Starting licensing server" : database.status === "malformed" ? "Recover database first" : ownerMachine ? "Start licensing server" : "Owner machine only";
     const serverRunning = healthy || Boolean(value.managed) || starting;
     const managedByAgent = Boolean(value.managed);
     // Keep the control visible while an owner server is running so the
@@ -253,6 +276,11 @@
     stopButton.disabled = !managedByAgent;
     stopButton.textContent = managedByAgent ? "Stop server" : "Stop unavailable";
     stopButton.title = managedByAgent ? "Stop the licensing server managed by this agent." : "This licensing server was started outside this agent. Stop that process first.";
+    if (recoverButton) {
+      const recoverable = ownerMachine && database.status === "malformed" && database.recoverable !== false;
+      recoverButton.classList.toggle("hidden", !recoverable);
+      recoverButton.disabled = !recoverable;
+    }
   }
 
   function shellQuote(value) {
@@ -583,6 +611,20 @@
     } catch (error) {
       renderLicenseServer({ healthy: false, ssdMounted: false, error: error.message || "The licensing server status could not be checked." }, true);
       setLicenseServerNotice(error.message || "The licensing server status could not be checked.", "error");
+    } finally { button.disabled = false; }
+  });
+  el("recover-license-database")?.addEventListener("click", async () => {
+    const button = el("recover-license-database");
+    if (!confirm("Recover the malformed licensing database? The current database will be preserved as a backup before recovery, and the licensing server will be restarted.")) return;
+    button.disabled = true;
+    setLicenseServerNotice("Backing up and recovering the licensing database…", "");
+    try {
+      const value = await api.recoverLicenseDatabase();
+      renderLicenseServer(value, true);
+      setLicenseServerNotice(value.recovery?.message || "The licensing database was recovered and the server was restarted.", "success");
+    } catch (error) {
+      setLicenseServerNotice(error.message || "The licensing database could not be recovered. The original file was preserved.", "error");
+      await refreshLicenseServer();
     } finally { button.disabled = false; }
   });
   el("start-license-server").addEventListener("click", async () => {

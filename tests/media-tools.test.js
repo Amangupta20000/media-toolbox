@@ -432,6 +432,48 @@ test("PDF compressor creates a validated smaller-or-original copy without changi
   assert.equal(db.getJobForPublic(job.id).logs.some((entry) => entry.message.includes("PDF compression")), true);
 });
 
+test("PDF compressor re-encodes embedded page images when structural compression is not enough", async () => {
+  const sharp = (await import("sharp")).default;
+  const sourcePath = path.join(testRoot, "image-heavy-compress-source.pdf");
+  const pixels = crypto.randomBytes(1600 * 1100 * 3);
+  const jpeg = await sharp(pixels, { raw: { width: 1600, height: 1100, channels: 3 } }).jpeg({ quality: 96 }).toBuffer();
+  const sourceDocument = await PDFDocument.create();
+  const sourceImage = await sourceDocument.embedJpg(jpeg);
+  for (let index = 0; index < 3; index += 1) {
+    const page = sourceDocument.addPage([800, 550]);
+    page.drawImage(sourceImage, { x: 0, y: 0, width: 800, height: 550 });
+    page.drawText(`Searchable PDF page ${index + 1}`, { x: 24, y: 24, size: 14 });
+  }
+  await fs.writeFile(sourcePath, await sourceDocument.save());
+  const inputBytes = (await fs.stat(sourcePath)).size;
+  const sourceHash = await sha256(sourcePath);
+  const jobDir = path.join(testRoot, "pdf-image-compressor-job");
+  await fs.mkdir(jobDir, { recursive: true });
+  const intakeResult = await createJobFromMultipart({
+    id: crypto.randomUUID(),
+    jobDir,
+    fields: { tool: "pdf-compressor", compressionProfile: "small" },
+    files: [{ field: "source", name: "image-heavy-compress-source.pdf", mime: "application/pdf", path: sourcePath, size: inputBytes }],
+  });
+  const job = db.getJob(intakeResult.ids[0]);
+  await worker.processJob(job);
+
+  const completed = db.getJob(job.id);
+  const result = JSON.parse(completed.result_json);
+  const output = await PDFDocument.load(await fs.readFile(result.path));
+  const outputPdfJs = await getDocument({ data: new Uint8Array(await fs.readFile(result.path)), disableWorker: true }).promise;
+  const outputText = (await Promise.all(Array.from({ length: outputPdfJs.numPages }, (_, index) => outputPdfJs.getPage(index + 1).then((page) => page.getTextContent()))))
+    .flatMap((content) => content.items.map((item) => item.str))
+    .join(" ");
+  assert.equal(completed.status, "completed");
+  assert.equal(output.getPageCount(), 3);
+  assert.match(outputText, /Searchable PDF page 1/);
+  assert.ok(result.bytes < inputBytes * 0.9, `expected meaningful image compression, got ${result.reductionPercent}%`);
+  assert.match(result.method, /image|Ghostscript/i);
+  assert.equal(await sha256(sourcePath), sourceHash);
+  assert.equal(db.getJobForPublic(job.id).logs.some((entry) => entry.message.includes("embedded image")), true);
+});
+
 test("PDF editor exports styled text boxes on blank pages", async () => {
   const jobDir = path.join(testRoot, "pdf-text-box-job");
   await fs.mkdir(jobDir, { recursive: true });

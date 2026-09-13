@@ -15,6 +15,7 @@ const DEFAULT_TAILSCALE_APP_PATH = "/Applications/Tailscale.app";
 const TAILSCALE_PROCESS_NAME = "Tailscale";
 const TAILSCALE_PGREP_PATH = "/usr/bin/pgrep";
 const TAILSCALE_OPEN_PATH = "/usr/bin/open";
+const DEFAULT_SQLITE_EXECUTABLE = process.platform === "darwin" ? "/usr/bin/sqlite3" : "sqlite3";
 const DEFAULT_LICENSE_PROXY_URL = "https://media-toolbox-woad.vercel.app/api/license";
 
 function isAlive(child) {
@@ -34,29 +35,45 @@ function findNode22Executable(homeDirectory = process.env.HOME || "") {
   }
 }
 
-function probeHealth(url, { httpModule = http, timeoutMs = HEALTH_TIMEOUT_MS } = {}) {
+function probeHealthStatus(url, { httpModule = http, timeoutMs = HEALTH_TIMEOUT_MS } = {}) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (value) => {
       if (settled) return;
       settled = true;
-      resolve(Boolean(value));
+      resolve(value);
     };
     let request;
     try {
       request = httpModule.get(url, { timeout: timeoutMs }, (response) => {
-        response.resume?.();
-        finish(response.statusCode === 200);
+        const chunks = [];
+        response.on?.("data", (chunk) => chunks.push(chunk));
+        response.once?.("end", () => {
+          let body = {};
+          try { body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}"); } catch { /* a non-JSON response is still an endpoint response */ }
+          finish({
+            reachable: true,
+            healthy: response.statusCode === 200 && body.ok !== false,
+            statusCode: response.statusCode || 0,
+            database: body.database && typeof body.database === "object" ? body.database : null,
+            error: typeof body.error === "string" ? body.error : "",
+          });
+        });
+        response.once?.("error", () => finish({ reachable: true, healthy: false, statusCode: response.statusCode || 0, database: null, error: "The health response could not be read." }));
       });
-      request.once?.("error", () => finish(false));
+      request.once?.("error", () => finish({ reachable: false, healthy: false, statusCode: 0, database: null, error: "The licensing endpoint could not be reached." }));
       request.once?.("timeout", () => {
         request.destroy?.();
-        finish(false);
+        finish({ reachable: false, healthy: false, statusCode: 0, database: null, error: "The licensing endpoint request timed out." });
       });
     } catch {
-      finish(false);
+      finish({ reachable: false, healthy: false, statusCode: 0, database: null, error: "The licensing endpoint could not be checked." });
     }
   });
+}
+
+function probeHealth(url, options = {}) {
+  return probeHealthStatus(url, options).then((value) => Boolean(value?.healthy));
 }
 
 function probeEndpoint(url, { timeoutMs = HEALTH_TIMEOUT_MS } = {}) {
@@ -69,21 +86,33 @@ function probeEndpoint(url, { timeoutMs = HEALTH_TIMEOUT_MS } = {}) {
   }
 }
 
+function probeEndpointStatus(url, { timeoutMs = HEALTH_TIMEOUT_MS } = {}) {
+  try {
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol)) return Promise.resolve({ reachable: false, healthy: false, statusCode: 0, database: null, error: "The public licensing URL is invalid." });
+    return probeHealthStatus(url, { httpModule: parsed.protocol === "https:" ? https : http, timeoutMs });
+  } catch {
+    return Promise.resolve({ reachable: false, healthy: false, statusCode: 0, database: null, error: "The public licensing URL is invalid." });
+  }
+}
+
 function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function runExecFile(execFileImpl, file, args) {
+function runExecFile(execFileImpl, file, args, options = {}) {
   return new Promise((resolve, reject) => {
     try {
-      execFileImpl(file, args, (error, stdout, stderr) => {
+      const callback = (error, stdout, stderr) => {
         resolve({
           ok: !error,
           error: error || null,
           stdout: String(stdout || ""),
           stderr: String(stderr || ""),
         });
-      });
+      };
+      if (Object.keys(options).length) execFileImpl(file, args, options, callback);
+      else execFileImpl(file, args, callback);
     } catch (error) {
       reject(error);
     }
@@ -105,13 +134,17 @@ function createLicenseServerManager({
   spawnImpl = defaultSpawn,
   execFileImpl = defaultExecFile,
   existsSync = fs.existsSync,
+  sqliteExecutable = DEFAULT_SQLITE_EXECUTABLE,
   platform = process.platform,
   tailscaleAppPath = DEFAULT_TAILSCALE_APP_PATH,
   tailscaleRunningCheck = null,
   tailscaleOpen = null,
-  healthCheck = (url) => probeHealth(url),
-  publicHealthCheck = (url) => probeEndpoint(url),
+  healthCheck = null,
+  publicHealthCheck = null,
+  healthStatusCheck = null,
+  publicHealthStatusCheck = null,
   publicProxyHealthCheck = null,
+  publicProxyHealthStatusCheck = null,
   publicProxyUrl = process.env.AGENT_LICENSE_SERVER_PROXY_URL || DEFAULT_LICENSE_PROXY_URL,
   tailscaleFunnelConfigure = null,
   logger = console,
@@ -124,6 +157,13 @@ function createLicenseServerManager({
   let manuallyStopped = false;
   let publicHealthyBeforeFailure = null;
   let consecutivePublicFailures = 0;
+  const localHealthCheck = healthCheck || ((target) => probeHealth(target));
+  const remoteHealthCheck = publicHealthCheck || ((target) => probeEndpoint(target));
+  const localHealthStatus = healthStatusCheck || (!healthCheck ? ((target) => probeHealthStatus(target)) : null);
+  const remoteHealthStatus = publicHealthStatusCheck || (!publicHealthCheck ? ((target) => probeEndpointStatus(target)) : null);
+  const publicProxyStatus = publicProxyHealthStatusCheck || (publicProxyHealthCheck
+    ? async (target) => ({ reachable: true, healthy: Boolean(await publicProxyHealthCheck(target)), statusCode: 0, database: null, error: "" })
+    : null);
   const checkTailscaleRunning = tailscaleRunningCheck || (async () => {
     const result = await runExecFile(execFileImpl, TAILSCALE_PGREP_PATH, ["-x", TAILSCALE_PROCESS_NAME]);
     return result.ok;
@@ -194,6 +234,85 @@ function createLicenseServerManager({
       // not show an SSD prompt merely because they contain the server code.
       ownerConfigured: ssdMounted || ownerMarker,
     };
+  }
+
+  function databasePath(targetDataDirectory = dataDirectory) {
+    return path.join(targetDataDirectory, "licenses.sqlite3");
+  }
+
+  async function inspectDatabase(targetPath = databasePath()) {
+    if (!existsSync(targetPath)) return { status: "not-created", healthy: null, error: "The licensing database has not been created yet.", recoverable: false };
+    if (!sqliteExecutable) return { status: "unavailable", healthy: null, error: "The SQLite diagnostic tool is not available in this agent.", recoverable: false };
+    const result = await runExecFile(execFileImpl, sqliteExecutable, [targetPath, "PRAGMA quick_check(1);"]);
+    const output = String(result.stdout || "").trim();
+    const diagnostic = String(result.stderr || result.error?.message || "").trim();
+    if (result.ok && output.toLowerCase() === "ok") return { status: "healthy", healthy: true, error: "", recoverable: false };
+    const message = diagnostic || output || "SQLite integrity check failed.";
+    if (/malformed|corrupt|not a database|disk image/i.test(message) || (result.ok && output && output.toLowerCase() !== "ok")) {
+      return { status: "malformed", healthy: false, error: message, recoverable: true };
+    }
+    return { status: "unavailable", healthy: null, error: message, recoverable: false };
+  }
+
+  function runCommandWithInput(executable, args, input) {
+    return new Promise((resolve, reject) => {
+      let processHandle;
+      try {
+        processHandle = spawnImpl(executable, args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+      } catch (error) {
+        reject(error);
+        return;
+      }
+      let stdout = "";
+      let stderr = "";
+      processHandle.stdout?.on?.("data", (chunk) => { stdout += String(chunk); });
+      processHandle.stderr?.on?.("data", (chunk) => { stderr += String(chunk); });
+      processHandle.once?.("error", reject);
+      processHandle.once?.("close", (code, signal) => resolve({ ok: code === 0, code, signal, stdout, stderr }));
+      processHandle.stdin?.end?.(input);
+    });
+  }
+
+  async function recoverLicenseDatabase() {
+    const storage = storageState();
+    if (!storage.ownerConfigured || !storage.ssdMounted) throw new Error("Connect the licensing SSD before recovering its database.");
+    const sourcePath = databasePath();
+    if (!existsSync(sourcePath)) throw new Error("The licensing database does not exist, so there is nothing to recover.");
+    if (!sqliteExecutable) throw new Error("This agent does not include the SQLite recovery tool.");
+    const current = await inspectDatabase(sourcePath);
+    if (current.healthy === true) return { ...(await getState()), recovery: { status: "not-needed", message: "The licensing database passed its integrity check; no recovery was needed." } };
+    if (current.status !== "malformed") throw new Error(current.error || "The licensing database could not be checked safely.");
+    const previousManualStop = manuallyStopped;
+    manuallyStopped = true;
+    if (child && isAlive(child)) await stopProcess();
+    const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+    const backupPath = `${sourcePath}.malformed-${stamp}.bak`;
+    const recoveredPath = `${sourcePath}.recovered-${stamp}.tmp`;
+    try {
+      await fs.promises.copyFile(sourcePath, backupPath);
+      const recoveredSql = await runExecFile(execFileImpl, sqliteExecutable, [sourcePath, ".recover"], { maxBuffer: 32 * 1024 * 1024 });
+      if (!recoveredSql.ok || !recoveredSql.stdout) throw new Error(String(recoveredSql.stderr || recoveredSql.error?.message || "SQLite could not recover the database contents."));
+      const rebuilt = await runCommandWithInput(sqliteExecutable, [recoveredPath], recoveredSql.stdout);
+      if (!rebuilt.ok) throw new Error(String(rebuilt.stderr || "SQLite could not write the recovered database."));
+      const repaired = await inspectDatabase(recoveredPath);
+      if (repaired.healthy !== true) throw new Error(repaired.error || "The recovered database did not pass its integrity check.");
+      await fs.promises.rename(recoveredPath, sourcePath);
+      manuallyStopped = false;
+      lastError = "";
+      const state = await start();
+      return {
+        ...state,
+        recovery: {
+          status: "recovered",
+          backupPath,
+          message: `The licensing database was recovered and the original was preserved at ${backupPath}.`,
+        },
+      };
+    } catch (error) {
+      await fs.promises.rm(recoveredPath, { force: true }).catch(() => {});
+      manuallyStopped = previousManualStop;
+      throw new Error(`${error instanceof Error ? error.message : String(error || "The licensing database could not be recovered.")} The original database was preserved at ${backupPath}.`);
+    }
   }
 
   async function getTailscaleState() {
@@ -280,19 +399,20 @@ function createLicenseServerManager({
 
   async function getState() {
     const publicEndpoint = publicUrl();
-    const [healthy, directPublicHealthy, tailscale] = await Promise.all([
-      healthCheck(`${url}/v1/health`),
-      publicEndpoint ? publicHealthCheck(`${publicEndpoint}/v1/health`) : Promise.resolve(null),
+    const storage = storageState();
+    const [healthy, directPublicHealthy, tailscale, localStatus, publicStatus, proxyStatus] = await Promise.all([
+      localHealthCheck(`${url}/v1/health`),
+      publicEndpoint ? remoteHealthCheck(`${publicEndpoint}/v1/health`) : Promise.resolve(null),
       getTailscaleState(),
+      localHealthStatus ? localHealthStatus(`${url}/v1/health`) : Promise.resolve(null),
+      publicEndpoint && remoteHealthStatus ? remoteHealthStatus(`${publicEndpoint}/v1/health`) : Promise.resolve(null),
+      publicEndpoint && publicProxyUrl && publicProxyStatus ? publicProxyStatus(`${String(publicProxyUrl).replace(/\/$/, "")}/v1/health`) : Promise.resolve(null),
     ]);
     let observedPublicHealthy = directPublicHealthy;
     let publicHealthSource = directPublicHealthy === true ? "public" : "";
-    if (publicEndpoint && directPublicHealthy === false && typeof publicProxyHealthCheck === "function") {
-      const proxyHealthy = await publicProxyHealthCheck(`${String(publicProxyUrl).replace(/\/$/, "")}/v1/health`);
-      if (proxyHealthy) {
-        observedPublicHealthy = true;
-        publicHealthSource = "website-proxy";
-      }
+    if (publicEndpoint && directPublicHealthy === false && proxyStatus?.healthy) {
+      observedPublicHealthy = true;
+      publicHealthSource = "website-proxy";
     }
     if (publicEndpoint && observedPublicHealthy === true) {
       publicHealthyBeforeFailure = true;
@@ -311,7 +431,12 @@ function createLicenseServerManager({
       }
     }
     const publicHealthy = observedPublicHealthy;
-    const storage = storageState();
+    const database = localStatus?.database || (storage.ownerConfigured ? await inspectDatabase() : { status: "not-applicable", healthy: null, error: "Owner storage is not available on this installation.", recoverable: false });
+    const publicDatabase = publicStatus?.database || proxyStatus?.database || (directPublicHealthy === true
+      ? { status: "healthy", healthy: true, error: "", recoverable: false }
+      : directPublicHealthy === false
+        ? { status: "unavailable", healthy: null, error: publicStatus?.error || proxyStatus?.error || "The public endpoint did not report database readiness.", recoverable: false }
+        : { status: "checking", healthy: null, error: "", recoverable: false });
     const autoStartStatus = manuallyStopped
       ? "stopped"
       : healthy
@@ -326,9 +451,14 @@ function createLicenseServerManager({
       healthy,
       running: healthy,
       publicHealthy,
+      database,
+      publicDatabase,
       managed: isAlive(child),
       url,
       publicUrl: publicEndpoint,
+      publicProxyUrl: publicProxyUrl || "",
+      publicProxyHealthy: proxyStatus?.healthy === undefined ? null : Boolean(proxyStatus.healthy),
+      publicProxyError: proxyStatus?.error || "",
       publicHealthSource,
       autoStartEnabled: true,
       autoStartStatus,
@@ -531,9 +661,10 @@ function createLicenseServerManager({
     stop,
     watchForStorage,
     stopWatching,
+    recoverLicenseDatabase,
     entryPath,
     findNode22Executable: () => findNode22Executable(app?.getPath?.("home") || process.env.HOME || ""),
   };
 }
 
-module.exports = { createLicenseServerManager, findNode22Executable, probeHealth };
+module.exports = { createLicenseServerManager, findNode22Executable, probeHealth, probeHealthStatus, probeEndpointStatus };

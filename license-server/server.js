@@ -242,7 +242,15 @@ export class LicenseService {
     if (request.method === "OPTIONS") return json(response, origin ? 204 : (request.headers.origin ? 403 : 204), {}, origin);
     if (request.headers.origin && !origin) return json(response, 403, { error: "This website origin is not trusted by the licensing server." });
     try {
-      if (url.pathname === "/v1/health" && request.method === "GET") return json(response, 200, { ok: true, service: "media-toolbox-license-server", protocolVersion: 1 }, origin);
+      if (url.pathname === "/v1/health" && request.method === "GET") {
+        const database = this.store.databaseStatus();
+        return json(response, database.healthy ? 200 : 503, {
+          ok: database.healthy,
+          service: "media-toolbox-license-server",
+          protocolVersion: 1,
+          database,
+        }, origin);
+      }
       if (url.pathname === "/v1/license-requests" && request.method === "POST") return json(response, 201, await this.requestLicense(request, await readJson(request, this.config.maxBodyBytes)), origin);
       const requestMatch = url.pathname.match(/^\/v1\/license-requests\/([^/]+)$/);
       if (requestMatch && request.method === "GET") return json(response, 200, await this.requestStatus(request, decodeURIComponent(requestMatch[1]), String(request.headers["x-request-token"] || url.searchParams.get("token") || "")), origin);

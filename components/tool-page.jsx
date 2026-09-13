@@ -300,12 +300,13 @@ export function ToolPage({ tool }) {
 }
 
 function PdfCompressionSettingsCard({ profile, onChange, capabilities }) {
-  const ghostscriptReady = capabilities?.pdf?.compressor !== false;
+  const compressionReady = capabilities?.pdf?.compressor !== false;
+  const compressionEngine = capabilities?.pdf?.compressorEngine || "the bundled PDF optimizer";
   return <section className="tool-card settings-card pdf-compression-settings-card">
     <div className="card-heading"><div><span className="card-index">02</span><h2>Choose compression</h2></div><span className="optional-label">PDF quality</span></div>
     <p className="card-description">Choose the balance between file size and image detail. Text, page order, and the original file are kept safe.</p>
     <div className="format-grid" aria-label="PDF compression profiles">{pdfCompressionProfiles.map(([value, label, detail]) => <button type="button" key={value} className={`format-option ${profile === value ? "selected" : ""}`} onClick={() => onChange(value)}><span className="format-radio" /><strong>{label}</strong><small>{detail}</small></button>)}</div>
-    <div className="info-note"><Info size={16} /><span>{ghostscriptReady ? "The worker will use Ghostscript’s PDF optimizer and keep the original if the selected pass would make the file larger." : "Ghostscript is not available, so the worker will use a safe structural PDF rewrite. Install Ghostscript for stronger image compression."}</span></div>
+    <div className="info-note"><Info size={16} /><span>{compressionReady ? `The worker will use ${String(compressionEngine).toLowerCase()} and keep the original if the selected pass would make the file larger.` : "The worker can still create a safe structural PDF rewrite, but stronger embedded-image compression is unavailable."}</span></div>
   </section>;
 }
 

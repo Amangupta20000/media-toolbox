@@ -185,6 +185,10 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardHtml, /id="license-server-command"/);
   assert.match(dashboardHtml, /id="copy-license-server-command"/);
   assert.match(dashboardHtml, /id="license-server-tailscale-status"/);
+  assert.match(dashboardHtml, /id="license-server-database-status"/);
+  assert.match(dashboardHtml, /id="license-server-public-database-status"/);
+  assert.match(dashboardHtml, /id="license-server-proxy-status"/);
+  assert.match(dashboardHtml, /id="recover-license-database"/);
   assert.match(dashboardHtml, /Copy this command only when using a source checkout/);
   assert.doesNotMatch(dashboardHtml, /bottom-left/);
   assert.match(dashboardRenderer, /el\("authorization-panel"\)\.classList\.toggle\("hidden", mode === "admin"\)/);
@@ -200,8 +204,12 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardCss, /\.admin-action\{background:#102c3d;border:1px solid/);
   assert.match(dashboardPreload, /agent:start-license-server/);
   assert.match(dashboardPreload, /agent:get-license-server-state/);
+  assert.match(dashboardPreload, /agent:recover-license-database/);
   assert.match(electronMain, /licenseServerManager\.watchForStorage/);
+  assert.match(electronMain, /agent:recover-license-database/);
   assert.match(electronMain, /ensureOwnerLicenseServer/);
+  assert.match(electronMain, /publicHealthStatusCheck: checkPublicLicenseServerStatus/);
+  assert.match(electronMain, /publicProxyHealthStatusCheck: checkPublicLicenseServerStatus/);
   assert.match(electronMain, /state\.ownerConfigured && !state\.healthy/);
   assert.match(electronMain, /licenseServerManager\?\.stopWatching/);
   assert.match(dashboardPreload, /agent:login-activation/);
@@ -687,6 +695,29 @@ test("dashboard licensing server manager reports local and public health separat
   }
 });
 
+test("dashboard licensing server manager exposes database corruption for recovery", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const temporaryMount = path.join(testRoot, "license-server-malformed-database");
+  const dataDirectory = path.join(temporaryMount, "MediaToolboxLicensing");
+  await fs.mkdir(dataDirectory, { recursive: true });
+  await fs.writeFile(path.join(dataDirectory, "licenses.sqlite3"), "not a sqlite database");
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(root, "agent"),
+    dataDirectory,
+    mountPath: temporaryMount,
+    existsSync: (value) => value === temporaryMount || value === dataDirectory || value === path.join(dataDirectory, "licenses.sqlite3") || value.endsWith(path.join("license-server", "index.js")),
+    healthCheck: async () => false,
+    publicHealthCheck: async () => false,
+    healthStatusCheck: async () => ({ healthy: false, database: { status: "malformed", healthy: false, error: "database disk image is malformed", recoverable: true } }),
+    logger: { log() {}, warn() {} },
+  });
+  const state = await manager.getState();
+  assert.equal(state.database.status, "malformed");
+  assert.equal(state.database.healthy, false);
+  assert.equal(state.database.recoverable, true);
+});
+
 test("client licensing status can use the website fallback when direct HTTPS is unavailable", async () => {
   const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -700,6 +731,7 @@ test("client licensing status can use the website fallback when direct HTTPS is 
     },
     publicProxyUrl: "https://media-toolbox-woad.vercel.app/api/license",
     publicProxyHealthCheck: async (value) => value === "https://media-toolbox-woad.vercel.app/api/license/v1/health",
+    publicProxyHealthStatusCheck: async (value) => ({ reachable: true, healthy: value === "https://media-toolbox-woad.vercel.app/api/license/v1/health", statusCode: 200, database: { status: "healthy", healthy: true, error: "" }, error: "" }),
     existsSync: (value) => value.endsWith(path.join("license-server", "index.js")),
     healthCheck: async () => false,
   });
@@ -709,6 +741,8 @@ test("client licensing status can use the website fallback when direct HTTPS is 
     const state = await manager.getState();
     assert.equal(state.ownerConfigured, false);
     assert.equal(state.publicHealthy, true);
+    assert.equal(state.publicProxyHealthy, true);
+    assert.equal(state.publicDatabase.healthy, true);
     assert.equal(state.publicHealthSource, "website-proxy");
   } finally {
     if (previousPublicUrl === undefined) delete process.env.LICENSE_SERVER_PUBLIC_URL;
@@ -788,6 +822,7 @@ test("Admin dashboard shows licensing-server status on non-owner installations w
   assert.match(source, /panel\.classList\.toggle\("hidden", !visible\)/);
   assert.match(source, /Online licensing connected/);
   assert.match(source, /website fallback/);
+  assert.match(source, /Recover database/);
   assert.match(source, /Not applicable/);
   assert.match(source, /!ownerMachine \|\| !mounted/);
 });

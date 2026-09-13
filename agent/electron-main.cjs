@@ -266,6 +266,7 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle("agent:get-license-server-state", () => licenseServerManager?.getState?.() || { available: false, healthy: false, running: false, error: "The licensing server manager is not ready." });
     ipcMain.handle("agent:start-license-server", () => licenseServerManager?.start?.() || Promise.reject(new Error("The licensing server manager is not ready.")));
     ipcMain.handle("agent:stop-license-server", () => licenseServerManager?.stop?.() || Promise.reject(new Error("The licensing server manager is not ready.")));
+    ipcMain.handle("agent:recover-license-database", () => licenseServerManager?.recoverLicenseDatabase?.() || Promise.reject(new Error("The licensing server manager is not ready.")));
     ipcMain.handle("agent:login", async (_event, username, password) => {
       const value = agent.loginAdmin(String(username || ""), String(password || ""));
       let licenseAdmin = agent.getLicenseAdminState();
@@ -348,15 +349,27 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   async function checkPublicLicenseServer(url) {
-    if (typeof net?.fetch !== "function") return false;
+    return (await checkPublicLicenseServerStatus(url)).healthy;
+  }
+
+  async function checkPublicLicenseServerStatus(url) {
+    if (typeof net?.fetch !== "function") return { reachable: false, healthy: false, statusCode: 0, database: null, error: "The public licensing endpoint could not be checked." };
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     try {
       const response = await net.fetch(url, { cache: "no-store", signal: controller.signal });
-      await response.arrayBuffer?.();
-      return response.status === 200;
+      const buffer = await response.arrayBuffer?.();
+      let body = {};
+      try { body = JSON.parse(new TextDecoder().decode(buffer || new ArrayBuffer(0))); } catch { /* a non-JSON response is still a response */ }
+      return {
+        reachable: true,
+        healthy: response.status === 200 && body.ok !== false,
+        statusCode: response.status,
+        database: body.database && typeof body.database === "object" ? body.database : null,
+        error: typeof body.error === "string" ? body.error : "",
+      };
     } catch {
-      return false;
+      return { reachable: false, healthy: false, statusCode: 0, database: null, error: "The public licensing endpoint could not be reached." };
     } finally {
       clearTimeout(timeout);
     }
@@ -438,7 +451,9 @@ if (!app.requestSingleInstanceLock()) {
       electronExecutable: process.execPath,
       useElectronRuntime: !process.defaultApp,
       publicHealthCheck: checkPublicLicenseServer,
+      publicHealthStatusCheck: checkPublicLicenseServerStatus,
       publicProxyHealthCheck: checkPublicLicenseProxy,
+      publicProxyHealthStatusCheck: checkPublicLicenseServerStatus,
       tailscaleFunnelConfigure: configureTailscaleFunnel,
     });
     // Prefer loopback only when this is the owner Mac. A released client agent

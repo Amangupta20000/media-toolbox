@@ -1,6 +1,7 @@
 import dns from "node:dns";
 import http from "node:http";
 import https from "node:https";
+import net from "node:net";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 4_500;
@@ -40,6 +41,28 @@ function readBody(request) {
   });
 }
 
+function resolveIpv4(hostname, lookupOptions, callback) {
+  // Vercel's serverless DNS layer can return an undefined address through
+  // dns.lookup for Tailscale Funnel hostnames. Resolve the public A record
+  // explicitly first, then retain the normal lookup as a compatibility
+  // fallback for other licensing hosts.
+  const finish = (address, family = 4) => {
+    // node:http requests DNS results with all:true. Returning a string for
+    // that form makes Node read address.address from undefined and surface
+    // the misleading `Invalid IP address: undefined` error.
+    if (lookupOptions?.all) return callback(null, [{ address, family }]);
+    return callback(null, address, family);
+  };
+  dns.resolve4(hostname, (error, addresses) => {
+    const address = (addresses || []).find((value) => net.isIP(value) === 4);
+    if (address) return finish(address, 4);
+    dns.lookup(hostname, { ...lookupOptions, family: 4, all: false }, (lookupError, lookupAddress, family) => {
+      if (!lookupError && lookupAddress && net.isIP(lookupAddress) === 4) return finish(lookupAddress, family || 4);
+      callback(lookupError || error || new Error(`No IPv4 address was found for ${hostname}.`));
+    });
+  });
+}
+
 function json(response, status, payload) {
   response.status(status).setHeader("Cache-Control", "no-store").json(payload);
 }
@@ -58,9 +81,7 @@ function requestOverIpv4(target, options) {
       method: options.method,
       headers,
       servername: target.protocol === "https:" ? target.hostname : undefined,
-      lookup(hostname, lookupOptions, callback) {
-        dns.lookup(hostname, { ...lookupOptions, family: 4, all: false }, callback);
-      },
+      lookup: resolveIpv4,
       timeout: REQUEST_TIMEOUT_MS,
     }, (upstream) => {
       const chunks = [];

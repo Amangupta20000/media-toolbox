@@ -9,6 +9,7 @@ import { appendJobLog, claimNextJob, deleteJob, getJob, listExpiredJobs, updateJ
 import { commandExists, firstAvailable, runCommand } from "../lib/command.js";
 import { applyPdfTextEdits } from "../lib/pdf-text-editor.js";
 import { applyPdfOcrEdits } from "../lib/pdf-ocr.js";
+import { pdfCompressionSettings, recompressPdfImages } from "../lib/pdf-compressor.js";
 import { rotatedImageDrawPlacement } from "../lib/pdf-image-placement.js";
 import { layoutPdfTextRuns, textBoxColor, textBoxDrawPlacement, textBoxFontDefinition, textBoxFontName, textBoxTextRuns } from "../lib/pdf-text-box.js";
 import { safePdfOutputFilename } from "../lib/job-intake.js";
@@ -719,20 +720,38 @@ async function processPdfCompressor(job) {
     throw new Error("The PDF is encrypted, corrupt, or unsupported.");
   }
 
+  const profile = options.compressionProfile || "balanced";
+  const profileSettings = pdfCompressionSettings(profile);
+  if (!profileSettings) throw new Error("Choose a supported compression level.");
   const settings = {
-    balanced: { pdfSettings: "ebook", label: "Balanced compression" },
-    small: { pdfSettings: "screen", label: "Smallest-file compression" },
-    quality: { pdfSettings: "prepress", label: "Higher-quality compression" },
-  }[options.compressionProfile || "balanced"];
-  if (!settings) throw new Error("Choose a supported compression level.");
+    ...profileSettings,
+    pdfSettings: { balanced: "ebook", small: "screen", quality: "prepress" }[profile],
+  };
   const outputName = safePdfOutputFilename(options.outputFilename, `${stem(job.source_name)}_compressed.pdf`);
   const jobDir = path.dirname(job.source_path);
   const outputPath = path.join(jobDir, outputName);
   const workPath = path.join(jobDir, `${outputName}.working`);
   const warnings = [];
+  let bestBytes = null;
   let method = "";
 
+  const chooseCandidate = async (candidate, candidateMethod) => {
+    try {
+      const validation = await PDFDocument.load(candidate, { updateMetadata: false, throwOnInvalidObject: false });
+      if (validation.getPageCount() !== inputDocument.getPageCount()) throw new Error("The compressed PDF page count changed.");
+      if (!bestBytes || candidate.length < bestBytes.length) {
+        bestBytes = candidate;
+        method = candidateMethod;
+      }
+      return true;
+    } catch (error) {
+      appendJobLog(job.id, `${candidateMethod} failed validation: ${error instanceof Error ? error.message : "invalid PDF"}`, "warning");
+      return false;
+    }
+  };
+
   update(job.id, 10, "Inspecting PDF", `Opening ${inputDocument.getPageCount()} page${inputDocument.getPageCount() === 1 ? "" : "s"}.`);
+  await fsp.rm(workPath, { force: true });
   const ghostscript = await usableGhostscript();
   if (ghostscript) {
     update(job.id, 28, "Compressing PDF", `${settings.label} with Ghostscript.`);
@@ -750,31 +769,48 @@ async function processPdfCompressor(job) {
       job.source_path,
     ], { timeoutMs: 15 * 60 * 1000 });
     if (compressed.code === 0 && fs.existsSync(workPath)) {
-      method = `Ghostscript ${settings.label.toLowerCase()}`;
+      await chooseCandidate(await fsp.readFile(workPath), `Ghostscript ${settings.label.toLowerCase()}`);
     } else {
       appendJobLog(job.id, `Ghostscript compression failed: ${commandFailure(compressed)}`, "warning");
-      warnings.push("The PDF optimizer could not complete on this worker; a safe structural rewrite was used instead.");
+      warnings.push("The optional Ghostscript optimizer could not complete on this worker; the bundled optimizer was used instead.");
     }
-  } else {
-    warnings.push("Ghostscript is not available or healthy on this worker; a safe structural rewrite was used instead.");
   }
 
-  if (!method) {
-    update(job.id, 48, "Optimizing PDF structure", "Rewriting the PDF with compressed object streams.");
-    const rewritten = await inputDocument.save({ useObjectStreams: true, addDefaultPage: false, objectsPerTick: 50 });
-    await fsp.writeFile(workPath, rewritten);
-    method = "PDF structural optimization";
+  update(job.id, 42, "Optimizing PDF structure", "Rewriting the PDF with compressed object streams.");
+  const rewritten = await inputDocument.save({ useObjectStreams: true, addDefaultPage: false, objectsPerTick: 50 });
+  await chooseCandidate(rewritten, "PDF structural optimization");
+
+  update(job.id, 56, "Compressing embedded images", "Re-encoding eligible page images while preserving text and vector content.");
+  try {
+    const imageDocument = await PDFDocument.load(input, { updateMetadata: false, throwOnInvalidObject: false });
+    let lastImageProgress = 0;
+    const imageResult = await recompressPdfImages(imageDocument, profile, {
+      onProgress: (done, total) => {
+        if (!total) return;
+        const progress = Math.min(78, 56 + Math.round((done / total) * 22));
+        if (progress <= lastImageProgress) return;
+        lastImageProgress = progress;
+        updateJob(job.id, progress, "Compressing embedded images", `Re-encoding image ${done} of ${total}.`);
+      },
+    });
+    if (imageResult.changed) {
+      const imageBytes = await imageDocument.save({ useObjectStreams: true, addDefaultPage: false, objectsPerTick: 50 });
+      await chooseCandidate(imageBytes, `Bundled image recompression (${imageResult.replacements} image${imageResult.replacements === 1 ? "" : "s"})`);
+      appendJobLog(job.id, `Re-encoded ${imageResult.replacements} embedded image${imageResult.replacements === 1 ? "" : "s"}; preserved ${imageResult.skipped} image${imageResult.skipped === 1 ? "" : "s"}.`, "info");
+    } else if (imageResult.reason) {
+      warnings.push("The bundled image engine was unavailable; structural PDF optimization was used instead.");
+    } else {
+      appendJobLog(job.id, "No eligible embedded images needed re-encoding.", "info");
+    }
+  } catch (error) {
+    appendJobLog(job.id, `Bundled image recompression was skipped: ${error instanceof Error ? error.message : "unknown error"}`, "warning");
+    warnings.push("Some embedded images could not be re-encoded; the best validated PDF pass was used instead.");
   }
 
   update(job.id, 82, "Validating PDF", "Checking that every page remains readable.");
-  let outputBytes = await fsp.readFile(workPath);
-  try {
-    const validation = await PDFDocument.load(outputBytes, { updateMetadata: false, throwOnInvalidObject: false });
-    if (validation.getPageCount() !== inputDocument.getPageCount()) throw new Error("The compressed PDF page count changed.");
-  } catch {
-    await fsp.rm(workPath, { force: true });
-    throw new Error("The compressed PDF could not be validated.");
-  }
+  if (!bestBytes) throw new Error("The compressed PDF could not be validated.");
+  let outputBytes = bestBytes;
+  await fsp.writeFile(workPath, outputBytes);
 
   const inputBytes = input.length;
   if (outputBytes.length >= inputBytes) {
@@ -1069,7 +1105,13 @@ async function writeCapabilities() {
   const values = {
     status: "ready",
     checkedAt: new Date().toISOString(),
-    pdf: { textEditing: true, ocr: true, ocrLanguages: ["eng"], compressor: Boolean(ghostscript), compressorEngine: ghostscript ? "Ghostscript" : "PDF structural optimization" },
+    pdf: {
+      textEditing: true,
+      ocr: true,
+      ocrLanguages: ["eng"],
+      compressor: Boolean(ghostscript || sharp),
+      compressorEngine: ghostscript ? "Ghostscript + bundled image recompression" : sharp ? "Bundled image recompression" : "PDF structural optimization",
+    },
     image: { imagemagick: Boolean(imageTool), sharp: Boolean(sharp), sips, heic: heic || sips, libheif, formats: ["jpeg", "png", "heic", "tiff", "gif", "bmp"] },
     video: { ffmpeg, ffprobe: await commandExists("ffprobe"), mkvmerge, mkvFallback: ffmpeg, untrunc: Boolean(await firstAvailable(untruncCandidates)), defaultReference: fs.existsSync(config.untruncReferencePath) },
   };

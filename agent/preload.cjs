@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld("mediaToolboxAgent", {
   getLicenseServerState: () => ipcRenderer.invoke("agent:get-license-server-state"),
   startLicenseServer: () => ipcRenderer.invoke("agent:start-license-server"),
   stopLicenseServer: () => ipcRenderer.invoke("agent:stop-license-server"),
+  recoverLicenseDatabase: () => ipcRenderer.invoke("agent:recover-license-database"),
   login: (username, password) => ipcRenderer.invoke("agent:login", username, password),
   acceptLegal: () => ipcRenderer.invoke("agent:accept-legal"),
   startTrial: () => ipcRenderer.invoke("agent:start-trial"),

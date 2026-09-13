@@ -54,7 +54,9 @@ test("licensing server handles approval, online agent redemption, replay, and wr
   try {
     const health = await fetch(`${base}/v1/health`, { headers: { Origin: "http://localhost:3000" } });
     assert.equal(health.status, 200);
-    assert.equal((await health.json()).service, "media-toolbox-license-server");
+    const healthState = await health.json();
+    assert.equal(healthState.service, "media-toolbox-license-server");
+    assert.deepEqual(healthState.database, { status: "healthy", healthy: true, error: "" });
 
     const preflight = await fetch(`${base}/v1/admin/login`, {
       method: "OPTIONS",
@@ -150,6 +152,23 @@ activateOnline(process.env.ACTIVATION_CODE).then(() => { console.log(JSON.string
     await new Promise((resolve) => server.close(resolve));
     store.close();
     await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("licensing health reports a malformed database instead of advertising a false positive", async () => {
+  const { LicenseService, createLicenseServer } = await import("../license-server/server.js");
+  const service = new LicenseService({
+    config: { publicOrigins: ["http://localhost:3000"] },
+    store: { databaseStatus: () => ({ status: "malformed", healthy: false, error: "database disk image is malformed" }) },
+  });
+  const server = await createLicenseServer({ service, cleanupIntervalMs: 0 });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/v1/health`);
+    assert.equal(response.status, 503);
+    assert.deepEqual((await response.json()).database, { status: "malformed", healthy: false, error: "database disk image is malformed" });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
   }
 });
 

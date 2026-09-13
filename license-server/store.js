@@ -80,6 +80,17 @@ export class LicenseStore {
     this.database.close();
   }
 
+  databaseStatus() {
+    try {
+      const result = String(this.database.pragma("quick_check(1)", { simple: true }) || "").trim();
+      if (result.toLowerCase() === "ok") return { status: "healthy", healthy: true, error: "" };
+      return { status: "malformed", healthy: false, error: result || "SQLite integrity check failed." };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "SQLite integrity check failed.");
+      return { status: /malformed|corrupt|not a database|disk image/i.test(message) ? "malformed" : "error", healthy: false, error: message };
+    }
+  }
+
   createRequest({ origin, requesterLabel = "", durationMs, now, expiresAt, auditDetails = {} }) {
     const id = randomUUID();
     const requestToken = token();
