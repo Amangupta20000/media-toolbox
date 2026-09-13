@@ -1,3 +1,7 @@
+import dns from "node:dns";
+import http from "node:http";
+import https from "node:https";
+
 const MAX_BODY_BYTES = 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 4_500;
 const MAX_UPSTREAM_ATTEMPTS = 2;
@@ -40,6 +44,45 @@ function json(response, status, payload) {
   response.status(status).setHeader("Cache-Control", "no-store").json(payload);
 }
 
+function requestOverIpv4(target, options) {
+  return new Promise((resolve, reject) => {
+    const transport = target.protocol === "https:" ? https : http;
+    const headers = { ...options.headers };
+    if (options.body && !headers["content-length"] && !headers["Content-Length"]) {
+      headers["content-length"] = String(options.body.length);
+    }
+    const request = transport.request({
+      hostname: target.hostname,
+      port: Number(target.port || (target.protocol === "https:" ? 443 : 80)),
+      path: `${target.pathname}${target.search}`,
+      method: options.method,
+      headers,
+      servername: target.protocol === "https:" ? target.hostname : undefined,
+      lookup(hostname, lookupOptions, callback) {
+        dns.lookup(hostname, { ...lookupOptions, family: 4, all: false }, callback);
+      },
+      timeout: REQUEST_TIMEOUT_MS,
+    }, (upstream) => {
+      const chunks = [];
+      upstream.on("data", (chunk) => chunks.push(chunk));
+      upstream.once("end", () => resolve({
+        status: upstream.statusCode || 502,
+        contentType: upstream.headers["content-type"] || "",
+        body: Buffer.concat(chunks),
+      }));
+      upstream.once("error", reject);
+    });
+    request.once("timeout", () => {
+      const error = new Error("The licensing server request timed out.");
+      error.name = "AbortError";
+      request.destroy(error);
+    });
+    request.once("error", reject);
+    if (options.body) request.write(options.body);
+    request.end();
+  });
+}
+
 export default async function handler(request, response) {
   const baseUrl = licensingServerUrl();
   const pathname = requestedPath(request);
@@ -70,31 +113,23 @@ export default async function handler(request, response) {
   try {
     body = ["GET", "HEAD"].includes(request.method) ? undefined : await readBody(request);
     for (let attempt = 0; attempt < MAX_UPSTREAM_ATTEMPTS; attempt += 1) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
       try {
-        upstream = await fetch(target, {
+        upstream = await requestOverIpv4(target, {
           method: request.method,
           headers,
           body,
-          signal: controller.signal,
-          redirect: "error",
         });
         break;
       } catch (error) {
         lastError = error;
         if (attempt === MAX_UPSTREAM_ATTEMPTS - 1) throw error;
-      } finally {
-        clearTimeout(timeout);
       }
     }
     if (!upstream) throw lastError || new Error("The licensing server request failed.");
-    const payload = Buffer.from(await upstream.arrayBuffer());
     response.status(upstream.status);
     response.setHeader("Cache-Control", "no-store");
-    const contentType = upstream.headers.get("content-type");
-    if (contentType) response.setHeader("Content-Type", contentType);
-    return response.send(payload);
+    if (upstream.contentType) response.setHeader("Content-Type", upstream.contentType);
+    return response.send(upstream.body);
   } catch (error) {
     error = lastError || error;
     if (error?.statusCode) return json(response, error.statusCode, { error: error.message });

@@ -59,6 +59,8 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(licenseClient, /direct Funnel URL/);
   assert.match(licenseProxy, /bodyParser: false/);
   assert.match(licenseProxy, /MAX_UPSTREAM_ATTEMPTS = 2/);
+  assert.match(licenseProxy, /requestOverIpv4/);
+  assert.match(licenseProxy, /family: 4/);
   assert.match(licenseProxy, /The licensing server request timed out/);
 });
 
