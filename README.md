@@ -11,7 +11,7 @@ Private image conversion, video repair, and PDF editing tools. The website runs 
 - Pixel dimensions preserved; JPEG transparency warning included.
 - Video recovery with lossless remux, MKV/WebM repair, optional Untrunc reference recovery, tolerant transcode, and video-only fallback.
 - Recovered video is validated with strict FFmpeg decoding; when Untrunc exposes decodable but damaged frames, the worker re-encodes them into a fresh H.264/AAC MP4 and reports the best-effort limitation.
-- PDF editor beta: load 1-5 PDFs (50 MB total), merge them, reorder or delete pages, add blank pages, and place/move/resize PNG, JPG, JPEG, or HEIC images on blank pages.
+- PDF editor beta: load 1-5 PDFs (200 MB total), merge them, reorder or delete pages, add blank pages, and place/move/resize PNG, JPG, JPEG, or HEIC images on blank pages.
 - PDF editor merges and exports through the Local agent or Server while retaining source page sizes and rotations and never modifying the original PDFs. Inserted HEIC/TIFF/GIF/BMP images use the ImageMagick/libheif normalization path when needed. PDF page previews and thumbnails are rendered by the application; no browser PDF viewer is used.
 - PDF text editor beta: open one PDF, select detected text runs across pages, replace them with inline editing, and export through the Local agent or Server. Native PDFs preserve searchable text and change only the selected text-show operators. Image-only PDFs use the bundled English OCR engine as a clearly labeled fallback.
 - Responsive two-column workspace with a collapsible tool sidebar.
@@ -172,11 +172,11 @@ The healthy video should come from the same device/app and use the same video si
 
 ## PDF editor limits and behavior
 
-- Add up to 5 PDFs per PDF editor request, with a combined upload limit of 50 MB. There is no separate per-file limit below that total, so a 50 MB PDF uses the complete allowance and prevents another PDF from being added.
+- Add up to 5 PDFs per PDF editor request, with a combined upload limit of 200 MB. There is no separate per-file limit below that total, so a 200 MB PDF uses the complete allowance and prevents another PDF from being added.
 - Up to five PDFs can be open in one editor project. A single PDF is supported too.
 - A blank page starts at A4 portrait when there is no selected source page. An image is fitted inside the page and can then be moved or resized.
 - The result is always one new PDF. Source PDFs are copied, never overwritten. PDF annotations, form fields, attachments, and other advanced structures may not survive page copying; the visible page content, page size, rotation, and order are the supported guarantees.
-- The separate `/pdf-text-editor` tool accepts one PDF up to 50 MB. Native text editing preserves page order, rotations, images, graphics, backgrounds, colors, opacity, font size, and non-edited text. Longer replacements may overflow because surrounding content is not reflowed. If the original font cannot encode the replacement, the bundled Helvetica fallback is used when possible and a warning is added; unsupported replacements are blocked safely.
+- The separate `/pdf-text-editor` tool accepts one PDF up to 200 MB. Native text editing preserves page order, rotations, images, graphics, backgrounds, colors, opacity, font size, and non-edited text. Longer replacements may overflow because surrounding content is not reflowed. If the original font cannot encode the replacement, the bundled Helvetica fallback is used when possible and a warning is added; unsupported replacements are blocked safely.
 - Image-only/scanned PDFs are rendered and scanned by the bundled Tesseract.js English OCR engine through the Local agent or Server. OCR words are shown as editable regions with confidence information. Export reconstructs only pages containing OCR edits, so the exact source font, opacity, and hidden pixels in those regions cannot be recovered; the export warning explains this limitation. Untouched pages remain copied from the original PDF.
 - PDF text editor export is available only through the Local agent or Server. PDF.js is used for page preview and selection; there is no browser export mode. Password-protected or encrypted PDFs that cannot be safely modified are rejected with an explicit message.
 

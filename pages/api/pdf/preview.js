@@ -26,7 +26,7 @@ export default async function handler(request, response) {
 
     const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "media-toolbox-pdf-preview-"));
     const outputPrefix = path.join(tempDir, `page-${page}-${randomUUID()}`);
-    const renderResolution = request.query.thumbnail === "1" ? "40" : "110";
+    const renderResolution = request.query.thumbnail === "1" ? "40" : "180";
     const rendered = await runCommand(pdftoppm, ["-f", String(page), "-l", String(page), "-singlefile", "-png", "-r", renderResolution, sourcePath, outputPrefix], { timeoutMs: 120000 });
     const outputPath = `${outputPrefix}.png`;
     if (rendered.code !== 0) {

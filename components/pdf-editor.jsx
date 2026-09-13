@@ -130,7 +130,7 @@ async function loadPdfLibrary() {
     // Serve the worker from the application origin instead of relying on
     // Next.js to publish a dynamically imported node_modules asset. The
     // latter can produce a hashed URL that is missing on the result page.
-    library.GlobalWorkerOptions.workerSrc = "/api/pdf/worker";
+    library.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
   }
   return library;
 }
@@ -522,7 +522,7 @@ export function PdfEditor() {
     const existingPdfBytes = pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0);
     const selectedPdfBytes = selectedFiles.reduce((total, file) => total + Number(file.size || 0), 0);
     if (existingPdfBytes + selectedPdfBytes > MAX_PDF_TOTAL_BYTES) {
-      setError("The combined PDF upload must be 50 MB or smaller. Remove a PDF before adding another.");
+      setError("The combined PDF upload must be 200 MB or smaller. Remove a PDF before adding another.");
       return;
     }
 
@@ -1151,13 +1151,13 @@ export function PdfEditor() {
   }, [activeView, job, loadingFiles, selectedPage, previewZoom, pages, pdfFiles, processingMode]);
 
   return <AppShell>
-    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools · Beta <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · 50 MB total</span></div><h1>PDF editor</h1><p>Merge documents, reorder pages, remove pages, and add images to PDF pages or new blank pages.</p></div></div>
+    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools · Beta <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · 200 MB total</span></div><h1>PDF editor</h1><p>Merge documents, reorder pages, remove pages, and add images to PDF pages or new blank pages.</p></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
     {activeView === "history" ? <ToolHistory tool="pdf-editor" /> : <>
     {!job && <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />}
     {job ? <PdfJobCard job={job} mode={jobMode} keepResult={keepResult} onReset={reset} onContinue={continueEditing} /> : <section className={`pdf-editor-shell ${pdfDragActive ? "pdf-drop-active" : ""}`} onDragOver={handlePdfDragOver} onDragLeave={handlePdfDragLeave} onDrop={handlePdfDrop}>
       <div className="pdf-editor-toolbar">
-        <div className="pdf-editor-toolbar-heading"><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDF_COUNT} PDFs · {pages.length} pages · {Math.ceil(pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0) / (1024 * 1024)) || 0} MB of 50 MB</span></div>
+        <div className="pdf-editor-toolbar-heading"><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDF_COUNT} PDFs · {pages.length} pages · {Math.ceil(pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0) / (1024 * 1024)) || 0} MB of 200 MB</span></div>
         <div className="pdf-editor-actions">
           <button className="secondary-button" type="button" onClick={() => pdfInputRef.current?.click()} disabled={loadingFiles || pdfFiles.length >= MAX_PDF_COUNT}><Plus size={17} /> Add PDF</button>
           <button className="secondary-button" type="button" onClick={addBlankPage}><FilePlus2 size={17} /> Blank page</button>
@@ -1193,7 +1193,7 @@ export function PdfEditor() {
 }
 
 function PdfEmptyState({ onBrowse, loading, dragActive }) {
-  return <div className="pdf-empty-state"><div className="pdf-empty-icon"><UploadCloud size={28} /></div><h2>{loading ? "Reading PDF pages…" : dragActive ? "Drop your PDF files" : "Add your first PDF"}</h2><p>{loading ? "Creating page previews for the editor." : dragActive ? "Release to add the PDFs to your project." : "Upload one PDF to edit it, or add up to five PDFs to merge them."}</p><button className="primary-button" type="button" onClick={onBrowse} disabled={loading}><FilePlus2 size={18} /> Browse PDF files</button><small>Up to 5 PDFs · 50 MB total</small></div>;
+  return <div className="pdf-empty-state"><div className="pdf-empty-icon"><UploadCloud size={28} /></div><h2>{loading ? "Reading PDF pages…" : dragActive ? "Drop your PDF files" : "Add your first PDF"}</h2><p>{loading ? "Creating page previews for the editor." : dragActive ? "Release to add the PDFs to your project." : "Upload one PDF to edit it, or add up to five PDFs to merge them."}</p><button className="primary-button" type="button" onClick={onBrowse} disabled={loading}><FilePlus2 size={18} /> Browse PDF files</button><small>Up to 5 PDFs · 200 MB total</small></div>;
 }
 
 function PdfNoPagesState({ onBrowse, onBlank }) {
@@ -1322,12 +1322,20 @@ function PdfPageCanvas({ page, pdfDocument, pageNumber, onError, onChange, onRem
       drawing = true;
       const surface = surfaceRef.current;
       const scale = Math.min(1.35, Math.max(0.45, Math.min(surface.clientWidth / pageInfo.width, surface.clientHeight / pageInfo.height)));
-      const viewport = pageInfo.pdfPage.getViewport({ scale, rotation: normalizeRotation(page.rotation) });
+      const rotation = normalizeRotation(page.rotation);
+      // Keep the displayed page at the same CSS size, but render its backing
+      // canvas at 2x (or the display's native density) so text and vector
+      // artwork stay sharp in the full preview. Thumbnails intentionally use
+      // their smaller render path.
+      const pixelRatio = Math.min(3, Math.max(2, Number(window.devicePixelRatio) || 1));
+      const renderViewport = pageInfo.pdfPage.getViewport({ scale: scale * pixelRatio, rotation });
       const canvas = canvasRef.current;
-      canvas.width = Math.ceil(viewport.width);
-      canvas.height = Math.ceil(viewport.height);
+      canvas.width = Math.ceil(renderViewport.width);
+      canvas.height = Math.ceil(renderViewport.height);
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
       try {
-        await pageInfo.pdfPage.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+        await pageInfo.pdfPage.render({ canvasContext: canvas.getContext("2d", { alpha: false }), viewport: renderViewport }).promise;
       } finally {
         drawing = false;
       }

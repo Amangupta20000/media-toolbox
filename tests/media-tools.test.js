@@ -459,9 +459,9 @@ test("PDF editor rejects a sixth PDF and unsupported inserted images at upload v
       id: crypto.randomUUID(),
       jobDir: testRoot,
       fields: { tool: "pdf-editor", operations: JSON.stringify([{ kind: "source", pdfIndex: 0, pageIndex: 0 }]) },
-      files: [{ field: "pdf", name: "oversized.pdf", mime: "application/pdf", path: sourcePath, size: 50 * 1024 * 1024 + 1 }],
+      files: [{ field: "pdf", name: "oversized.pdf", mime: "application/pdf", path: sourcePath, size: 200 * 1024 * 1024 + 1 }],
     }),
-    /50 MB PDF limit/i,
+    /200 MB PDF limit/i,
   );
 
   await assert.rejects(
@@ -473,11 +473,11 @@ test("PDF editor rejects a sixth PDF and unsupported inserted images at upload v
         { kind: "source", pdfIndex: 1, pageIndex: 0 },
       ]) },
       files: [
-        { field: "pdf", name: "first.pdf", mime: "application/pdf", path: sourcePath, size: 30 * 1024 * 1024 },
-        { field: "pdf", name: "second.pdf", mime: "application/pdf", path: sourcePath, size: 20 * 1024 * 1024 + 1 },
+        { field: "pdf", name: "first.pdf", mime: "application/pdf", path: sourcePath, size: 120 * 1024 * 1024 },
+        { field: "pdf", name: "second.pdf", mime: "application/pdf", path: sourcePath, size: 80 * 1024 * 1024 + 1 },
       ],
     }),
-    /combined PDF upload.*50 MB limit/i,
+    /combined PDF upload.*200 MB limit/i,
   );
 });
 

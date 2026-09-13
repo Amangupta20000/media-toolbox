@@ -21,7 +21,7 @@ export default async function handler(request, response) {
     if (sources.length !== 1) throw new Error("Add exactly one PDF for OCR.");
     const source = sources[0];
     if (!likelyFileForTool(source, "pdf-text-editor")) throw new Error("The uploaded file is not a PDF.");
-    if (source.size > appConfig.pdfMaxBytes) throw new Error("The PDF is larger than the 50 MB limit.");
+    if (source.size > appConfig.pdfMaxBytes) throw new Error("The PDF is larger than the 200 MB limit.");
     response.statusCode = 200;
     response.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
     response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
