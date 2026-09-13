@@ -1,6 +1,10 @@
+import dns from "node:dns/promises";
+import http from "node:http";
+import https from "node:https";
+
 const MAX_BODY_BYTES = 1024 * 1024;
-const REQUEST_TIMEOUT_MS = 4_500;
-const MAX_UPSTREAM_ATTEMPTS = 2;
+const REQUEST_TIMEOUT_MS = 2_500;
+const MAX_UPSTREAM_ATTEMPTS = 3;
 
 export const config = {
   api: {
@@ -40,6 +44,52 @@ function json(response, status, payload) {
   response.status(status).setHeader("Cache-Control", "no-store").json(payload);
 }
 
+async function publicIpv4Addresses(target) {
+  if (target.protocol !== "https:") return [];
+  try {
+    return [...new Set((await dns.resolve4(target.hostname)).map((value) => String(value).trim()).filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
+
+function requestWithAddress(target, options, address) {
+  if (!address) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    return fetch(target, { ...options, signal: controller.signal })
+      .then(async (upstream) => ({ status: upstream.status, contentType: upstream.headers.get("content-type"), body: Buffer.from(await upstream.arrayBuffer()) }))
+      .finally(() => clearTimeout(timeout));
+  }
+
+  return new Promise((resolve, reject) => {
+    const transport = target.protocol === "https:" ? https : http;
+    const headers = { ...options.headers, Host: target.host };
+    const request = transport.request({
+      hostname: address,
+      port: Number(target.port || (target.protocol === "https:" ? 443 : 80)),
+      path: `${target.pathname}${target.search}`,
+      method: options.method,
+      headers,
+      servername: target.protocol === "https:" ? target.hostname : undefined,
+      timeout: REQUEST_TIMEOUT_MS,
+    }, (upstream) => {
+      const chunks = [];
+      upstream.on("data", (chunk) => chunks.push(chunk));
+      upstream.once("end", () => resolve({
+        status: upstream.statusCode || 502,
+        contentType: upstream.headers["content-type"] || "",
+        body: Buffer.concat(chunks),
+      }));
+      upstream.once("error", reject);
+    });
+    request.once("timeout", () => request.destroy(new Error("The licensing server request timed out.")));
+    request.once("error", reject);
+    if (options.body) request.write(options.body);
+    request.end();
+  });
+}
+
 export default async function handler(request, response) {
   const baseUrl = licensingServerUrl();
   const pathname = requestedPath(request);
@@ -69,37 +119,31 @@ export default async function handler(request, response) {
   let lastError;
   try {
     body = ["GET", "HEAD"].includes(request.method) ? undefined : await readBody(request);
-    for (let attempt = 0; attempt < MAX_UPSTREAM_ATTEMPTS; attempt += 1) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const addresses = await publicIpv4Addresses(target);
+    const candidates = [...addresses, null].slice(0, MAX_UPSTREAM_ATTEMPTS);
+    for (const address of candidates) {
       try {
-        upstream = await fetch(target, {
+        upstream = await requestWithAddress(target, {
           method: request.method,
           headers,
           body,
-          signal: controller.signal,
           redirect: "error",
-        });
+        }, address);
         break;
       } catch (error) {
         lastError = error;
-        if (attempt === MAX_UPSTREAM_ATTEMPTS - 1) throw error;
-      } finally {
-        clearTimeout(timeout);
       }
     }
-    const payload = Buffer.from(await upstream.arrayBuffer());
+    if (!upstream) throw lastError || new Error("The licensing server request failed.");
     response.status(upstream.status);
     response.setHeader("Cache-Control", "no-store");
-    const contentType = upstream.headers.get("content-type");
+    const contentType = upstream.contentType;
     if (contentType) response.setHeader("Content-Type", contentType);
-    return response.send(payload);
+    return response.send(upstream.body);
   } catch (error) {
     error = lastError || error;
     if (error?.statusCode) return json(response, error.statusCode, { error: error.message });
     if (error?.name === "AbortError") return json(response, 504, { error: "The licensing server request timed out." });
     return json(response, 502, { error: `The licensing server could not be reached: ${error?.message || "request failed"}` });
-  } finally {
-    clearTimeout(timeout);
   }
 }
