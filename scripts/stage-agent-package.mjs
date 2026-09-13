@@ -24,6 +24,14 @@ await copy("electron-builder.yml");
 await copy("agent/package.json", "package.json");
 await copy("agent/package-lock.json", "package-lock.json");
 
+// Keep the packaged Local agent aligned with the website PDF editor. In
+// particular, blank-page-only projects are valid and must not be regressed by
+// an old ignored .agent-build directory or a partially refreshed package.
+const stagedJobIntake = await fs.readFile(path.join(stagingDirectory, "lib", "job-intake.js"), "utf8");
+if (stagedJobIntake.includes('pdfFiles.length < 1') || stagedJobIntake.includes('Add at least one PDF."')) {
+  throw new Error("The staged Local agent still contains the old PDF-editor requirement for an uploaded PDF.");
+}
+
 for (const filename of ["license-public-key.pem", "license-server-url.txt"]) {
   const stagedFile = path.join(stagingDirectory, "agent", filename);
   try {

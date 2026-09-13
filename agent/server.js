@@ -247,6 +247,15 @@ function safeDownloadName(name) {
   return String(name || "download").replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+function requestedDownloadName(requested, original) {
+  const fallback = safeDownloadName(original || "download");
+  if (!requested) return fallback;
+  const extensionMatch = fallback.match(/\.[a-z0-9]{1,8}$/i);
+  const extension = extensionMatch ? extensionMatch[0] : "";
+  const candidateStem = safeDownloadName(requested).replace(/\.[a-z0-9]{1,8}$/i, "") || "download";
+  return `${candidateStem}${extension}`;
+}
+
 function isWithinDirectory(candidate, directory) {
   const resolvedCandidate = path.resolve(candidate);
   const resolvedDirectory = path.resolve(directory);
@@ -439,7 +448,7 @@ function resultPathFor(job) {
   return resolved.startsWith(dataRoot) ? resolved : null;
 }
 
-function streamResult(request, response, job, preview = false, onComplete = null) {
+function streamResult(request, response, job, preview = false, onComplete = null, requestedFilename = "") {
   const result = rawResult(job);
   const resultPath = resultPathFor(job);
   if (!result || !resultPath || !fs.existsSync(resultPath)) {
@@ -479,7 +488,8 @@ function streamResult(request, response, job, preview = false, onComplete = null
     response.setHeader("Vary", "Origin");
   }
   response.setHeader("Content-Type", type);
-  response.setHeader("Content-Disposition", `${preview ? "inline" : "attachment"}; filename="${safeDownloadName(result.filename || "download")}"`);
+  const downloadName = requestedDownloadName(requestedFilename, result.filename || "download");
+  response.setHeader("Content-Disposition", `${preview ? "inline" : "attachment"}; filename="${downloadName}"`);
   response.setHeader("Accept-Ranges", "bytes");
   response.setHeader("Content-Length", String(end - start + 1));
   response.setHeader("Cache-Control", "no-store");
@@ -751,7 +761,7 @@ async function handle(request, response) {
       return streamResult(request, response, job, url.searchParams.get("preview") === "1", () => {
         const options = JSON.parse(job.options_json || "{}");
         if (options.retention !== "keep" && url.searchParams.get("preview") !== "1") cleanupJob(id).catch(() => undefined);
-      });
+      }, url.searchParams.get("filename") || "");
     }
     if (action === "preview" && request.method === "GET") {
       if (path.extname(rawResult(job)?.filename || "").toLowerCase() === ".pdf") return renderPdfPage(request, response, job, Number(url.searchParams.get("page") || 1));

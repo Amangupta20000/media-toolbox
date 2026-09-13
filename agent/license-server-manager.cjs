@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
 const path = require("node:path");
-const { spawn: defaultSpawn } = require("node:child_process");
+const { execFile: defaultExecFile, spawn: defaultSpawn } = require("node:child_process");
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4900;
@@ -11,6 +11,10 @@ const DEFAULT_MOUNT_PATH = "/Volumes/Sandisk Exf";
 const HEALTH_TIMEOUT_MS = 1500;
 const START_TIMEOUT_MS = 15000;
 const AUTO_START_INTERVAL_MS = 5000;
+const DEFAULT_TAILSCALE_APP_PATH = "/Applications/Tailscale.app";
+const TAILSCALE_PROCESS_NAME = "Tailscale";
+const TAILSCALE_PGREP_PATH = "/usr/bin/pgrep";
+const TAILSCALE_OPEN_PATH = "/usr/bin/open";
 
 function isAlive(child) {
   return Boolean(child && child.exitCode === null && !child.killed);
@@ -68,6 +72,23 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function runExecFile(execFileImpl, file, args) {
+  return new Promise((resolve, reject) => {
+    try {
+      execFileImpl(file, args, (error, stdout, stderr) => {
+        resolve({
+          ok: !error,
+          error: error || null,
+          stdout: String(stdout || ""),
+          stderr: String(stderr || ""),
+        });
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
 function createLicenseServerManager({
   app,
   moduleDirectory = __dirname,
@@ -81,7 +102,12 @@ function createLicenseServerManager({
   resourcesPath = process.resourcesPath || "",
   autoStartIntervalMs = AUTO_START_INTERVAL_MS,
   spawnImpl = defaultSpawn,
+  execFileImpl = defaultExecFile,
   existsSync = fs.existsSync,
+  platform = process.platform,
+  tailscaleAppPath = DEFAULT_TAILSCALE_APP_PATH,
+  tailscaleRunningCheck = null,
+  tailscaleOpen = null,
   healthCheck = (url) => probeHealth(url),
   publicHealthCheck = (url) => probeEndpoint(url),
   logger = console,
@@ -92,6 +118,16 @@ function createLicenseServerManager({
   let autoStartRun = null;
   let startRun = null;
   let manuallyStopped = false;
+  const checkTailscaleRunning = tailscaleRunningCheck || (async () => {
+    const result = await runExecFile(execFileImpl, TAILSCALE_PGREP_PATH, ["-x", TAILSCALE_PROCESS_NAME]);
+    return result.ok;
+  });
+  const openTailscaleApp = tailscaleOpen || (async () => {
+    const result = await runExecFile(execFileImpl, TAILSCALE_OPEN_PATH, ["-a", "Tailscale"]);
+    if (!result.ok) {
+      throw result.error || new Error(result.stderr || "The Tailscale app could not be opened.");
+    }
+  });
   // A packaged Electron app cannot spawn a script through an app.asar path:
   // the archive is readable by Electron but app.asar itself is not a real
   // directory to the child process. The builder copies this runtime to the
@@ -154,11 +190,75 @@ function createLicenseServerManager({
     };
   }
 
+  async function getTailscaleState() {
+    if (platform !== "darwin") {
+      return {
+        supported: false,
+        installed: null,
+        running: null,
+        opened: false,
+        message: "The Tailscale app check is available on macOS only.",
+      };
+    }
+
+    const installed = Boolean(existsSync(tailscaleAppPath));
+    if (!installed) {
+      return {
+        supported: true,
+        installed: false,
+        running: false,
+        opened: false,
+        message: "Tailscale is not installed. Install the Tailscale app to make the licensing server publicly reachable.",
+      };
+    }
+
+    try {
+      const running = Boolean(await checkTailscaleRunning());
+      return {
+        supported: true,
+        installed: true,
+        running,
+        opened: false,
+        message: running ? "Tailscale is running." : "Tailscale is installed but not running.",
+      };
+    } catch (error) {
+      return {
+        supported: true,
+        installed: true,
+        running: false,
+        opened: false,
+        error: error instanceof Error ? error.message : String(error || "The Tailscale app status could not be checked."),
+        message: "The Tailscale app status could not be checked.",
+      };
+    }
+  }
+
+  async function ensureTailscaleRunning() {
+    const state = await getTailscaleState();
+    if (!state.supported || !state.installed || state.running) return state;
+    try {
+      await openTailscaleApp();
+      return {
+        ...state,
+        error: "",
+        opened: true,
+        message: "Tailscale was closed, so the Tailscale app was opened. Wait for it to connect before checking the public endpoint.",
+      };
+    } catch (error) {
+      return {
+        ...state,
+        error: `Tailscale is installed but could not be opened: ${error instanceof Error ? error.message : String(error || "unknown error")}`,
+        message: "The licensing server can run locally, but Tailscale could not be opened.",
+      };
+    }
+  }
+
   async function getState() {
     const publicEndpoint = publicUrl();
-    const [healthy, publicHealthy] = await Promise.all([
+    const [healthy, publicHealthy, tailscale] = await Promise.all([
       healthCheck(`${url}/v1/health`),
       publicEndpoint ? publicHealthCheck(`${publicEndpoint}/v1/health`) : Promise.resolve(null),
+      getTailscaleState(),
     ]);
     const storage = storageState();
     const autoStartStatus = manuallyStopped
@@ -181,6 +281,7 @@ function createLicenseServerManager({
       autoStartEnabled: true,
       autoStartStatus,
       ...storage,
+      tailscale,
       runtime: useElectronRuntime ? "packaged Electron runtime" : (nodeExecutable ? nodeExecutable : "Node 22 required"),
       error: lastError
         || (storage.ownerConfigured && !storage.ssdMounted ? "Connect the licensing SSD before starting the server."
@@ -221,12 +322,24 @@ function createLicenseServerManager({
 
   async function startInternal() {
     const current = await getState();
-    if (current.healthy) return { ...current, started: false, message: "The licensing server is already running." };
     if (!current.ssdMounted) throw new Error("Connect the Sandisk Exf licensing SSD before starting the server.");
     if (!current.available) throw new Error("This agent release does not include the licensing server runtime.");
+    const tailscale = await ensureTailscaleRunning();
+    const currentWithTailscale = tailscale.opened || tailscale.error
+      ? { ...current, tailscale }
+      : current;
+    const startMessage = tailscale.opened
+      ? "The licensing server is running. Tailscale was closed, so the Tailscale app was opened. Wait for it to connect before checking the public endpoint."
+      : tailscale.error
+        ? `The licensing server is running locally, but ${tailscale.error}`
+        : tailscale.installed === false
+          ? "The licensing server is running locally, but Tailscale is not installed."
+          : "The licensing server is running.";
+    if (current.healthy) return { ...currentWithTailscale, started: false, message: startMessage };
     if (child && isAlive(child)) {
       await waitForHealth(child);
-      return { ...(await getState()), started: false, message: "The licensing server is already starting." };
+      const state = await getState();
+      return { ...state, ...(tailscale.opened || tailscale.error ? { tailscale } : {}), started: false, message: startMessage };
     }
 
     lastError = "";
@@ -280,7 +393,8 @@ function createLicenseServerManager({
     try {
       await waitForHealth(nextChild);
       rememberOwnerMachine();
-      return { ...(await getState()), started: true, message: "The licensing server is running." };
+      const state = await getState();
+      return { ...state, tailscale: tailscale.opened || tailscale.error ? tailscale : state.tailscale, started: true, message: startMessage };
     } catch (error) {
       if (isAlive(nextChild)) nextChild.kill?.("SIGTERM");
       throw error;

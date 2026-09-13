@@ -348,6 +348,34 @@ test("PDF editor reorders pages, creates a blank page with an image, and preserv
   assert.equal(await sha256(sourcePath), sourceHash);
 });
 
+test("PDF editor exports a project made only from blank pages", async () => {
+  const jobDir = path.join(testRoot, "pdf-blank-only-job");
+  await fs.mkdir(jobDir, { recursive: true });
+  const intakeResult = await createJobFromMultipart({
+    id: crypto.randomUUID(),
+    jobDir,
+    fields: {
+      tool: "pdf-editor",
+      operations: JSON.stringify([
+        { kind: "blank", width: 300, height: 400, rotation: 0, images: [] },
+        { kind: "blank", width: 400, height: 300, rotation: 90, images: [] },
+      ]),
+    },
+    files: [],
+  });
+  const job = db.getJob(intakeResult.ids[0]);
+  await worker.processJob(job);
+
+  const completed = db.getJob(job.id);
+  const result = JSON.parse(completed.result_json);
+  const output = await PDFDocument.load(await fs.readFile(result.path));
+  assert.equal(completed.status, "completed");
+  assert.equal(result.filename, "blank_pages_edited.pdf");
+  assert.equal(result.inputBytes, 0);
+  assert.equal(output.getPageCount(), 2);
+  assert.deepEqual(output.getPages().map((page) => [Math.round(page.getWidth()), Math.round(page.getHeight())]), [[300, 400], [400, 300]]);
+});
+
 test("PDF editor embeds multiple images on one blank page", async (t) => {
   const sourcePath = path.join(testRoot, "multi-image-source.pdf");
   await createPdf(sourcePath, "Multiple images", [[420, 560]]);
@@ -547,10 +575,10 @@ test("PDF editor fails clearly for an invalid source page and serves a PDF with 
   const chunks = [];
   response.on("data", (chunk) => chunks.push(chunk));
   const ended = once(response, "end");
-  route.default({ method: "GET", query: { id: validJob.id }, headers: {} }, response);
+  route.default({ method: "GET", query: { id: validJob.id, filename: "my-export.exe" }, headers: {} }, response);
   await ended;
   assert.equal(headers["content-type"], "application/pdf");
-  assert.match(headers["content-disposition"], /^attachment;/);
+  assert.match(headers["content-disposition"], /^attachment; filename="my-export\.pdf"$/);
   assert.equal(Buffer.concat(chunks).subarray(0, 5).toString(), "%PDF-");
 
   const previewRoute = await import("../pages/api/jobs/[id]/preview.js");

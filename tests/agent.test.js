@@ -182,6 +182,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardHtml, /id="license-server-notice"/);
   assert.match(dashboardHtml, /id="license-server-command"/);
   assert.match(dashboardHtml, /id="copy-license-server-command"/);
+  assert.match(dashboardHtml, /id="license-server-tailscale-status"/);
   assert.match(dashboardHtml, /Copy this command only when using a source checkout/);
   assert.doesNotMatch(dashboardHtml, /bottom-left/);
   assert.match(dashboardCss, /\.dashboard-actions\{position:fixed;left:0;right:0;bottom:0/);
@@ -209,6 +210,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardRenderer, /Restart and install/);
   assert.match(dashboardRenderer, /status === "up-to-date"/);
   assert.match(dashboardRenderer, /Agent is up to date/);
+  assert.doesNotMatch(dashboardRenderer, /showNotice\([^\n]*up to date/);
   assert.match(dashboardRenderer, /updateDismissTimer/);
   assert.match(dashboardRenderer, /window\.setTimeout\(\(\) => \{[\s\S]*panel\.classList\.add\("hidden"\)[\s\S]*\}, 10000\)/);
   assert.match(dashboardRenderer, /full-required/);
@@ -268,6 +270,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardRenderer, /setLicenseServerNotice/);
   assert.match(dashboardRenderer, /LICENSE_DATA_DIR=\$\{shellQuote\(dataDir\)\} npm run license-server/);
   assert.match(dashboardRenderer, /copy-license-server-command/);
+  assert.match(dashboardRenderer, /Tailscale was closed, so it was opened/);
   assert.match(dashboardRenderer, /value\.ownerConfigured === true/);
   assert.match(dashboardRenderer, /panel\.classList\.toggle\("hidden", !adminAuthenticated\)/);
   assert.match(dashboardRenderer, /state\.authorization\?\.mode === "admin"/);
@@ -382,6 +385,47 @@ test("dashboard licensing server manager starts and stops the loopback service",
   const stopped = await manager.stop();
   assert.equal(stopped.healthy, false);
   assert.equal(stopped.managed, false);
+});
+
+test("dashboard licensing server manager opens Tailscale before starting when the app is closed", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const mountPath = path.join(testRoot, "license-server-tailscale");
+  const dataDirectory = path.join(mountPath, "MediaToolboxLicensing");
+  let healthy = false;
+  let opened = 0;
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.killed = false;
+  child.kill = () => {
+    child.killed = true;
+    child.exitCode = 0;
+    healthy = false;
+    child.emit("exit", 0, "SIGTERM");
+  };
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(root, "agent"),
+    dataDirectory,
+    mountPath,
+    nodeExecutable: "/node22/bin/node",
+    platform: "darwin",
+    tailscaleAppPath: "/Applications/Tailscale.app",
+    tailscaleRunningCheck: async () => false,
+    tailscaleOpen: async () => { opened += 1; },
+    existsSync: (value) => value === mountPath || value === dataDirectory || value === "/Applications/Tailscale.app" || value.endsWith(path.join("license-server", "index.js")),
+    healthCheck: async () => healthy,
+    spawnImpl: () => {
+      healthy = true;
+      return child;
+    },
+    logger: { log() {}, warn() {} },
+  });
+  const started = await manager.start();
+  assert.equal(opened, 1);
+  assert.equal(started.tailscale.opened, true);
+  assert.match(started.tailscale.message, /Tailscale was closed/);
+  assert.equal(started.started, true);
+  await manager.stop();
 });
 
 test("packaged licensing server manager uses a real cwd and can restart after stopping", async () => {

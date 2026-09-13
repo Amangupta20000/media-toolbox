@@ -1,7 +1,11 @@
 import { Download } from "lucide-react";
+import { downloadUrlWithFilename } from "./result-filename.jsx";
 
-export function ResultDownloadNote({ result, mode = "server", keepResult = false }) {
+export function ResultDownloadNote({ result, mode = "server", keepResult = false, filename }) {
   if (!result?.downloadUrl) return null;
+
+  const downloadName = filename || result.filename;
+  const downloadUrl = downloadUrlWithFilename(result.downloadUrl, downloadName);
 
   const retainedLocalResult = mode === "local" && (keepResult || result.retained);
   const location = result.location || (
@@ -25,7 +29,7 @@ export function ResultDownloadNote({ result, mode = "server", keepResult = false
       <Download size={16} aria-hidden="true" />
       <span>{message}</span>
     </div>
-    <a className="result-download-note-link" href={result.downloadUrl} download={result.filename}>
+    <a className="result-download-note-link" href={downloadUrl} download={downloadName}>
       Download again
     </a>
   </div>;

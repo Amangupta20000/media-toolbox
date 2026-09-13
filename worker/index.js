@@ -544,9 +544,9 @@ async function drawPdfImages(pdf, outputPage, operation, workDir, index) {
 async function processPdfEditor(job) {
   let manifest;
   try { manifest = JSON.parse(await fsp.readFile(job.source_path, "utf8")); } catch { throw new Error("The PDF editor project could not be read."); }
-  if (!Array.isArray(manifest.pdfs) || manifest.pdfs.length < 1 || !Array.isArray(manifest.pages) || manifest.pages.length < 1) throw new Error("The PDF editor project has no pages.");
+  if (!Array.isArray(manifest.pdfs) || !Array.isArray(manifest.pages) || manifest.pages.length < 1) throw new Error("The PDF editor project has no pages.");
 
-  update(job.id, 5, "Reading PDFs", `Opening ${manifest.pdfs.length} PDF${manifest.pdfs.length === 1 ? "" : "s"}.`);
+  update(job.id, 5, "Reading PDFs", manifest.pdfs.length ? `Opening ${manifest.pdfs.length} PDF${manifest.pdfs.length === 1 ? "" : "s"}.` : "Starting a blank-page PDF project.");
   const referencedPdfIndices = new Set(
     manifest.pages
       .filter((operation) => operation?.kind === "source")
@@ -592,7 +592,8 @@ async function processPdfEditor(job) {
   }
 
   update(job.id, 90, "Writing PDF", "Saving the new merged PDF.");
-  const outputName = `${manifest.pdfs.length === 1 ? stem(manifest.pdfs[0].name) : "merged"}_edited.pdf`;
+  const outputStem = manifest.pdfs.length === 1 ? stem(manifest.pdfs[0].name) : manifest.pdfs.length > 1 ? "merged" : "blank_pages";
+  const outputName = `${outputStem}_edited.pdf`;
   const outputPath = path.join(path.dirname(job.source_path), outputName);
   await fsp.writeFile(outputPath, await outputDocument.save());
   try {

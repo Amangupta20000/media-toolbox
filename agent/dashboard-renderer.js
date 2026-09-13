@@ -182,6 +182,7 @@
     const publicConfigured = Boolean(value.publicUrl);
     const publicHealthy = value.publicHealthy === null || value.publicHealthy === undefined ? null : Boolean(value.publicHealthy);
     const mounted = Boolean(value.ssdMounted);
+    const tailscale = value.tailscale || {};
     const fullyReachable = healthy && (!publicConfigured || publicHealthy !== false);
     const autoStartStatus = value.autoStartStatus || "";
     const waitingForSsd = ownerMachine && autoStartStatus === "waiting-for-ssd";
@@ -197,11 +198,26 @@
       : healthy && !value.managed
       ? "The licensing service is reachable, but it was started outside this agent. Stop that process first, then start it here so this dashboard can manage it."
       : healthy
-      ? `The licensing service is reachable at ${value.url || "http://127.0.0.1:4900"}. Tailscale Funnel can forward to it using its saved configuration.`
+      ? tailscale.opened
+        ? "The licensing service is reachable locally. Tailscale was opened because it was not running; wait for it to connect before checking the public endpoint."
+        : tailscale.installed === false
+          ? `The licensing service is reachable at ${value.url || "http://127.0.0.1:4900"}, but Tailscale is not installed. Install Tailscale to make the public endpoint reachable.`
+          : `The licensing service is reachable at ${value.url || "http://127.0.0.1:4900"}. Tailscale Funnel can forward to it using its saved configuration.`
       : value.error || (mounted ? "The licensing service is not running. Click Start licensing server after the SSD is mounted." : "Connect the Sandisk Exf licensing SSD, then click Start licensing server.");
     el("license-server-url").textContent = value.url || "http://127.0.0.1:4900";
     el("license-server-local-status").textContent = healthy ? "Connected" : "Unavailable";
     el("license-server-storage").textContent = value.dataDir || "/Volumes/Sandisk Exf/MediaToolboxLicensing";
+    el("license-server-tailscale-status").textContent = tailscale.supported === false
+      ? "Not applicable"
+      : tailscale.installed === false
+        ? "Not installed"
+        : tailscale.opened && !tailscale.running
+          ? "Opened; connecting"
+          : tailscale.running
+            ? "Running"
+            : tailscale.error
+              ? "Check failed"
+              : "Not running";
     el("license-server-public-url").textContent = value.publicUrl || "Configured by Tailscale Funnel";
     el("license-server-public-status").textContent = !publicConfigured ? "Not configured" : publicHealthy === true ? "Connected" : publicHealthy === false ? "Unavailable" : "Checking";
     const dataDir = value.dataDir || "/Volumes/Sandisk Exf/MediaToolboxLicensing";
@@ -559,7 +575,17 @@
     try {
       const value = await api.startLicenseServer();
       renderLicenseServer(value, true);
-      setLicenseServerNotice("The SSD licensing server is running. The saved Tailscale Funnel can now reach it.", "success");
+      const tailscale = value.tailscale || {};
+      setLicenseServerNotice(
+        tailscale.opened
+          ? "The SSD licensing server is running. Tailscale was closed, so it was opened. Wait for it to connect, then click Check status."
+          : tailscale.installed === false
+            ? "The SSD licensing server is running locally, but Tailscale is not installed."
+            : tailscale.error
+              ? `The SSD licensing server is running locally, but ${tailscale.error}`
+              : "The SSD licensing server is running. The saved Tailscale Funnel can now reach it.",
+        tailscale.installed === false || tailscale.error ? "error" : "success",
+      );
     } catch (error) {
       setLicenseServerNotice(error.message || "The licensing server could not be started.", "error");
       await refreshLicenseServer();
@@ -663,7 +689,6 @@
       }
       const nextState = updateAction === "download" ? await api.downloadUpdate() : updateAction === "install" ? await api.installUpdate() : await api.checkForUpdates();
       renderUpdate(nextState);
-      if (updateAction === "check" && nextState.status === "up-to-date") showNotice("The agent is up to date.");
     } catch (error) {
       renderUpdate({ status: "error", error: error.message || "The agent update could not be completed." });
     } finally { button.disabled = false; }
@@ -675,7 +700,7 @@
     try {
       const nextState = await api.checkForUpdates();
       renderUpdate(nextState);
-      showNotice(nextState.status === "available" ? `Agent update available${nextState.version ? ` · v${nextState.version}` : ""}.` : nextState.status === "up-to-date" ? "The agent is up to date." : nextState.error || "Update status checked.");
+      showNotice(nextState.status === "error" ? nextState.error || "The agent update check failed." : "");
     } catch (error) {
       renderUpdate({ status: "error", error: error.message || "The agent update check failed." });
       showNotice(error.message || "The agent update check failed.");

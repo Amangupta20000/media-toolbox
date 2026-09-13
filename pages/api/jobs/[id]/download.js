@@ -4,7 +4,17 @@ import { getJob } from "../../../../lib/db.js";
 export const config = { api: { responseLimit: false } };
 
 function safeFilename(name) {
-  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return String(name || "download").replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function requestedDownloadFilename(requested, original) {
+  const fallback = safeFilename(original || "download");
+  if (!requested) return fallback;
+  const extensionMatch = fallback.match(/\.[a-z0-9]{1,8}$/i);
+  const extension = extensionMatch ? extensionMatch[0] : "";
+  const candidate = safeFilename(requested);
+  const candidateStem = candidate.replace(/\.[a-z0-9]{1,8}$/i, "") || "download";
+  return `${candidateStem}${extension}`;
 }
 
 function contentType(filename) {
@@ -65,8 +75,9 @@ export default function handler(request, response) {
     response.setHeader("Content-Range", `bytes ${start}-${end}/${fileSize}`);
   }
   const type = contentType(result.filename || "");
+  const downloadName = requestedDownloadFilename(request.query.filename, result.filename);
   response.setHeader("Content-Type", type === "application/pdf" || preview ? type : "application/octet-stream");
-  response.setHeader("Content-Disposition", `${preview ? "inline" : "attachment"}; filename="${safeFilename(result.filename || "download")}"`);
+  response.setHeader("Content-Disposition", `${preview ? "inline" : "attachment"}; filename="${downloadName}"`);
   response.setHeader("Accept-Ranges", "bytes");
   response.setHeader("Content-Length", String(end - start + 1));
   response.setHeader("Cache-Control", "no-store");

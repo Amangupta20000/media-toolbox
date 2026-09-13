@@ -8,6 +8,7 @@ import { clipboardImageFile, isSupportedImageFile } from "../lib/image-input.js"
 import { takeHistoryEdit } from "./history-edit.js";
 import { ProcessingMode } from "./processing-mode.jsx";
 import { ResultDownloadNote } from "./result-download-note.jsx";
+import { downloadFilename, downloadUrlWithFilename, filenameStem, ResultFilenameField } from "./result-filename.jsx";
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 
@@ -330,11 +331,17 @@ function BatchJobStatusCard({ jobs, mode, onReset }) {
       return <article className={`batch-job-row ${done ? "complete" : itemFailed ? "failed" : ""}`} key={entry.id}>
         <div className="batch-job-row-status">{done ? <CheckCircle2 size={17} /> : itemFailed ? <AlertTriangle size={17} /> : <LoaderCircle className="spin" size={17} />}<span>{index + 1}</span></div>
         <div className="batch-job-row-copy"><strong title={entry.result?.filename || entry.message}>{entry.result?.filename || `Image ${index + 1}`}</strong><span>{done ? `${formatBytes(entry.result.bytes)} · ready` : itemFailed ? entry.error || "Conversion failed." : `${entry.stage || "Queued"} · ${progress}%`}</span></div>
-        {done && <a className="secondary-button" href={entry.result.downloadUrl} download={entry.result.filename}><Download size={16} /> Download</a>}
+        {done && <BatchDownloadAction result={entry.result} />}
       </article>;
     })}</div>
     <div className="job-actions"><button className="secondary-button" onClick={onReset}><RotateCcw size={17} /> {finished ? "Convert more images" : "Cancel batch"}</button></div>
   </section>;
+}
+
+function BatchDownloadAction({ result }) {
+  const [filenameStemValue, setFilenameStemValue] = useState(() => filenameStem(result?.filename));
+  const filename = downloadFilename(filenameStemValue, result?.filename);
+  return <div className="batch-download-action"><ResultFilenameField originalFilename={result.filename} value={filenameStemValue} onChange={setFilenameStemValue} /><a className="secondary-button" href={downloadUrlWithFilename(result.downloadUrl, filename)} download={filename}><Download size={16} /> Download</a></div>;
 }
 
 function VideoRecoverySummary({ hasServerReference, hasUntrunc }) {
@@ -365,10 +372,12 @@ function VideoRecoverySummary({ hasServerReference, hasUntrunc }) {
 }
 
 function JobStatusCard({ job, isImage, mode, keepResult, onReset }) {
+  const [filenameStemValue, setFilenameStemValue] = useState("");
   const done = job.status === "completed";
   const failed = job.status === "failed";
   const bestEffort = done && (job.warnings || []).some((warning) => /damaged frames/i.test(warning));
   const progress = Math.max(0, Math.min(100, job.progress));
+  const filename = done && job.result ? downloadFilename(filenameStemValue || filenameStem(job.result.filename), job.result.filename) : "";
   return <section className={`job-card ${done ? "success" : failed ? "failed" : ""}`}>
     <div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? (bestEffort ? "Best effort" : "Complete") : failed ? "Needs attention" : job.status === "queued" ? "Queued" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div>
     <div className="job-icon">{done ? <FileCheck2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div>
@@ -384,7 +393,7 @@ function JobStatusCard({ job, isImage, mode, keepResult, onReset }) {
     {done && job.result && !isImage && <ResultVideoPreview result={job.result} />}
     {done && job.result && <div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div>{isImage && job.result.targetSizeKb && <div><span>Size target</span><strong>{job.result.targetMet ? `Near ${job.result.targetSizeKb} KB` : "Not reached"}</strong></div>}{isImage && job.result.width && <div><span>Resolution</span><strong>{job.result.width} × {job.result.height}</strong></div>}<div><span>Method</span><strong>{job.result.method || "Completed"}</strong></div></div>}
     {job.warnings.length > 0 && <div className="warning-list">{job.warnings.map((warning) => <div key={warning}><AlertTriangle size={16} /><span>{warning}</span></div>)}</div>}
-    {done && job.result && <ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} />}<div className="job-actions">{done && job.result && <a className="primary-button" href={job.result.downloadUrl} download={job.result.filename}><Download size={18} /> Download result</a>}<button className="secondary-button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Process another file" : "Cancel"}</button></div>
+    {done && job.result && <ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={filename} />} {done && job.result && <ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} />}<div className="job-actions">{done && job.result && <a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, filename)} download={filename}><Download size={18} /> Download result</a>}<button className="secondary-button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Process another file" : "Cancel"}</button></div>
   </section>;
 }
 
