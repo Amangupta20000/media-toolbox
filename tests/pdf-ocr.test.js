@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
-import { createCanvas } from "@napi-rs/canvas";
+import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
 import { PDFDocument } from "pdf-lib";
 import { applyPdfOcrEdits, recognizePdfText, sha256Hex } from "../lib/pdf-ocr.js";
+import { applyRasterTextEdits } from "../lib/pdf-ocr-raster.js";
 
 async function rasterPdf() {
   const canvas = createCanvas(1200, 360);
@@ -107,4 +108,79 @@ test("OCR keeps the full leading word on isolated text over a dark slide", async
   assert.ok(run, `Expected the complete slide heading, got: ${detected.pages[0].runs.map((item) => item.text).join(" | ")}`);
   assert.match(run.text, /^Lecture\s+Number$/i);
   assert.ok(run.bbox.x0 < 1000, "the OCR region must include the leading letters so an edit cannot leave them behind");
+});
+
+test("OCR raster edits keep neighbouring artwork out of the replacement background", () => {
+  const canvas = createCanvas(1000, 240);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#000000";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  // This nearby rule is outside the source text mask. A distant background
+  // sampler would copy it into the cleared text region as a red rectangle.
+  context.fillStyle = "#ff0000";
+  context.fillRect(100, 46, 500, 7);
+  context.fillStyle = "#ffffff";
+  context.font = "700 52px Arial";
+  context.fillText("Regular Expression", 100, 125);
+
+  const warnings = applyRasterTextEdits(canvas, [{
+    originalText: "Regular Expression",
+    replacementText: "Regular Expressions",
+    bbox: { x0: 100, y0: 80, x1: 600, y1: 140 },
+    confidence: 96,
+  }]);
+  assert.ok(warnings.some((warning) => /wider than the original/i.test(warning)));
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  const pixelAt = (x, y) => {
+    const offset = (y * canvas.width + x) * 4;
+    return [pixels[offset], pixels[offset + 1], pixels[offset + 2]];
+  };
+  const redPixelsInsideMask = [];
+  for (let y = 70; y < 150; y += 1) {
+    for (let x = 90; x < 610; x += 1) {
+      const [red, green, blue] = pixelAt(x, y);
+      if (red > 120 && red > green * 1.5 && red > blue * 1.5) redPixelsInsideMask.push(1);
+    }
+  }
+  assert.equal(redPixelsInsideMask.length, 0, "nearby red artwork must not leak into the cleared source region");
+  assert.deepEqual(pixelAt(300, 49), [255, 0, 0], "artwork outside the source region must remain unchanged");
+  let whitePixels = 0;
+  for (let y = 70; y < 150; y += 1) {
+    for (let x = 90; x < 610; x += 1) {
+      const [red, green, blue] = pixelAt(x, y);
+      if (red > 180 && green > 180 && blue > 180) whitePixels += 1;
+    }
+  }
+  assert.ok(whitePixels > 100, "the replacement should use the original white visual colour");
+});
+
+test("OCR font matching chooses a close installed family for image-only text", () => {
+  const canvas = createCanvas(1000, 240);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#101820";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#f5ef22";
+  context.font = '700 52px "Comic Sans MS"';
+  const text = "Lecture Number";
+  const metrics = context.measureText(text);
+  const baseline = 130;
+  context.fillText(text, 100, baseline);
+  const matches = [];
+  applyRasterTextEdits(canvas, [{
+    originalText: text,
+    replacementText: "Lecture Number 11",
+    bbox: {
+      x0: 100,
+      y0: baseline - metrics.actualBoundingBoxAscent,
+      x1: 100 + metrics.width,
+      y1: baseline + metrics.actualBoundingBoxDescent,
+    },
+    confidence: 96,
+  }], {
+    availableFonts: GlobalFonts.families.map((font) => font.family),
+    onFontMatch: (match) => matches.push(match),
+  });
+  assert.equal(matches.length, 1);
+  assert.ok(["Comic Sans MS", "Chalkboard SE", "Chalkboard", "Bradley Hand", "Marker Felt", "Noteworthy"].includes(matches[0].fontFamily), `Expected a handwritten match, got ${matches[0].fontFamily}`);
+  assert.ok(matches[0].scaleX > 0, "the matched font should retain the source text width");
 });
