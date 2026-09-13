@@ -690,6 +690,17 @@ test("website local-agent setup does not expose license-request controls", async
   assert.match(source, /request a code.*desktop dashboard|request a code.*desktop/i);
 });
 
+test("website local-agent setup keeps Windows and Linux installers disabled", async () => {
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const source = await fs.readFile(path.join(root, "components", "local-agent-setup.jsx"), "utf8");
+  const styles = await fs.readFile(path.join(root, "styles", "globals.css"), "utf8");
+  assert.match(source, /macOS available/);
+  assert.match(source, /agent-platform-disabled" type="button" disabled[^>]*>.*Windows installer/);
+  assert.match(source, /agent-platform-disabled" type="button" disabled[^>]*>.*Linux installer/);
+  assert.match(source, /Windows and Linux installers will be available in a future release/);
+  assert.match(styles, /\.agent-platform-disabled[^}]*cursor: not-allowed/);
+});
+
 test("web admin panel uses the hidden /admin route and is not in navigation", async () => {
   const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
   const adminPage = await fs.readFile(path.join(root, "pages", "admin.jsx"), "utf8");

@@ -901,6 +901,8 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .session-error { color: #a64b4b; }
 .agent-download-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 17px 0; }
 .agent-download-grid .secondary-button { justify-content: center; text-decoration: none; }
+.agent-download-grid .agent-platform-disabled { color: #9aa8b5; background: #f2f5f6; border-color: #dfe7eb; cursor: not-allowed; opacity: .78; }
+.agent-download-grid .agent-platform-disabled span { font-size: 9px; font-weight: 650; }
 .agent-macos-note { display: flex; gap: 9px; align-items: flex-start; margin: 12px 0; padding: 12px; color: #765b22; background: #fff8e7; border: 1px solid #f1d58a; border-radius: 10px; font-size: 10px; line-height: 1.55; }
 .agent-macos-note svg { flex: 0 0 auto; color: #bd8616; }
 .agent-macos-note strong { color: #694d14; }
@@ -910,6 +912,7 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .agent-security-note { display: flex; gap: 9px; align-items: flex-start; padding: 12px; color: #6f8796; background: #f4f9fa; border-radius: 10px; font-size: 10px; line-height: 1.5; }
 .agent-security-note svg { flex: 0 0 auto; color: #178d8f; }
 [data-theme="dark"] .processing-mode, [data-theme="dark"] .agent-status-card, [data-theme="dark"] .agent-pair-card, [data-theme="dark"] .agent-capabilities-card, [data-theme="dark"] .agent-install-card, [data-theme="dark"] .agent-sessions-card { background: #132b3a; border-color: var(--line); }
+[data-theme="dark"] .agent-download-grid .agent-platform-disabled { color: #6f8493; background: #18303e; border-color: #2d4554; }
 [data-theme="dark"] .processing-mode-option, [data-theme="dark"] .agent-capability-row, [data-theme="dark"] .agent-pair-form input, [data-theme="dark"] .agent-session-row, [data-theme="dark"] .agent-session-empty { color: #9db0c0; background: #102230; border-color: #2f4859; }
 [data-theme="dark"] .audit-log-row { background: #102230; border-color: #2f4859; }
 [data-theme="dark"] .audit-log-row strong { color: #dcebf2; }
