@@ -280,6 +280,11 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(electronMain, /dashboardDirectory/);
   assert.match(electronMain, /preload: path\.join\(dashboardDirectory, "preload\.cjs"\)/);
   assert.match(electronMain, /loadFile\(path\.join\(dashboardDirectory, "dashboard\.html"\)\)/);
+  assert.match(electronMain, /movable: true/);
+  assert.match(electronMain, /titleBarStyle: "default"/);
+  assert.match(electronMain, /Menu\.setApplicationMenu/);
+  assert.match(electronMain, /label: app\.name/);
+  assert.doesNotMatch(electronMain, /app\.dock\?\.hide/);
   assert.match(dashboardRenderer, /block\.classList\.toggle\("hidden", mode === "activation"\)/);
   assert.match(dashboardHtml, /id="activation-session-access"/);
   assert.match(dashboardRenderer, /activationReloginAvailable/);

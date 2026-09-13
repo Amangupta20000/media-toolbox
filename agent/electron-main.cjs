@@ -156,6 +156,12 @@ if (!app.requestSingleInstanceLock()) {
       height: 800,
       minWidth: 820,
       minHeight: 620,
+      movable: true,
+      resizable: true,
+      fullscreenable: true,
+      titleBarStyle: "default",
+      autoHideMenuBar: false,
+      skipTaskbar: false,
       show: false,
       title: "Media Toolbox Agent",
       webPreferences: {
@@ -167,8 +173,50 @@ if (!app.requestSingleInstanceLock()) {
     });
     dashboardWindow.on("closed", () => { dashboardWindow = null; });
     dashboardWindow.loadFile(path.join(dashboardDirectory, "dashboard.html"));
-    dashboardWindow.once("ready-to-show", () => { dashboardWindow?.show(); dashboardWindow?.focus(); });
+    dashboardWindow.once("ready-to-show", () => {
+      dashboardWindow?.show();
+      dashboardWindow?.focus();
+      if (process.platform === "darwin") app.focus({ steal: true });
+    });
     return dashboardWindow;
+  }
+
+  function setupApplicationMenu() {
+    const appSubmenu = process.platform === "darwin"
+      ? [
+        { role: "about" },
+        { type: "separator" },
+        { role: "services", submenu: [] },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ]
+      : [{ label: "Quit", role: "quit" }];
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      { label: app.name, submenu: appSubmenu },
+      {
+        label: "File",
+        submenu: [
+          { label: "Show Dashboard", click: openDashboard },
+          { label: "Show Pairing Code", click: showPairingCode },
+          { type: "separator" },
+          { role: "close" },
+        ],
+      },
+      { role: "editMenu" },
+      { role: "viewMenu" },
+      { role: "windowMenu" },
+      {
+        label: "Help",
+        submenu: [
+          { label: "Open Website Setup", click: () => shell.openExternal(process.env.AGENT_SETUP_URL) },
+          { label: "Open GitHub Releases", click: () => shell.openExternal(latestReleaseUrl) },
+        ],
+      },
+    ]));
   }
 
   function registerDashboardIpc() {
@@ -338,6 +386,7 @@ if (!app.requestSingleInstanceLock()) {
 
   async function start() {
     loadLocalEnvironment();
+    app.setName?.("Media Toolbox Agent");
     // Use Chromium's trusted network stack for all licensing requests in the
     // desktop process. This also keeps an older verified runtime compatible
     // if it does not yet expose the explicit auth fetch adapter below.
@@ -360,7 +409,10 @@ if (!app.requestSingleInstanceLock()) {
     }
     process.env.DATA_DIR = path.join(app.getPath("userData"), "data");
     process.env.AGENT_SETUP_URL = process.env.AGENT_SETUP_URL || "http://localhost:3000/local-agent";
-    if (process.platform === "darwin") app.dock?.hide();
+    // This is a regular desktop application, not a background-only menu-bar
+    // helper. Keep it in the Dock and let macOS install its application menu
+    // when the dashboard window becomes the active app.
+    if (process.platform === "darwin") app.dock?.show();
     app.setLoginItemSettings({ openAtLogin: true, args: ["--hidden"] });
     app.setAsDefaultProtocolClient("mediatoolbox");
     const { ensureAgentCertificate } = await import("./tls.js");
@@ -400,6 +452,7 @@ if (!app.requestSingleInstanceLock()) {
       console.warn("Automatic licensing-server startup is waiting:", error.message);
     });
     setupAutoUpdater();
+    setupApplicationMenu();
     const firstUpdateCheck = setTimeout(() => checkForUpdates().catch(() => undefined), 8000);
     firstUpdateCheck.unref?.();
     const scheduledUpdateCheck = setInterval(() => checkForUpdates().catch(() => undefined), 6 * 60 * 60 * 1000);

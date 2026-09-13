@@ -346,8 +346,12 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .thumbnail-page-image { display: block; width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: contain; background: #fff; border: 1px solid #d9e3e8; box-shadow: 0 2px 7px rgba(28, 52, 72, .11); }
 .thumbnail-loading { width: 100%; height: 100%; display: grid; place-items: center; color: #91a4b1; background: linear-gradient(110deg, #edf3f5 30%, #f8fbfc 45%, #edf3f5 60%); background-size: 220% 100%; animation: thumbnailShimmer 1.4s linear infinite; font-size: 9px; font-weight: 750; }
 @keyframes thumbnailShimmer { to { background-position: -220% 0; } }
-.thumbnail-image-overlay-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-.thumbnail-image-overlay-layer img { position: absolute; display: block; object-fit: fill; }
+.thumbnail-image-overlay-layer { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.thumbnail-image-overlay, .blank-page-mini-image { position: absolute; overflow: visible; }
+.thumbnail-image-overlay img, .blank-page-mini-image img { display: block; object-fit: fill; pointer-events: none; }
+.thumbnail-text-box-overlay-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; overflow: hidden; }
+.thumbnail-text-box-overlay { position: absolute; overflow: hidden; box-sizing: border-box; }
+.thumbnail-text-box-overlay span { display: block; width: 100%; height: 100%; overflow: hidden; padding: 1px; box-sizing: border-box; line-height: 1.1; white-space: pre-wrap; word-break: break-word; }
 .blank-page-mini { position: relative; height: 100%; width: auto; max-width: 100%; overflow: hidden; background: #fff; border: 1px solid #d9e3e8; box-shadow: 0 2px 7px rgba(28, 52, 72, .11); }
 .blank-page-mini img { position: absolute; display: block; object-fit: fill; }
 .thumbnail-meta { display: flex; align-items: center; gap: 5px; padding: 7px 1px 0; color: #8999a8; font-size: 9px; }
@@ -399,7 +403,32 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .pdf-image-overlay { position: absolute; cursor: move; border: 2px solid #38a6a8; box-shadow: 0 0 0 3px rgba(56, 166, 168, .16); }
 .pdf-image-overlay-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: visible; }
 .pdf-image-overlay-layer .pdf-image-overlay { pointer-events: auto; }
-.pdf-image-overlay img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.pdf-image-overlay img { display: block; pointer-events: none; }
+.pdf-text-box-overlay-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; overflow: visible; }
+.pdf-text-box-overlay { position: absolute; box-sizing: border-box; min-width: 24px; min-height: 24px; cursor: move; border: 2px solid #9b72c8; box-shadow: 0 0 0 3px rgba(155, 114, 200, .16); pointer-events: auto; }
+.pdf-text-box-content { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.pdf-text-box-content textarea { display: block; width: 100%; height: 100%; box-sizing: border-box; padding: 5px 7px; color: inherit; background: transparent; border: 0; border-radius: 0; outline: 0; resize: none; overflow: auto; font: inherit; line-height: 1.2; white-space: pre-wrap; word-break: break-word; pointer-events: auto; }
+.pdf-text-box-content textarea::placeholder { color: currentColor; opacity: .45; }
+.pdf-text-box-controls { position: absolute; z-index: 5; top: -31px; left: 50%; display: flex; align-items: center; gap: 2px; min-height: 23px; max-width: min(92vw, 390px); padding: 3px; color: #174558; background: rgba(247, 252, 252, .97); border: 1px solid #b99bda; border-radius: 5px; box-shadow: 0 3px 8px rgba(33, 57, 77, .2); transform: translateX(-50%); white-space: nowrap; }
+.pdf-text-box-controls select { width: 90px; height: 21px; padding: 1px 2px; color: #174558; background: #fff; border: 1px solid #d5c9e2; border-radius: 3px; font: 700 9px/1 system-ui, sans-serif; }
+.pdf-text-box-controls input[type="number"] { width: 38px; height: 21px; padding: 1px 2px; color: #174558; background: #fff; border: 1px solid #d5c9e2; border-radius: 3px; text-align: center; font: 700 9px/1 system-ui, sans-serif; }
+.pdf-text-box-controls select:focus, .pdf-text-box-controls input:focus { border-color: #9b72c8; outline: 2px solid rgba(155, 114, 200, .16); }
+.pdf-text-box-style-button { width: 21px; height: 21px; display: inline-flex; align-items: center; justify-content: center; padding: 0; color: #174558; background: transparent; border: 0; border-radius: 3px; cursor: pointer; }
+.pdf-text-box-style-button:hover, .pdf-text-box-style-button[aria-pressed="true"] { color: #fff; background: #9b72c8; }
+.pdf-text-box-color { width: 22px; height: 21px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid #d5c9e2; border-radius: 3px; background: #fff; cursor: pointer; overflow: hidden; }
+.pdf-text-box-color input { width: 24px; height: 24px; padding: 0; border: 0; cursor: pointer; }
+.pdf-text-box-clear-background { min-height: 21px; padding: 0 4px; color: #6f5785; background: transparent; border: 0; border-radius: 3px; font: 700 8px/1 system-ui, sans-serif; cursor: pointer; }
+.pdf-text-box-clear-background:hover { color: #fff; background: #9b72c8; }
+.text-box-remove-handle { position: absolute; top: -8px; left: -8px; width: 19px; height: 19px; display: grid; place-items: center; padding: 0; cursor: pointer; color: #fff; background: #c55f68; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 2px 5px rgba(31, 53, 70, .24); }
+.text-box-remove-handle:hover { background: #a8434d; }
+.text-box-resize-handle { position: absolute; right: -7px; bottom: -7px; width: 14px; height: 14px; padding: 0; cursor: nwse-resize; background: #fff; border: 2px solid #9b72c8; border-radius: 50%; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.image-rotation-controls { position: absolute; z-index: 4; top: -28px; left: 50%; display: flex; align-items: center; gap: 2px; min-height: 21px; padding: 2px 3px; color: #174558; background: rgba(247,252,252,.96); border: 1px solid #8bd1d0; border-radius: 5px; box-shadow: 0 3px 8px rgba(33,57,77,.2); transform: translateX(-50%); white-space: nowrap; }
+.image-rotate-button { width: 19px; height: 19px; display: inline-flex; align-items: center; justify-content: center; padding: 0; color: #174558; background: transparent; border: 0; border-radius: 3px; cursor: pointer; }
+.image-rotate-button:hover { color: #0e8f94; background: #e5f6f5; }
+.image-rotation-controls input { width: 38px; height: 19px; padding: 1px 2px; color: #174558; background: #fff; border: 1px solid #c8dce3; border-radius: 3px; text-align: center; font: 700 9px/1 system-ui, sans-serif; }
+.image-rotation-controls input:focus { border-color: var(--teal); outline: 2px solid rgba(30,159,163,.16); }
+.image-rotation-controls span { font-size: 10px; font-weight: 700; }
 .image-remove-handle { position: absolute; top: -8px; left: -8px; width: 19px; height: 19px; display: grid; place-items: center; padding: 0; cursor: pointer; color: #fff; background: #c55f68; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 2px 5px rgba(31, 53, 70, .24); }
 .image-remove-handle:hover { background: #a8434d; }
 .image-ratio-handle { position: absolute; top: -8px; right: -8px; width: 19px; height: 19px; display: grid; place-items: center; padding: 0; cursor: pointer; color: #fff; background: #278f94; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 2px 5px rgba(31, 53, 70, .24); }
@@ -635,6 +664,12 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .pdf-more-tools-menu kbd { color: #8199a8; }
 [data-theme="dark"] .pdf-more-tools-menu button.pdf-more-tools-danger { color: #e0a4a4; }
 [data-theme="dark"] .pdf-more-tools-menu button.pdf-more-tools-danger:hover { color: #ffb0b0; background: #40252c; }
+[data-theme="dark"] .pdf-text-box-overlay { border-color: #c49be9; box-shadow: 0 0 0 3px rgba(196, 155, 233, .2); }
+[data-theme="dark"] .pdf-text-box-controls { color: #dcebf2; background: rgba(20, 38, 51, .97); border-color: #8f70ac; }
+[data-theme="dark"] .pdf-text-box-controls select, [data-theme="dark"] .pdf-text-box-controls input[type="number"], [data-theme="dark"] .pdf-text-box-color { color: #dcebf2; background: #122536; border-color: #526276; }
+[data-theme="dark"] .pdf-text-box-style-button { color: #dcebf2; }
+[data-theme="dark"] .pdf-text-box-style-button:hover, [data-theme="dark"] .pdf-text-box-style-button[aria-pressed="true"] { color: #142638; background: #c49be9; }
+[data-theme="dark"] .pdf-text-box-clear-background { color: #d8b8f0; }
 
 @media (max-width: 900px) {
   .sidebar { width: 250px; flex-basis: 250px; }
@@ -977,6 +1012,10 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .pdf-text-edit-popover { background: #102b38; border-color: #2c6970; }
 [data-theme="dark"] .pdf-text-edit-popover > input { color: #dcebf2; background: #102230; border-color: #2f4859; }
 [data-theme="dark"] .pdf-text-ocr-notice { color: #f0d88a; background: #3e321b; border-color: #80651f; }
+[data-theme="dark"] .image-rotation-controls { color: #dcebf2; background: rgba(16,43,56,.96); border-color: #2c6970; }
+[data-theme="dark"] .image-rotate-button { color: #dcebf2; }
+[data-theme="dark"] .image-rotate-button:hover { color: #83e0df; background: #183f4b; }
+[data-theme="dark"] .image-rotation-controls input { color: #dcebf2; background: #102230; border-color: #2f4859; }
 @media (max-width: 760px) {
   .pdf-text-toolbar { align-items: stretch; flex-direction: column; }
   .pdf-text-toolbar .primary-button { width: 100%; }

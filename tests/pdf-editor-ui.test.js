@@ -20,6 +20,14 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /GlobalWorkerOptions\.workerSrc = "\/api\/pdf\/worker"/);
   assert.match(shell, /const scale = .*previewZoom/);
   assert.match(shell, /surfaceSize/);
+  assert.match(shell, /imagePreviewStyle\(page, image, placement\)/);
+  assert.match(shell, /Set rotation for image/);
+  assert.match(shell, /rotation: normalizeImageRotation\(image\.rotation\)/);
+  assert.match(shell, /Text box/);
+  assert.match(shell, /Text size for text box/);
+  assert.match(shell, /Background color for text box/);
+  assert.match(shell, /onChangeTextBoxes/);
+  assert.match(shell, /textBoxFontName/);
   assert.match(workerRoute, /path\.join\(process\.cwd\(\), "node_modules", "pdfjs-dist"/);
 });
 

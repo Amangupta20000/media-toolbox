@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Copy, Download, FilePlus2, FileText, GripVertical, ImagePlus, Keyboard, LoaderCircle, Lock, MoreHorizontal, Plus, Printer, RotateCcw, RotateCw, Trash2, Unlock, UploadCloud, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertTriangle, Bold, CheckCircle2, Copy, Download, FilePlus2, FileText, GripVertical, ImagePlus, Italic, Keyboard, LoaderCircle, Lock, MoreHorizontal, Plus, Printer, RotateCcw, RotateCw, Trash2, Type, Underline, Unlock, UploadCloud, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { formatBytes } from "./file-dropzone.jsx";
 import { takeHistoryEdit } from "./history-edit.js";
@@ -11,6 +11,8 @@ import { downloadFilename, downloadUrlWithFilename, filenameStem, ResultFilename
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 import { MAX_PDF_COUNT, MAX_PDF_TOTAL_BYTES } from "../lib/pdf-limits.js";
+import { normalizeImageRotation, rotatedImageDrawPlacement } from "../lib/pdf-image-placement.js";
+import { PDF_TEXT_BOX_FONTS, textBoxColor, textBoxCssFontFamily, textBoxDrawPlacement, textBoxFontName, wrapPdfTextLines } from "../lib/pdf-text-box.js";
 
 const MAX_IMAGE_COORDINATE = 100000;
 const ACCEPTED_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".heic", ".heif", ".tif", ".tiff", ".gif", ".bmp"]);
@@ -19,6 +21,40 @@ const A4 = { width: 595.28, height: 841.89, rotation: 0 };
 function getPageImages(page) {
   if (Array.isArray(page?.images)) return page.images;
   return page?.image ? [{ ...page.image, id: page.image.id || "legacy-image" }] : [];
+}
+
+function getPageTextBoxes(page) {
+  return Array.isArray(page?.textBoxes) ? page.textBoxes : [];
+}
+
+function validHexColor(value) {
+  return /^#[0-9a-f]{6}$/i.test(String(value || ""));
+}
+
+function textBoxPreviewStyle(page, textBox, scale = 1) {
+  const placement = imageDisplayPlacement(page, textBox);
+  const pageRotation = normalizeRotation(page?.rotation);
+  const quarterTurn = pageRotation === 90 || pageRotation === 270;
+  return {
+    position: "absolute",
+    left: "50%",
+    top: "50%",
+    width: quarterTurn ? `${Number(textBox.width) / Math.max(1, Number(placement.width)) * 100}%` : "100%",
+    height: quarterTurn ? `${Number(textBox.height) / Math.max(1, Number(placement.height)) * 100}%` : "100%",
+    display: "flex",
+    alignItems: "stretch",
+    justifyContent: "stretch",
+    transform: `translate(-50%, -50%) rotate(${pageRotation}deg)`,
+    transformOrigin: "center",
+    overflow: "visible",
+    fontSize: `${Math.max(1, Number(textBox.fontSize) || 18) * scale}px`,
+    fontFamily: textBoxCssFontFamily(textBox.fontFamily),
+    fontWeight: textBox.bold ? 700 : 400,
+    fontStyle: textBox.italic ? "italic" : "normal",
+    textDecoration: textBox.underline ? "underline" : "none",
+    color: validHexColor(textBox.color) ? textBox.color : "#173b53",
+    backgroundColor: textBox.backgroundColor === "transparent" ? "transparent" : validHexColor(textBox.backgroundColor) ? textBox.backgroundColor : "transparent",
+  };
 }
 
 function makeId() {
@@ -79,7 +115,15 @@ function validatePdfProject({ pages, pdfFiles, processingMode }) {
     for (const [imageIndex, image] of getPageImages(page).entries()) {
       if (!image || (!image.file && !image.sourceBytes)) return `Image ${imageIndex + 1} on page ${index + 1} is missing its source file.`;
       const values = [image.x, image.y, image.width, image.height].map(Number);
-      if (!values.every(Number.isFinite) || values[2] <= 0 || values[3] <= 0 || values[0] < -MAX_IMAGE_COORDINATE || values[1] < -MAX_IMAGE_COORDINATE || values[0] + values[2] > MAX_IMAGE_COORDINATE || values[1] + values[3] > MAX_IMAGE_COORDINATE) return `Image ${imageIndex + 1} on page ${index + 1} has an invalid placement.`;
+      const imageRotation = image.rotation === undefined ? 0 : Number(image.rotation);
+      if (!values.every(Number.isFinite) || !Number.isFinite(imageRotation) || values[2] <= 0 || values[3] <= 0 || values[0] < -MAX_IMAGE_COORDINATE || values[1] < -MAX_IMAGE_COORDINATE || values[0] + values[2] > MAX_IMAGE_COORDINATE || values[1] + values[3] > MAX_IMAGE_COORDINATE) return `Image ${imageIndex + 1} on page ${index + 1} has an invalid placement or rotation.`;
+    }
+    for (const [textBoxIndex, textBox] of getPageTextBoxes(page).entries()) {
+      const values = [textBox?.x, textBox?.y, textBox?.width, textBox?.height, textBox?.fontSize].map(Number);
+      const fontFamily = String(textBox?.fontFamily || "Helvetica");
+      const color = String(textBox?.color || "#173b53");
+      const backgroundColor = String(textBox?.backgroundColor || "transparent");
+      if (!textBox || typeof textBox !== "object" || !values.every(Number.isFinite) || values[2] <= 0 || values[3] <= 0 || values[4] < 1 || values[4] > 500 || values[0] < -MAX_IMAGE_COORDINATE || values[1] < -MAX_IMAGE_COORDINATE || values[0] + values[2] > MAX_IMAGE_COORDINATE || values[1] + values[3] > MAX_IMAGE_COORDINATE || !PDF_TEXT_BOX_FONTS.some((font) => font.value === fontFamily) || !validHexColor(color) || (backgroundColor !== "transparent" && !validHexColor(backgroundColor)) || String(textBox.text ?? "").length > 20000) return `Text box ${textBoxIndex + 1} on page ${index + 1} has invalid text or styling.`;
     }
   }
   return "";
@@ -292,13 +336,52 @@ async function rasterizeBrowserPages(pages, sourceDocuments, preparedPages, onPr
       const pdfPage = page.pdfPage || await withTimeout(documentProxy.getPage(page.pageIndex + 1), 60000, "A PDF page took too long to load in Browser mode.");
       onProgress?.(18);
       const bytes = await renderPdfPageToJpeg(pdfPage);
-      rasterPages.push({ kind: "raster", width: page.width, height: page.height, rotation: page.rotation || 0, baseImage: { extension: ".jpg", bytes }, images: preparedPage.images || [] });
+      rasterPages.push({ kind: "raster", width: page.width, height: page.height, rotation: page.rotation || 0, baseImage: { extension: ".jpg", bytes }, images: preparedPage.images || [], textBoxes: preparedPage.textBoxes || [] });
     } else {
-      rasterPages.push({ kind: "blank", width: page.width, height: page.height, rotation: page.rotation || 0, images: preparedPage.images || [] });
+      rasterPages.push({ kind: "blank", width: page.width, height: page.height, rotation: page.rotation || 0, images: preparedPage.images || [], textBoxes: preparedPage.textBoxes || [] });
     }
     onProgress?.(18 + Math.round(((index + 1) / Math.max(1, pages.length)) * 44));
   }
   return rasterPages;
+}
+
+async function drawBrowserPdfTextBoxes(pdf, outputPage, operation) {
+  const textBoxes = Array.isArray(operation.textBoxes) ? operation.textBoxes : [];
+  if (!textBoxes.length) return;
+  const fontCache = new Map();
+  const pageHeight = Number(operation.height) || outputPage.getHeight();
+  for (const [index, textBox] of textBoxes.entries()) {
+    try {
+      const fontName = textBoxFontName(textBox);
+      let font = fontCache.get(fontName);
+      if (!font) {
+        font = await pdf.embedFont(fontName);
+        fontCache.set(fontName, font);
+      }
+      const size = Math.max(1, Number(textBox.fontSize) || 18);
+      const placement = textBoxDrawPlacement(textBox, pageHeight);
+      if (textBox.backgroundColor !== "transparent") {
+        const background = textBoxColor(textBox.backgroundColor, "#ffffff");
+        outputPage.drawRectangle({ x: placement.x, y: placement.y, width: placement.width, height: placement.height, color: pdf.rgb(background.r, background.g, background.b), borderWidth: 0 });
+      }
+      if (!String(textBox.text ?? "")) continue;
+      const lines = wrapPdfTextLines(textBox.text, font, size, Math.max(1, placement.width - 8));
+      const lineHeight = size * 1.2;
+      const textX = placement.x + 4;
+      const firstBaseline = placement.y + placement.height - size - 4;
+      const color = textBoxColor(textBox.color);
+      outputPage.drawText(lines.join("\n"), { x: textX, y: firstBaseline, size, font, lineHeight, color: pdf.rgb(color.r, color.g, color.b) });
+      if (textBox.underline) {
+        const thickness = Math.max(0.5, size * 0.06);
+        lines.forEach((line, lineIndex) => {
+          const baseline = firstBaseline - lineIndex * lineHeight;
+          outputPage.drawLine({ start: { x: textX, y: baseline - size * 0.08 }, end: { x: textX + font.widthOfTextAtSize(line, size), y: baseline - size * 0.08 }, thickness, color: pdf.rgb(color.r, color.g, color.b) });
+        });
+      }
+    } catch (error) {
+      throw new Error(`Text box ${index + 1} could not be exported with the selected font. Use a supported PDF font and text.`);
+    }
+  }
 }
 
 async function exportPdfInBrowser(pdfFiles, pages, sourceDocuments, pdfLibrary, onProgress) {
@@ -316,17 +399,20 @@ async function exportPdfInBrowser(pdfFiles, pages, sourceDocuments, pdfLibrary, 
       const bytes = image.sourceBytes
         ? image.sourceBytes.slice(0)
         : await withTimeout(image.file.arrayBuffer(), 30000, `Timed out while reading ${image.file.name}. Choose Local agent or Server for this file.`);
-      images.push({ x: image.x, y: image.y, width: image.width, height: image.height, extension, bytes });
+      images.push({ x: image.x, y: image.y, width: image.width, height: image.height, rotation: normalizeImageRotation(image.rotation), extension, bytes });
     }
-    preparedPages.push({ kind: page.kind, pdfIndex: page.pdfIndex, pageIndex: page.pageIndex, width: page.width, height: page.height, rotation: page.rotation, images });
+    preparedPages.push({ kind: page.kind, pdfIndex: page.pdfIndex, pageIndex: page.pageIndex, width: page.width, height: page.height, rotation: page.rotation, images, textBoxes: getPageTextBoxes(page) });
     onProgress?.(10 + Math.round(((index + 1) / Math.max(1, pages.length)) * 6));
   }
 
   onProgress?.(16);
   const rasterPages = await rasterizeBrowserPages(pages, sourceDocuments, preparedPages, onProgress);
   onProgress?.(64);
-  const { PDFDocument, degrees } = await import("pdf-lib");
+  const { PDFDocument, degrees, rgb } = await import("pdf-lib");
   const output = await PDFDocument.create();
+  // Keep the helper's output API small while allowing browser-mode exports to
+  // use pdf-lib's colour factory without changing the worker implementation.
+  const browserPdf = { embedFont: (...args) => output.embedFont(...args), rgb };
   for (const [index, page] of rasterPages.entries()) {
     const target = output.addPage([page.width, page.height]);
     if (page.rotation) target.setRotation(degrees(page.rotation));
@@ -338,13 +424,16 @@ async function exportPdfInBrowser(pdfFiles, pages, sourceDocuments, pdfLibrary, 
       const embedded = image.extension === ".png"
         ? await output.embedPng(new Uint8Array(image.bytes))
         : await output.embedJpg(new Uint8Array(image.bytes));
+      const placement = rotatedImageDrawPlacement(image, page.height);
       target.drawImage(embedded, {
-        x: image.x,
-        y: target.getHeight() - image.y - image.height,
-        width: image.width,
-        height: image.height,
+        x: placement.x,
+        y: placement.y,
+        width: placement.width,
+        height: placement.height,
+        rotate: degrees(placement.rotation),
       });
     }
+    await drawBrowserPdfTextBoxes(browserPdf, target, page);
     onProgress?.(64 + Math.round(((index + 1) / Math.max(1, rasterPages.length)) * 8));
   }
   const bytes = new Uint8Array(await withTimeout(output.save(), 120000, "Browser PDF export took too long while saving the file. Try Local agent or Server for this file."));
@@ -496,7 +585,7 @@ export function PdfEditor() {
       }
       return clone;
     }));
-    const duplicate = { ...selectedPage, id: makeId(), images: clonedImages };
+    const duplicate = { ...selectedPage, id: makeId(), images: clonedImages, textBoxes: getPageTextBoxes(selectedPage).map((textBox) => ({ ...textBox, id: makeId() })) };
     setPages((current) => {
       const selectedIndex = current.findIndex((page) => page.id === selectedPage.id);
       const next = [...current];
@@ -643,7 +732,7 @@ export function PdfEditor() {
 
   const addBlankPage = () => {
     const dimensions = selectedPage ? { width: selectedPage.width, height: selectedPage.height, rotation: selectedPage.rotation || 0 } : A4;
-    const page = { id: makeId(), kind: "blank", ...dimensions, images: [] };
+    const page = { id: makeId(), kind: "blank", ...dimensions, images: [], textBoxes: [] };
     setPages((current) => {
       const selectedIndex = selectedPage ? current.findIndex((item) => item.id === selectedPage.id) : -1;
       const next = [...current];
@@ -657,7 +746,7 @@ export function PdfEditor() {
   const addBlankPageAfter = (previousPageId) => {
     const previousPage = pages.find((item) => item.id === previousPageId);
     const dimensions = previousPage ? { width: previousPage.width, height: previousPage.height, rotation: previousPage.rotation || 0 } : A4;
-    const page = { id: makeId(), kind: "blank", ...dimensions, images: [] };
+    const page = { id: makeId(), kind: "blank", ...dimensions, images: [], textBoxes: [] };
     setPages((current) => {
       const previousIndex = current.findIndex((item) => item.id === previousPageId);
       const next = [...current];
@@ -950,7 +1039,7 @@ export function PdfEditor() {
         const y = Math.max(0, Math.min(targetPage.height - height, (targetPage.height - height) / 2 + offset));
         const url = URL.createObjectURL(file);
         imageUrlsRef.current.add(url);
-        addedImages.push({ id: makeId(), file, sourceBytes: await file.arrayBuffer(), url, x, y, width, height, lockAspectRatio: true });
+        addedImages.push({ id: makeId(), file, sourceBytes: await file.arrayBuffer(), url, x, y, width, height, rotation: 0, lockAspectRatio: true });
       }
       updatePage(targetPage.id, { images: [...existingImages, ...addedImages] });
       setError("");
@@ -1003,6 +1092,23 @@ export function PdfEditor() {
       }
     }
     updatePage(pageId, { images: [] });
+  };
+
+  const addTextBox = () => {
+    if (!selectedPage) {
+      setError("Select a PDF page before adding a text box.");
+      return;
+    }
+    const width = Math.min(280, Math.max(180, selectedPage.width * 0.55));
+    const height = Math.min(86, Math.max(52, selectedPage.height * 0.12));
+    const textBox = { id: makeId(), text: "", x: Math.max(0, (selectedPage.width - width) / 2), y: Math.max(0, (selectedPage.height - height) / 2), width, height, fontSize: 18, fontFamily: "Helvetica", bold: false, italic: false, underline: false, color: "#173b53", backgroundColor: "transparent" };
+    updatePage(selectedPage.id, { textBoxes: [...getPageTextBoxes(selectedPage), textBox] });
+    setError("");
+  };
+
+  const removeTextBox = (pageId, textBoxId) => {
+    const page = pages.find((item) => item.id === pageId);
+    updatePage(pageId, { textBoxes: getPageTextBoxes(page).filter((textBox) => textBox.id !== textBoxId) });
   };
 
   const reset = () => {
@@ -1077,8 +1183,12 @@ export function PdfEditor() {
           operation.images = images.map((image, imageIndex) => {
             const imageField = `page-image-${page.id}-${image.id || imageIndex}`;
             form.append(imageField, image.file, image.file.name);
-            return { imageField, image: { x: image.x, y: image.y, width: image.width, height: image.height } };
+            return { imageField, image: { x: image.x, y: image.y, width: image.width, height: image.height, rotation: normalizeImageRotation(image.rotation) } };
           });
+        }
+        const textBoxes = getPageTextBoxes(page);
+        if (textBoxes.length) {
+          operation.textBoxes = textBoxes.map((textBox) => ({ id: textBox.id, text: String(textBox.text ?? ""), x: Number(textBox.x), y: Number(textBox.y), width: Number(textBox.width), height: Number(textBox.height), fontSize: Number(textBox.fontSize), fontFamily: textBox.fontFamily, bold: Boolean(textBox.bold), italic: Boolean(textBox.italic), underline: Boolean(textBox.underline), color: textBox.color, backgroundColor: textBox.backgroundColor }));
         }
         return operation;
       }));
@@ -1151,7 +1261,7 @@ export function PdfEditor() {
   }, [activeView, job, loadingFiles, selectedPage, previewZoom, pages, pdfFiles, processingMode]);
 
   return <AppShell>
-    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools · Beta <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · 200 MB total</span></div><h1>PDF editor</h1><p>Merge documents, reorder pages, remove pages, and add images to PDF pages or new blank pages.</p></div></div>
+    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools · Beta <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · 200 MB total</span></div><h1>PDF editor</h1><p>Merge documents, reorder pages, remove pages, add images, or place styled text boxes on PDF pages and new blank pages.</p></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
     {activeView === "history" ? <ToolHistory tool="pdf-editor" /> : <>
     {!job && <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />}
@@ -1161,6 +1271,7 @@ export function PdfEditor() {
         <div className="pdf-editor-actions">
           <button className="secondary-button" type="button" onClick={() => pdfInputRef.current?.click()} disabled={loadingFiles || pdfFiles.length >= MAX_PDF_COUNT}><Plus size={17} /> Add PDF</button>
           <button className="secondary-button" type="button" onClick={addBlankPage}><FilePlus2 size={17} /> Blank page</button>
+          <button className="secondary-button" type="button" onClick={addTextBox} disabled={!selectedPage} title={selectedPage ? "Add a text box to the selected page" : "Add a page first"}><Type size={17} /> Text box</button>
           <div ref={moreToolsRef} className="pdf-more-tools">
             <button className="icon-button pdf-more-tools-trigger" type="button" aria-label="Open other PDF tools" aria-haspopup="menu" aria-expanded={Boolean(selectedPage) && moreToolsOpen} title={selectedPage ? "Other tools" : "Add a page to use other tools"} disabled={!selectedPage} onClick={() => setMoreToolsOpen((current) => !current)}><MoreHorizontal size={20} /></button>
             {selectedPage && moreToolsOpen && <div className="pdf-more-tools-menu" role="menu" aria-label="Other PDF tools">
@@ -1169,6 +1280,7 @@ export function PdfEditor() {
               <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); rotateSelectedPage(90); }}><RotateCw size={16} /><span>Rotate right</span><kbd>→</kbd></button>
               <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); void duplicateSelectedPage(); }}><Copy size={16} /><span>Duplicate page</span><kbd>⌘/Ctrl+D</kbd></button>
               <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); imageInputRef.current?.click(); }}><ImagePlus size={16} /><span>Add images</span></button>
+              <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); addTextBox(); }}><Type size={16} /><span>Add text box</span></button>
               {selectedPageImages.length > 0 && <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); removeAllImages(selectedPage.id); }}><Trash2 size={16} /><span>Remove images</span></button>}
               <div className="pdf-more-tools-divider" />
               <button className="pdf-more-tools-danger" type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); deletePage(selectedPage.id); }}><Trash2 size={16} /><span>Delete page</span><kbd>Delete</kbd></button>
@@ -1184,7 +1296,7 @@ export function PdfEditor() {
       {processingMode === "local" && <label className="keep-result-check pdf-retention-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label>}
       {!pdfFiles.length && !pages.length ? <PdfEmptyState onBrowse={() => pdfInputRef.current?.click()} onBlank={addBlankPage} loading={loadingFiles} dragActive={pdfDragActive} /> : !pages.length ? <PdfNoPagesState onBrowse={() => pdfInputRef.current?.click()} onBlank={addBlankPage} /> : <div className="pdf-editor-layout">
         <aside className="pdf-page-rail"><div className="pdf-rail-heading"><span>Pages</span><small>Pages load as you scroll</small></div><div ref={pageListRef} className="pdf-page-list" onDragOver={handlePageListDragOver} onDrop={handlePageListDrop}>{renderPageList()}</div></aside>
-        <section className="pdf-selected-panel"><div className="pdf-selected-heading"><div><span>Selected page {selectedPage ? pages.findIndex((page) => page.id === selectedPage.id) + 1 : "—"}</span><small>{selectedPage?.kind === "blank" ? "Blank page" : selectedPage?.sourceName || "Choose a page"}{selectedPage?.kind === "source" ? ` · Original page ${selectedPage.pageNumber}` : ""}</small></div></div><div ref={previewScrollRef} className="pdf-document-preview" onScroll={handlePreviewScroll}>{pages.map((page, index) => <Fragment key={page.id}><PdfPreviewPage page={page} index={index} selected={page.id === selectedPage?.id} previewZoom={previewZoom} pdfDocument={documentsRef.current[page.pdfIndex]} previewRootRef={previewScrollRef} elementRef={(element) => { if (element) previewElementRefs.current.set(page.id, element); else previewElementRefs.current.delete(page.id); }} onChange={(images) => updatePage(page.id, { images })} onRemove={(imageId) => removeImage(page.id, imageId)} onAddImages={() => openImagePickerForPage(page.id)} onError={setPreviewError} /><PdfInsertPageButton pageNumber={index + 1} onClick={() => addBlankPageAfter(page.id)} /></Fragment>)}</div>{previewError && <div className="pdf-preview-error"><AlertTriangle size={16} /><span>{previewError}</span></div>}<p className="pdf-editor-tip"><GripVertical size={15} /> Scroll the preview to select a page. Click + Add page between previews to insert a blank page.</p></section>
+        <section className="pdf-selected-panel"><div className="pdf-selected-heading"><div><span>Selected page {selectedPage ? pages.findIndex((page) => page.id === selectedPage.id) + 1 : "—"}</span><small>{selectedPage?.kind === "blank" ? "Blank page" : selectedPage?.sourceName || "Choose a page"}{selectedPage?.kind === "source" ? ` · Original page ${selectedPage.pageNumber}` : ""}</small></div></div><div ref={previewScrollRef} className="pdf-document-preview" onScroll={handlePreviewScroll}>{pages.map((page, index) => <Fragment key={page.id}><PdfPreviewPage page={page} index={index} selected={page.id === selectedPage?.id} previewZoom={previewZoom} pdfDocument={documentsRef.current[page.pdfIndex]} previewRootRef={previewScrollRef} elementRef={(element) => { if (element) previewElementRefs.current.set(page.id, element); else previewElementRefs.current.delete(page.id); }} onChange={(images) => updatePage(page.id, { images })} onRemove={(imageId) => removeImage(page.id, imageId)} onChangeTextBoxes={(textBoxes) => updatePage(page.id, { textBoxes })} onRemoveTextBox={(textBoxId) => removeTextBox(page.id, textBoxId)} onAddImages={() => openImagePickerForPage(page.id)} onError={setPreviewError} /><PdfInsertPageButton pageNumber={index + 1} onClick={() => addBlankPageAfter(page.id)} /></Fragment>)}</div>{previewError && <div className="pdf-preview-error"><AlertTriangle size={16} /><span>{previewError}</span></div>}<p className="pdf-editor-tip"><GripVertical size={15} /> Scroll the preview to select a page. Click + Add page between previews to insert a blank page. Use Text box to add editable text to the selected page.</p></section>
       </div>}
       {error && <div className="error-banner"><AlertTriangle size={18} /><span>{error}</span></div>}
     </section>}
@@ -1200,7 +1312,7 @@ function PdfNoPagesState({ onBrowse, onBlank }) {
   return <div className="pdf-empty-state pdf-no-pages-state"><div className="pdf-empty-icon"><FileText size={28} /></div><h2>No pages left</h2><p>Add another PDF or add a blank page to continue building your document.</p><div className="pdf-empty-actions"><button className="primary-button" type="button" onClick={onBrowse}><Plus size={18} /> Add PDF</button><button className="secondary-button" type="button" onClick={onBlank}><FilePlus2 size={18} /> Add blank page</button></div></div>;
 }
 
-function PdfPreviewPage({ page, index, selected, previewZoom, pdfDocument, previewRootRef, elementRef, onChange, onRemove, onAddImages, onError }) {
+function PdfPreviewPage({ page, index, selected, previewZoom, pdfDocument, previewRootRef, elementRef, onChange, onRemove, onChangeTextBoxes, onRemoveTextBox, onAddImages, onError }) {
   const nodeRef = useRef(null);
   const [shouldRender, setShouldRender] = useState(index < 2);
 
@@ -1226,7 +1338,7 @@ function PdfPreviewPage({ page, index, selected, previewZoom, pdfDocument, previ
   const pageLabel = page.kind === "source" || page.kind === "raster" ? `Original page ${page.pageNumber}` : "New blank page";
   return <article ref={setNode} className={`pdf-preview-page ${selected ? "selected" : ""}`} aria-label={`Final page ${index + 1}, ${pageLabel}`}>
     <div className="pdf-preview-page-heading"><strong>Final page {index + 1}</strong><span>{pageLabel}{page.kind === "source" || page.kind === "raster" ? ` · ${page.sourceName}` : ""}{page.kind === "raster" ? " · Password-protected source" : ""}</span></div>
-    {shouldRender ? page.kind === "blank" ? <BlankPageCanvas page={page} onChange={onChange} onRemove={onRemove} onAddImages={onAddImages} /> : page.previewFallback ? <PdfFallbackPreview page={page} compact onChange={onChange} onRemove={onRemove} /> : <PdfPageCanvas page={page} pdfDocument={pdfDocument} pageNumber={page.pageNumber} previewZoom={previewZoom} onError={onError} onChange={onChange} onRemove={onRemove} /> : <div className="pdf-preview-page-placeholder" style={{ "--page-ratio": pageDisplayRatio(page) }}><FileText size={24} /><span>Loading page {index + 1}</span></div>}
+    {shouldRender ? page.kind === "blank" ? <BlankPageCanvas page={page} onChange={onChange} onRemove={onRemove} onChangeTextBoxes={onChangeTextBoxes} onRemoveTextBox={onRemoveTextBox} onAddImages={onAddImages} /> : page.previewFallback ? <PdfFallbackPreview page={page} compact onChange={onChange} onRemove={onRemove} onChangeTextBoxes={onChangeTextBoxes} onRemoveTextBox={onRemoveTextBox} /> : <PdfPageCanvas page={page} pdfDocument={pdfDocument} pageNumber={page.pageNumber} previewZoom={previewZoom} onError={onError} onChange={onChange} onRemove={onRemove} onChangeTextBoxes={onChangeTextBoxes} onRemoveTextBox={onRemoveTextBox} /> : <div className="pdf-preview-page-placeholder" style={{ "--page-ratio": pageDisplayRatio(page) }}><FileText size={24} /><span>Loading page {index + 1}</span></div>}
   </article>;
 }
 
@@ -1236,7 +1348,7 @@ function PdfInsertPageButton({ pageNumber, onClick }) {
 
 function PdfPageThumbnail({ page, index, elementRef, thumbnailRootRef, pdfDocument, onThumbnailError, selected, draggedId, dropTargetId, dropPosition, recentlyDroppedId, onSelect, onDelete, onDragStart, onDragEnd, onDragOver, onDrop }) {
   return <>{dropTargetId === page.id && dropPosition === "before" && <div className="pdf-drop-gap" aria-hidden="true">Drop here</div>}<div ref={elementRef} className={`pdf-page-thumbnail ${selected ? "selected" : ""} ${draggedId === page.id ? "dragging" : ""} ${dropTargetId === page.id ? "drop-target" : ""} ${recentlyDroppedId === page.id && draggedId !== page.id ? "just-dropped" : ""}`} draggable onClick={onSelect} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop}>
-    <div className="thumbnail-frame">{page.kind === "source" || page.kind === "raster" ? <div className="thumbnail-page-surface" style={{ "--page-ratio": pageDisplayRatio(page) }}><PdfThumbnailImage page={page} index={index} pdfDocument={pdfDocument} rootRef={thumbnailRootRef} onError={onThumbnailError} /><ThumbnailImageOverlayLayer page={page} /></div> : <BlankPageMiniature page={page} />}</div>
+    <div className="thumbnail-frame">{page.kind === "source" || page.kind === "raster" ? <div className="thumbnail-page-surface" style={{ "--page-ratio": pageDisplayRatio(page) }}><PdfThumbnailImage page={page} index={index} pdfDocument={pdfDocument} rootRef={thumbnailRootRef} onError={onThumbnailError} /><ThumbnailImageOverlayLayer page={page} /><ThumbnailTextBoxOverlayLayer page={page} /></div> : <BlankPageMiniature page={page} />}</div>
     <div className="thumbnail-meta"><GripVertical className="thumbnail-grip" size={14} /><span><strong>Final {index + 1}</strong>{page.kind === "source" || page.kind === "raster" ? <> · <span className="thumbnail-original-page">Original {page.pageNumber}</span> · {page.sourceName}</> : " · New blank page"}</span><button type="button" aria-label={`Delete page ${index + 1}`} title="Delete page" onClick={(event) => { event.stopPropagation(); onDelete(); }}><X size={14} /></button></div>
   </div>{dropTargetId === page.id && dropPosition === "after" && <div className="pdf-drop-gap" aria-hidden="true">Drop here</div>}</>;
 }
@@ -1290,15 +1402,43 @@ function PdfThumbnailImage({ page, index, pdfDocument, rootRef, onError }) {
 }
 
 function ThumbnailImageOverlayLayer({ page }) {
-  return <div className="thumbnail-image-overlay-layer">{getPageImages(page).map((image, index) => { const placement = imageDisplayPlacement(page, image); return <img key={image.id || index} src={image.url} alt="" aria-hidden="true" style={{ left: `${placement.x / placement.pageWidth * 100}%`, top: `${placement.y / placement.pageHeight * 100}%`, width: `${placement.width / placement.pageWidth * 100}%`, height: `${placement.height / placement.pageHeight * 100}%` }} />; })}</div>;
+  return <div className="thumbnail-image-overlay-layer">{getPageImages(page).map((image, index) => { const placement = imageDisplayPlacement(page, image); return <div className="thumbnail-image-overlay" key={image.id || index} style={imageOverlayFrameStyle(placement)}><img src={image.url} alt="" aria-hidden="true" style={imagePreviewStyle(page, image, placement)} /></div>; })}</div>;
+}
+
+function ThumbnailTextBoxOverlayLayer({ page }) {
+  return <div className="thumbnail-text-box-overlay-layer">{getPageTextBoxes(page).map((textBox, index) => { const placement = imageDisplayPlacement(page, textBox); return <div className="thumbnail-text-box-overlay" key={textBox.id || index} style={imageOverlayFrameStyle(placement)}><span style={{ fontFamily: textBoxCssFontFamily(textBox.fontFamily), fontSize: `${Math.max(3, Number(textBox.fontSize) || 18) * Math.min(0.25, 180 / Math.max(1, page.width))}px`, fontWeight: textBox.bold ? 700 : 400, fontStyle: textBox.italic ? "italic" : "normal", textDecoration: textBox.underline ? "underline" : "none", color: validHexColor(textBox.color) ? textBox.color : "#173b53", backgroundColor: textBox.backgroundColor === "transparent" ? "transparent" : validHexColor(textBox.backgroundColor) ? textBox.backgroundColor : "transparent" }}>{textBox.text}</span></div>; })}</div>;
 }
 
 function BlankPageMiniature({ page }) {
   const images = getPageImages(page);
-  return <div className="blank-page-mini" style={{ aspectRatio: pageDisplayRatio(page) }}>{images.map((image, index) => { const placement = imageDisplayPlacement(page, image); return <img key={image.id || index} src={image.url} alt={`Image ${index + 1} on blank page`} style={{ left: `${placement.x / placement.pageWidth * 100}%`, top: `${placement.y / placement.pageHeight * 100}%`, width: `${placement.width / placement.pageWidth * 100}%`, height: `${placement.height / placement.pageHeight * 100}%` }} />; })}</div>;
+  return <div className="blank-page-mini" style={{ aspectRatio: pageDisplayRatio(page) }}>{images.map((image, index) => { const placement = imageDisplayPlacement(page, image); return <div className="blank-page-mini-image" key={image.id || index} style={imageOverlayFrameStyle(placement)}><img src={image.url} alt={`Image ${index + 1} on blank page`} style={imagePreviewStyle(page, image, placement)} /></div>; })}<ThumbnailTextBoxOverlayLayer page={page} /></div>;
 }
 
-function PdfPageCanvas({ page, pdfDocument, pageNumber, previewZoom = 1, onError, onChange, onRemove }) {
+function imageOverlayFrameStyle(placement) {
+  return {
+    left: `${placement.x / placement.pageWidth * 100}%`,
+    top: `${placement.y / placement.pageHeight * 100}%`,
+    width: `${placement.width / placement.pageWidth * 100}%`,
+    height: `${placement.height / placement.pageHeight * 100}%`,
+  };
+}
+
+function imagePreviewStyle(page, image, placement) {
+  const pageRotation = normalizeRotation(page?.rotation);
+  const quarterTurn = pageRotation === 90 || pageRotation === 270;
+  return {
+    position: "absolute",
+    left: "50%",
+    top: "50%",
+    width: quarterTurn ? `${Number(image.width) / Math.max(1, Number(placement.width)) * 100}%` : "100%",
+    height: quarterTurn ? `${Number(image.height) / Math.max(1, Number(placement.height)) * 100}%` : "100%",
+    transform: `translate(-50%, -50%) rotate(${normalizeRotation(pageRotation + normalizeImageRotation(image.rotation))}deg)`,
+    transformOrigin: "center",
+    objectFit: "fill",
+  };
+}
+
+function PdfPageCanvas({ page, pdfDocument, pageNumber, previewZoom = 1, onError, onChange, onRemove, onChangeTextBoxes, onRemoveTextBox }) {
   const canvasRef = useRef(null);
   const frameRef = useRef(null);
   const surfaceRef = useRef(null);
@@ -1358,17 +1498,17 @@ function PdfPageCanvas({ page, pdfDocument, pageNumber, previewZoom = 1, onError
   }, [pageInfo, page.rotation, previewZoom, onError]);
 
   const ratio = pageInfo ? pageDisplayRatio({ ...page, width: pageInfo.width, height: pageInfo.height }) : pageDisplayRatio(page);
-  return <div ref={frameRef} className="pdf-page-canvas-wrap"><div ref={surfaceRef} className="pdf-page-canvas-surface" style={{ "--page-ratio": ratio, ...(surfaceSize ? { width: `${surfaceSize.width}px`, height: `${surfaceSize.height}px` } : {}) }}><canvas ref={canvasRef} aria-label={`PDF page ${pageNumber}`} /><ImageOverlayLayer page={page} onChange={onChange} onRemove={onRemove} /></div></div>;
+  return <div ref={frameRef} className="pdf-page-canvas-wrap"><div ref={surfaceRef} className="pdf-page-canvas-surface" style={{ "--page-ratio": ratio, ...(surfaceSize ? { width: `${surfaceSize.width}px`, height: `${surfaceSize.height}px` } : {}) }}><canvas ref={canvasRef} aria-label={`PDF page ${pageNumber}`} /><ImageOverlayLayer page={page} onChange={onChange} onRemove={onRemove} /><TextBoxOverlayLayer page={page} onChange={onChangeTextBoxes} onRemove={onRemoveTextBox} /></div></div>;
 }
 
-function PdfFallbackPreview({ page, compact = false, onChange, onRemove }) {
+function PdfFallbackPreview({ page, compact = false, onChange, onRemove, onChangeTextBoxes, onRemoveTextBox }) {
   const previewUrl = page.previewToken ? `/api/pdf/preview?token=${encodeURIComponent(page.previewToken)}&page=${page.pageNumber}` : "";
-  return <div className="pdf-page-fallback"><div className="pdf-page-fallback-stage" style={{ "--page-ratio": pageDisplayRatio(page) }}>{previewUrl ? <img src={previewUrl} alt={`Preview of PDF page ${page.pageNumber}`} style={{ transform: `rotate(${normalizeRotation(page.rotation)}deg)` }} /> : <div className="pdf-page-fallback-empty"><FileText size={28} /><strong>Preview is unavailable</strong></div>}<ImageOverlayLayer page={page} onChange={onChange} onRemove={onRemove} /></div>{!compact && <div className="pdf-page-fallback-note"><FileText size={22} /><strong>Server-rendered PDF preview</strong><span>Page {page.pageNumber} is ready to include in the exported PDF.</span></div>}</div>;
+  return <div className="pdf-page-fallback"><div className="pdf-page-fallback-stage" style={{ "--page-ratio": pageDisplayRatio(page) }}>{previewUrl ? <img src={previewUrl} alt={`Preview of PDF page ${page.pageNumber}`} style={{ transform: `rotate(${normalizeRotation(page.rotation)}deg)` }} /> : <div className="pdf-page-fallback-empty"><FileText size={28} /><strong>Preview is unavailable</strong></div>}<ImageOverlayLayer page={page} onChange={onChange} onRemove={onRemove} /><TextBoxOverlayLayer page={page} onChange={onChangeTextBoxes} onRemove={onRemoveTextBox} /></div>{!compact && <div className="pdf-page-fallback-note"><FileText size={22} /><strong>Server-rendered PDF preview</strong><span>Page {page.pageNumber} is ready to include in the exported PDF.</span></div>}</div>;
 }
 
-function BlankPageCanvas({ page, onChange, onRemove, onAddImages }) {
+function BlankPageCanvas({ page, onChange, onRemove, onChangeTextBoxes, onRemoveTextBox, onAddImages }) {
   const images = getPageImages(page);
-  return <div className="blank-page-preview-area"><div className="blank-page-canvas" style={{ "--page-ratio": pageDisplayRatio(page) }}>{images.length ? <ImageOverlayLayer page={page} onChange={onChange} onRemove={onRemove} /> : <button className="blank-page-message" type="button" onClick={onAddImages}><ImagePlus size={25} /><span>Add images to this blank page</span></button>}</div><p className="blank-page-help">{images.length ? "Drag an image to move it. Use the corner handle to resize it. Use the lock to allow free resizing. Use × to remove it." : "Click the blank page to add one or more supported images."}</p></div>;
+  return <div className="blank-page-preview-area"><div className="blank-page-canvas" style={{ "--page-ratio": pageDisplayRatio(page) }}>{images.length ? <ImageOverlayLayer page={page} onChange={onChange} onRemove={onRemove} /> : <button className="blank-page-message" type="button" onClick={onAddImages}><ImagePlus size={25} /><span>Add images to this blank page</span></button>}<TextBoxOverlayLayer page={page} onChange={onChangeTextBoxes} onRemove={onRemoveTextBox} /></div><p className="blank-page-help">{images.length ? "Drag an image to move it. Use the corner handle to resize it, the lock to allow free resizing, and the rotate controls for 15° or an exact angle. Use × to remove it." : "Click the blank page to add images or use Text box to add editable text."}</p></div>;
 }
 
 function ImageOverlayLayer({ page, onChange, onRemove }) {
@@ -1409,8 +1549,65 @@ function ImageOverlayLayer({ page, onChange, onRemove }) {
   };
   const onPointerUp = () => { interactionRef.current = null; };
   const toggleAspectRatio = (imageId) => onChange(images.map((item) => item.id === imageId ? { ...item, lockAspectRatio: item.lockAspectRatio === false } : item));
+  const updateImageRotation = (imageId, value) => {
+    const rotation = Number(value);
+    if (!Number.isFinite(rotation)) return;
+    onChange(images.map((item) => item.id === imageId ? { ...item, rotation: normalizeImageRotation(rotation) } : item));
+  };
+  const rotateImage = (imageId, delta) => {
+    const image = images.find((item) => item.id === imageId);
+    updateImageRotation(imageId, normalizeImageRotation((image?.rotation || 0) + delta));
+  };
 
-  return <div ref={layerRef} className="pdf-image-overlay-layer" onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>{images.map((image, index) => { const placement = imageDisplayPlacement(page, image); return <div className="pdf-image-overlay" key={image.id || index} style={{ left: `${placement.x / placement.pageWidth * 100}%`, top: `${placement.y / placement.pageHeight * 100}%`, width: `${placement.width / placement.pageWidth * 100}%`, height: `${placement.height / placement.pageHeight * 100}%`, zIndex: index + 1 }} onPointerDown={(event) => onPointerDown(event, "move", image)}><img src={image.url} alt={`Placed image ${index + 1}`} draggable="false" /><button type="button" className="image-remove-handle" aria-label={`Remove image ${index + 1}`} title="Remove image" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove?.(image.id); }}><X size={11} /></button><button type="button" className="image-ratio-handle" aria-label={image.lockAspectRatio === false ? `Keep image ${index + 1} aspect ratio` : `Allow image ${index + 1} free resizing`} title={image.lockAspectRatio === false ? "Keep aspect ratio" : "Allow free resizing"} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); toggleAspectRatio(image.id); }}>{image.lockAspectRatio === false ? <Unlock size={10} /> : <Lock size={10} />}</button><button type="button" className="image-resize-handle" aria-label={`Resize image ${index + 1}`} onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, "resize", image); }} /></div>; })}</div>;
+  return <div ref={layerRef} className="pdf-image-overlay-layer" onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>{images.map((image, index) => { const placement = imageDisplayPlacement(page, image); return <div className="pdf-image-overlay" key={image.id || index} style={{ ...imageOverlayFrameStyle(placement), zIndex: index + 1 }} onPointerDown={(event) => onPointerDown(event, "move", image)}><img src={image.url} alt={`Placed image ${index + 1}`} draggable="false" style={imagePreviewStyle(page, image, placement)} /><div className="image-rotation-controls" onPointerDown={(event) => event.stopPropagation()}><button type="button" className="image-rotate-button" aria-label={`Rotate image ${index + 1} 15 degrees clockwise`} title="Rotate 15° clockwise" onClick={(event) => { event.stopPropagation(); rotateImage(image.id, 15); }}><RotateCw size={10} /></button><input type="number" min="-360" max="360" step="1" value={normalizeImageRotation(image.rotation)} aria-label={`Set rotation for image ${index + 1} in degrees`} title="Set image rotation in degrees" onChange={(event) => updateImageRotation(image.id, event.target.value)} /><span aria-hidden="true">°</span></div><button type="button" className="image-remove-handle" aria-label={`Remove image ${index + 1}`} title="Remove image" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove?.(image.id); }}><X size={11} /></button><button type="button" className="image-ratio-handle" aria-label={image.lockAspectRatio === false ? `Keep image ${index + 1} aspect ratio` : `Allow image ${index + 1} free resizing`} title={image.lockAspectRatio === false ? "Keep aspect ratio" : "Allow free resizing"} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); toggleAspectRatio(image.id); }}>{image.lockAspectRatio === false ? <Unlock size={10} /> : <Lock size={10} />}</button><button type="button" className="image-resize-handle" aria-label={`Resize image ${index + 1}`} onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, "resize", image); }} /></div>; })}</div>;
+}
+
+function TextBoxOverlayLayer({ page, onChange, onRemove }) {
+  const layerRef = useRef(null);
+  const interactionRef = useRef(null);
+  const [scale, setScale] = useState(1);
+  const textBoxes = getPageTextBoxes(page);
+  useEffect(() => {
+    const layer = layerRef.current;
+    if (!layer) return undefined;
+    const updateScale = () => setScale(layer.getBoundingClientRect().width / Math.max(1, pageDisplayDimensions(page).width));
+    updateScale();
+    if (typeof ResizeObserver !== "function") return undefined;
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(layer);
+    return () => observer.disconnect();
+  }, [page.width, page.height, page.rotation]);
+  const updateTextBox = (textBoxId, changes) => onChange?.(textBoxes.map((textBox) => textBox.id === textBoxId ? { ...textBox, ...changes } : textBox));
+  const onPointerDown = (event, mode, textBox) => {
+    if (!textBox || !layerRef.current) return;
+    const bounds = layerRef.current.getBoundingClientRect();
+    interactionRef.current = { mode, textBoxId: textBox.id, startX: event.clientX, startY: event.clientY, bounds, textBox: { ...textBox } };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  };
+  const onPointerMove = (event) => {
+    const interaction = interactionRef.current;
+    if (!interaction) return;
+    const textBox = textBoxes.find((item) => item.id === interaction.textBoxId);
+    if (!textBox) return;
+    const displayDimensions = pageDisplayDimensions(page);
+    const displayDx = (event.clientX - interaction.startX) * displayDimensions.width / Math.max(1, interaction.bounds.width);
+    const displayDy = (event.clientY - interaction.startY) * displayDimensions.height / Math.max(1, interaction.bounds.height);
+    const rotation = normalizeRotation(page.rotation);
+    const dx = rotation === 90 ? displayDy : rotation === 180 ? -displayDx : rotation === 270 ? -displayDy : displayDx;
+    const dy = rotation === 90 ? -displayDx : rotation === 180 ? -displayDy : rotation === 270 ? displayDx : displayDy;
+    if (interaction.mode === "move") {
+      onChange?.(textBoxes.map((item) => item.id === interaction.textBoxId ? { ...item, x: Math.max(-MAX_IMAGE_COORDINATE, Math.min(MAX_IMAGE_COORDINATE - item.width, interaction.textBox.x + dx)), y: Math.max(-MAX_IMAGE_COORDINATE, Math.min(MAX_IMAGE_COORDINATE - item.height, interaction.textBox.y + dy)) } : item));
+      return;
+    }
+    const widthDelta = rotation === 90 || rotation === 270 ? displayDy : displayDx;
+    const heightDelta = rotation === 90 || rotation === 270 ? displayDx : displayDy;
+    const width = Math.max(24, Math.min(MAX_IMAGE_COORDINATE, interaction.textBox.width + widthDelta));
+    const height = Math.max(24, Math.min(MAX_IMAGE_COORDINATE, interaction.textBox.height + heightDelta));
+    onChange?.(textBoxes.map((item) => item.id === interaction.textBoxId ? { ...item, width, height } : item));
+  };
+  const onPointerUp = () => { interactionRef.current = null; };
+  return <div ref={layerRef} className="pdf-text-box-overlay-layer" onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>{textBoxes.map((textBox, index) => { const placement = imageDisplayPlacement(page, textBox); const color = validHexColor(textBox.color) ? textBox.color : "#173b53"; const backgroundColor = textBox.backgroundColor === "transparent" || !validHexColor(textBox.backgroundColor) ? "transparent" : textBox.backgroundColor; return <div className="pdf-text-box-overlay" key={textBox.id || index} style={{ ...imageOverlayFrameStyle(placement), zIndex: index + 3 }} onPointerDown={(event) => onPointerDown(event, "move", textBox)}><div className="pdf-text-box-content" style={textBoxPreviewStyle(page, textBox, scale)}><textarea value={textBox.text} placeholder="Type text here" aria-label={`Text box ${index + 1} text`} onPointerDown={(event) => event.stopPropagation()} onChange={(event) => updateTextBox(textBox.id, { text: event.target.value })} style={{ color, backgroundColor }} /></div><div className="pdf-text-box-controls" onPointerDown={(event) => event.stopPropagation()}><select value={textBox.fontFamily} aria-label={`Font for text box ${index + 1}`} title="Font" onChange={(event) => updateTextBox(textBox.id, { fontFamily: event.target.value })}>{PDF_TEXT_BOX_FONTS.map((font) => <option key={font.value} value={font.value}>{font.label}</option>)}</select><input type="number" min="1" max="500" step="1" value={textBox.fontSize} aria-label={`Text size for text box ${index + 1}`} title="Text size" onChange={(event) => updateTextBox(textBox.id, { fontSize: Math.max(1, Math.min(500, Number(event.target.value) || 1)) })} /><button type="button" className="pdf-text-box-style-button" aria-label={`Bold text box ${index + 1}`} aria-pressed={Boolean(textBox.bold)} title="Bold" onClick={() => updateTextBox(textBox.id, { bold: !textBox.bold })}><Bold size={11} /></button><button type="button" className="pdf-text-box-style-button" aria-label={`Italic text box ${index + 1}`} aria-pressed={Boolean(textBox.italic)} title="Italic" onClick={() => updateTextBox(textBox.id, { italic: !textBox.italic })}><Italic size={11} /></button><button type="button" className="pdf-text-box-style-button" aria-label={`Underline text box ${index + 1}`} aria-pressed={Boolean(textBox.underline)} title="Underline" onClick={() => updateTextBox(textBox.id, { underline: !textBox.underline })}><Underline size={11} /></button><label className="pdf-text-box-color" title="Text color"><span className="sr-only">Text color</span><input type="color" value={color} aria-label={`Text color for text box ${index + 1}`} onChange={(event) => updateTextBox(textBox.id, { color: event.target.value })} /></label><label className="pdf-text-box-color" title="Background color"><span className="sr-only">Background color</span><input type="color" value={backgroundColor === "transparent" ? "#ffffff" : backgroundColor} aria-label={`Background color for text box ${index + 1}`} onChange={(event) => updateTextBox(textBox.id, { backgroundColor: event.target.value })} /></label><button type="button" className="pdf-text-box-clear-background" onClick={() => updateTextBox(textBox.id, { backgroundColor: "transparent" })}>Clear</button></div><button type="button" className="text-box-remove-handle" aria-label={`Remove text box ${index + 1}`} title="Remove text box" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove?.(textBox.id); }}><X size={11} /></button><button type="button" className="text-box-resize-handle" aria-label={`Resize text box ${index + 1}`} onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, "resize", textBox); }} /></div>; })}</div>;
 }
 
 function pdfPreviewUrl(downloadUrl) {

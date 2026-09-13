@@ -2,12 +2,14 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { PDFDocument, degrees } from "pdf-lib";
+import { PDFDocument, degrees, rgb } from "pdf-lib";
 import { config, paths, untruncCandidates } from "../lib/config.js";
 import { appendJobLog, claimNextJob, deleteJob, getJob, listExpiredJobs, updateJob } from "../lib/db.js";
 import { commandExists, firstAvailable, runCommand } from "../lib/command.js";
 import { applyPdfTextEdits } from "../lib/pdf-text-editor.js";
 import { applyPdfOcrEdits } from "../lib/pdf-ocr.js";
+import { rotatedImageDrawPlacement } from "../lib/pdf-image-placement.js";
+import { textBoxColor, textBoxDrawPlacement, textBoxFontName, wrapPdfTextLines } from "../lib/pdf-text-box.js";
 
 let sharpPromise;
 
@@ -527,17 +529,58 @@ async function drawPdfImages(pdf, outputPage, operation, workDir, index) {
   const pageHeight = Number(operation.height) || outputPage.getHeight();
   for (const [imageIndex, imageOperation] of images.entries()) {
     const placement = imageOperation.placement || imageOperation.image;
-    const values = [placement?.x, placement?.y, placement?.width, placement?.height].map(Number);
+    const values = [placement?.x, placement?.y, placement?.width, placement?.height, placement?.rotation ?? 0].map(Number);
     if (!placement || !values.every(Number.isFinite) || values[2] <= 0 || values[3] <= 0 || values[0] < -100000 || values[1] < -100000 || values[0] + values[2] > 100000 || values[1] + values[3] > 100000) {
       throw new Error(`Image ${imageIndex + 1} has an invalid placement on PDF page.`);
     }
     const image = await embedPdfImage(pdf, { imagePath: imageOperation.path, imageName: imageOperation.name, imageMime: imageOperation.mime }, workDir, `${index}-${imageIndex}`);
+    const drawPlacement = rotatedImageDrawPlacement(placement, pageHeight);
     outputPage.drawImage(image, {
-      x: placement.x,
-      y: pageHeight - placement.y - placement.height,
-      width: placement.width,
-      height: placement.height,
+      x: drawPlacement.x,
+      y: drawPlacement.y,
+      width: drawPlacement.width,
+      height: drawPlacement.height,
+      rotate: degrees(drawPlacement.rotation),
     });
+  }
+}
+
+async function drawPdfTextBoxes(pdf, outputPage, operation) {
+  const textBoxes = Array.isArray(operation.textBoxes) ? operation.textBoxes : [];
+  if (!textBoxes.length) return;
+  const fontCache = new Map();
+  const pageHeight = Number(operation.height) || outputPage.getHeight();
+  for (const [index, textBox] of textBoxes.entries()) {
+    try {
+      const fontName = textBoxFontName(textBox);
+      let font = fontCache.get(fontName);
+      if (!font) {
+        font = await pdf.embedFont(fontName);
+        fontCache.set(fontName, font);
+      }
+      const size = Math.max(1, Number(textBox.fontSize) || 18);
+      const placement = textBoxDrawPlacement(textBox, pageHeight);
+      if (textBox.backgroundColor !== "transparent") {
+        const background = textBoxColor(textBox.backgroundColor, "#ffffff");
+        outputPage.drawRectangle({ x: placement.x, y: placement.y, width: placement.width, height: placement.height, color: rgb(background.r, background.g, background.b), borderWidth: 0 });
+      }
+      if (!String(textBox.text ?? "")) continue;
+      const lines = wrapPdfTextLines(textBox.text, font, size, Math.max(1, placement.width - 8));
+      const lineHeight = size * 1.2;
+      const textX = placement.x + 4;
+      const firstBaseline = placement.y + placement.height - size - 4;
+      const color = textBoxColor(textBox.color);
+      outputPage.drawText(lines.join("\n"), { x: textX, y: firstBaseline, size, font, lineHeight, color: rgb(color.r, color.g, color.b) });
+      if (textBox.underline) {
+        const thickness = Math.max(0.5, size * 0.06);
+        lines.forEach((line, lineIndex) => {
+          const baseline = firstBaseline - lineIndex * lineHeight;
+          outputPage.drawLine({ start: { x: textX, y: baseline - size * 0.08 }, end: { x: textX + font.widthOfTextAtSize(line, size), y: baseline - size * 0.08 }, thickness, color: rgb(color.r, color.g, color.b) });
+        });
+      }
+    } catch (error) {
+      throw new Error(`Text box ${index + 1} could not be exported with the selected font. Use a supported PDF font and text.`);
+    }
   }
 }
 
@@ -581,6 +624,7 @@ async function processPdfEditor(job) {
       outputDocument.addPage(copiedPage);
       if ([0, 90, 180, 270].includes(Number(operation.rotation))) copiedPage.setRotation(degrees(Number(operation.rotation)));
       if ((Array.isArray(operation.images) && operation.images.length) || operation.imagePath) await drawPdfImages(outputDocument, copiedPage, operation, workDir, index);
+      if (Array.isArray(operation.textBoxes) && operation.textBoxes.length) await drawPdfTextBoxes(outputDocument, copiedPage, operation);
       update(job.id, pageProgress, "Arranging pages", `Added page ${index + 1} of ${manifest.pages.length}.`);
       continue;
     }
@@ -588,6 +632,7 @@ async function processPdfEditor(job) {
     const outputPage = outputDocument.addPage([operation.width, operation.height]);
     if ([0, 90, 180, 270].includes(operation.rotation)) outputPage.setRotation(degrees(operation.rotation));
     if ((Array.isArray(operation.images) && operation.images.length) || operation.imagePath) await drawPdfImages(outputDocument, outputPage, operation, workDir, index);
+    if (Array.isArray(operation.textBoxes) && operation.textBoxes.length) await drawPdfTextBoxes(outputDocument, outputPage, operation);
     update(job.id, pageProgress, "Arranging pages", `Added page ${index + 1} of ${manifest.pages.length}.`);
   }
 

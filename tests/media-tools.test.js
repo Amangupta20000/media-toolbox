@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import zlib from "node:zlib";
 import { once } from "node:events";
 import { PassThrough } from "node:stream";
 import test, { after, before } from "node:test";
@@ -376,6 +377,33 @@ test("PDF editor exports a project made only from blank pages", async () => {
   assert.deepEqual(output.getPages().map((page) => [Math.round(page.getWidth()), Math.round(page.getHeight())]), [[300, 400], [400, 300]]);
 });
 
+test("PDF editor exports styled text boxes on blank pages", async () => {
+  const jobDir = path.join(testRoot, "pdf-text-box-job");
+  await fs.mkdir(jobDir, { recursive: true });
+  const intakeResult = await createJobFromMultipart({
+    id: crypto.randomUUID(),
+    jobDir,
+    fields: {
+      tool: "pdf-editor",
+      operations: JSON.stringify([{ kind: "blank", width: 420, height: 560, rotation: 0, images: [], textBoxes: [{ id: "title", text: "Hello PDF", x: 40, y: 80, width: 220, height: 48, fontSize: 18, fontFamily: "Helvetica", bold: true, italic: true, underline: true, color: "#ff0000", backgroundColor: "#00ff00" }] }]),
+    },
+    files: [],
+  });
+  const job = db.getJob(intakeResult.ids[0]);
+  await worker.processJob(job);
+
+  const completed = db.getJob(job.id);
+  const result = JSON.parse(completed.result_json);
+  const output = await PDFDocument.load(await fs.readFile(result.path));
+  const contents = output.context.lookup(output.context.lookup(output.getPage(0).node.Contents()).array[0]);
+  const content = zlib.inflateSync(Buffer.from(contents.contents)).toString("latin1");
+  assert.equal(completed.status, "completed");
+  assert.match(content, /<48656C6C6F20504446>/);
+  assert.match(content, /1 0 0 rg/);
+  assert.match(content, /0 1 0 rg/);
+  assert.match(content, /m\n/);
+});
+
 test("PDF editor embeds multiple images on one blank page", async (t) => {
   const sourcePath = path.join(testRoot, "multi-image-source.pdf");
   await createPdf(sourcePath, "Multiple images", [[420, 560]]);
@@ -415,6 +443,39 @@ test("PDF editor embeds multiple images on one blank page", async (t) => {
   assert.equal(result.pageCount, 2);
   assert.equal(output.getPage(0).getRotation().angle, 270);
   assert.equal(output.getPage(1).getRotation().angle, 90);
+});
+
+test("PDF editor preserves arbitrary image rotation in the exported PDF", async (t) => {
+  const imageTool = await firstAvailable(["magick", "convert"]);
+  if (!imageTool) {
+    t.skip("ImageMagick is required for the rotated-image fixture.");
+    return;
+  }
+  const imagePath = path.join(testRoot, "rotated-image.png");
+  const convertCommand = imageTool === "magick" ? imageTool : "convert";
+  await command(convertCommand, ["-size", "80x40", "xc:tomato", imagePath]);
+  const jobDir = path.join(testRoot, "pdf-rotated-image-job");
+  await fs.mkdir(jobDir, { recursive: true });
+  const manifestPath = path.join(jobDir, "manifest.json");
+  await fs.writeFile(manifestPath, JSON.stringify({
+    pdfs: [],
+    pages: [{ kind: "blank", width: 420, height: 560, rotation: 0, images: [
+      { path: imagePath, name: "rotated-image.png", mime: "image/png", placement: { x: 140, y: 180, width: 80, height: 40, rotation: 37 } },
+    ] }],
+  }));
+  const job = await createJob({ tool: "pdf-editor", sourcePath: manifestPath, sourceName: "PDF editor project", options: { pdfCount: 0, pageCount: 1 } });
+  await worker.processJob(job);
+
+  const completed = db.getJob(job.id);
+  const result = JSON.parse(completed.result_json);
+  const pdfBytes = await fs.readFile(result.path);
+  const output = await PDFDocument.load(pdfBytes);
+  assert.equal(completed.status, "completed");
+  assert.equal(output.getPageCount(), 1);
+  const contents = output.context.lookup(output.getPage(0).node.Contents());
+  const stream = output.context.lookup(contents.array[0]);
+  const content = zlib.inflateSync(Buffer.from(stream.contents)).toString("latin1");
+  assert.match(content, /0\.6018150231520483 -0\.6018150231520483/);
 });
 
 test("PDF editor merges five PDFs in manifest order and keeps every source unchanged", async () => {
