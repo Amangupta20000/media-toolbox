@@ -246,6 +246,8 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .result-video-preview { margin: 22px 0 18px; padding: 10px; text-align: left; background: #f8fbfc; border: 1px solid #e4eef2; border-radius: 10px; }
 .result-video-frame { min-height: 180px; display: grid; place-items: center; overflow: hidden; padding: 10px; background: #0d1e2e; border: 1px solid #1f3b51; border-radius: 7px; }
 .result-video-frame video { display: block; width: 100%; max-height: 420px; background: #08131f; border-radius: 4px; }
+.result-pdf-preview { margin: 22px 0 18px; padding: 10px; text-align: left; background: #f8fbfc; border: 1px solid #e4eef2; border-radius: 10px; }
+.result-pdf-preview iframe { display: block; width: 100%; height: 390px; border: 1px solid #d8e6eb; border-radius: 7px; background: #fff; }
 .result-summary { display: flex; gap: 8px; margin: 25px 0 18px; padding-bottom: 5px; overflow-x: auto; text-align: left; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scrollbar-color: #b7cbd4 transparent; }
 .result-summary > div { flex: 0 0 220px; min-width: 0; padding: 11px; background: #f8fbfc; border: 1px solid #edf2f5; border-radius: 8px; scroll-snap-align: start; }
 .result-summary span, .result-summary strong { display: block; }
@@ -587,7 +589,7 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .dropzone:hover, [data-theme="dark"] .dropzone.dragging { background: #153b42; border-color: #5bc1c1; }
 [data-theme="dark"] .dropzone-empty strong, [data-theme="dark"] .selected-file-copy strong { color: #dcebf2; }
 [data-theme="dark"] .dropzone-empty span, [data-theme="dark"] .selected-file-copy span, [data-theme="dark"] .format-option, [data-theme="dark"] .method-option, [data-theme="dark"] .field-label { color: #a0b2c0; }
-[data-theme="dark"] .selected-file, [data-theme="dark"] .image-preview-card, [data-theme="dark"] .result-image-preview, [data-theme="dark"] .result-video-preview { background: #132b3a; border-color: #2f5663; }
+[data-theme="dark"] .selected-file, [data-theme="dark"] .image-preview-card, [data-theme="dark"] .result-image-preview, [data-theme="dark"] .result-video-preview, [data-theme="dark"] .result-pdf-preview { background: #132b3a; border-color: #2f5663; }
 [data-theme="dark"] .image-batch-setting, [data-theme="dark"] .batch-job-row { background: #122536; border-color: #2c4354; }
 [data-theme="dark"] .image-settings-pager, [data-theme="dark"] .image-settings-sync { background: #122536; border-color: #2c4354; }
 [data-theme="dark"] .image-settings-pager-arrow { color: #a0b2c0; background: #173044; border-color: #385468; }

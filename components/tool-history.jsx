@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Download, Eye, FileText, Film, FolderOpen, Image as ImageIcon, Pencil, RefreshCw, Trash2, X } from "lucide-react";
+import { AlertTriangle, Archive, Download, Eye, FileText, Film, FolderOpen, Image as ImageIcon, Pencil, RefreshCw, Trash2, X } from "lucide-react";
 import { formatBytes } from "./file-dropzone.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
 import { rememberHistoryEdit } from "./history-edit.js";
@@ -13,6 +13,7 @@ const toolNames = {
   "video-repair": "Video repair",
   "pdf-editor": "PDF editing",
   "pdf-text-editor": "PDF text editing",
+  "pdf-compressor": "PDF compression",
 };
 
 const toolIcons = {
@@ -20,6 +21,7 @@ const toolIcons = {
   "video-repair": Film,
   "pdf-editor": FileText,
   "pdf-text-editor": FileText,
+  "pdf-compressor": Archive,
 };
 
 export function ToolViewTabs({ value, onChange }) {
@@ -182,7 +184,7 @@ export function ToolHistory({ tool }) {
       return;
     }
     rememberHistoryEdit({ tool, downloadUrl: result.downloadUrl, filename: result.filename, mime: result.mime });
-    window.location.assign(tool === "pdf-editor" ? "/pdf-editor" : tool === "pdf-text-editor" ? "/pdf-text-editor" : tool === "video-repair" ? "/video-repair" : "/image-converter");
+    window.location.assign(tool === "pdf-editor" ? "/pdf-editor" : tool === "pdf-text-editor" ? "/pdf-text-editor" : tool === "pdf-compressor" ? "/pdf-compressor" : tool === "video-repair" ? "/video-repair" : "/image-converter");
   };
 
   return <section className="history-panel" aria-labelledby={`${tool}-history-title`}>
@@ -245,7 +247,7 @@ function HistoryPreviewModal({ item, onClose, onDelete, onEdit, deleting }) {
         {!previewUrl && <DismissibleMessage className="preview-unavailable" resetKey="missing-preview"><AlertTriangle size={18} /><span>This saved result is no longer available for preview.</span></DismissibleMessage>}
         {previewUrl && tool === "image-converter" && (previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${result.filename}-image-preview`}><AlertTriangle size={18} /><span>This image cannot be previewed in this browser, but it can still be downloaded.</span></DismissibleMessage> : <img className="history-preview-image" src={previewUrl} alt={`Preview of ${result.filename || "saved image"}`} onError={() => setPreviewError(true)} />)}
         {previewUrl && tool === "video-repair" && (previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${result.filename}-video-preview`}><AlertTriangle size={18} /><span>This video cannot be previewed in this browser, but it can still be downloaded.</span></DismissibleMessage> : <video className="history-preview-video" controls autoPlay={false} preload="metadata" playsInline onError={() => setPreviewError(true)} aria-label={`Preview of ${result.filename || "saved video"}`}><source src={previewUrl} /></video>)}
-        {(previewUrl && (tool === "pdf-editor" || tool === "pdf-text-editor")) && <iframe className="history-preview-pdf" src={previewUrl} title={`Preview of ${result.filename || "saved PDF"}`} />}
+        {(previewUrl && (tool === "pdf-editor" || tool === "pdf-text-editor" || tool === "pdf-compressor")) && <iframe className="history-preview-pdf" src={previewUrl} title={`Preview of ${result.filename || "saved PDF"}`} />}
       </div>
       <div className="history-preview-actions"><button className="secondary-button history-modal-delete" type="button" onClick={handleDelete} disabled={deleting}><Trash2 size={16} /> {deleting ? "Deleting…" : "Delete file"}</button><a className="primary-button" href={result.downloadUrl} download={result.filename}><Download size={17} /> Download</a><button className="secondary-button" type="button" onClick={onEdit}><Pencil size={16} /> Edit file</button></div>
     </div>

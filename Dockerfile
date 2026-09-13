@@ -33,6 +33,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     imagemagick \
+    ghostscript \
     libheif1 \
     poppler-utils \
     ffmpeg \

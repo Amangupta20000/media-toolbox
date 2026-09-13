@@ -403,6 +403,35 @@ test("PDF editor uses the requested PDF name for a retained result", async () =>
   assert.equal(JSON.parse(completed.options_json).outputFilename, "Quarterly_design_review.pdf");
 });
 
+test("PDF compressor creates a validated smaller-or-original copy without changing the source", async () => {
+  const sourcePath = path.join(testRoot, "compress-source.pdf");
+  await createPdf(sourcePath, "Compress", [[360, 240], [420, 300]]);
+  const sourceHash = await sha256(sourcePath);
+  const jobDir = path.join(testRoot, "pdf-compressor-job");
+  await fs.mkdir(jobDir, { recursive: true });
+  const intakeResult = await createJobFromMultipart({
+    id: crypto.randomUUID(),
+    jobDir,
+    fields: { tool: "pdf-compressor", compressionProfile: "balanced" },
+    files: [{ field: "source", name: "compress-source.pdf", mime: "application/pdf", path: sourcePath, size: (await fs.stat(sourcePath)).size }],
+  });
+  const job = db.getJob(intakeResult.ids[0]);
+  await worker.processJob(job);
+
+  const completed = db.getJob(job.id);
+  const result = JSON.parse(completed.result_json);
+  const output = await PDFDocument.load(await fs.readFile(result.path));
+  assert.equal(completed.status, "completed");
+  assert.equal(result.filename, "compress-source_compressed.pdf");
+  assert.equal(result.pageCount, 2);
+  assert.equal(result.inputBytes, (await fs.stat(sourcePath)).size);
+  assert.equal(result.bytes <= result.inputBytes, true);
+  assert.equal(result.reductionPercent >= 0 && result.reductionPercent <= 100, true);
+  assert.equal(output.getPageCount(), 2);
+  assert.equal(await sha256(sourcePath), sourceHash);
+  assert.equal(db.getJobForPublic(job.id).logs.some((entry) => entry.message.includes("PDF compression")), true);
+});
+
 test("PDF editor exports styled text boxes on blank pages", async () => {
   const jobDir = path.join(testRoot, "pdf-text-box-job");
   await fs.mkdir(jobDir, { recursive: true });

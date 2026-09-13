@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { Bot, Clock3, Film, FileText, Image as ImageIcon, Menu, Moon, PanelLeftClose, PanelLeftOpen, ShieldCheck, Sparkles, Sun } from "lucide-react";
+import { Archive, Bot, Clock3, Film, FileText, Image as ImageIcon, Menu, Moon, PanelLeftClose, PanelLeftOpen, ShieldCheck, Sparkles, Sun } from "lucide-react";
 import { probeLocalAgent } from "./processing-client.js";
 
 const navigation = [
@@ -11,6 +11,7 @@ const navigation = [
   { href: "/video-repair", label: "Video repair", detail: "Layered recovery workflow", icon: Film },
   { href: "/pdf-editor", label: "PDF editor", detail: "Merge and arrange pages", icon: FileText, beta: true },
   { href: "/pdf-text-editor", label: "PDF text editor", detail: "Edit existing PDF text", icon: FileText, beta: true },
+  { href: "/pdf-compressor", label: "PDF compressor", detail: "Reduce PDF file size", icon: Archive, beta: true },
   { href: "/local-agent", label: "Local agent", detail: "Process files on this device", icon: Bot },
 ];
 

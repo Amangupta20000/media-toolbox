@@ -69,6 +69,31 @@ function commandFailure(result) {
   return detail.slice(0, 500) || `process exited with code ${result.code}`;
 }
 
+async function usableGhostscript() {
+  const candidate = await firstAvailable(["gs"]);
+  if (!candidate) return null;
+  try {
+    // On macOS, an executable can still have a valid mode bit while one of
+    // its Homebrew dylib dependencies has been removed. Do not launch such a
+    // binary: the dynamic loader can leave the child stuck before it emits an
+    // error, which would block a compression job indefinitely.
+    if (process.platform === "darwin") {
+      const inspection = await runCommand("otool", ["-L", candidate], { timeoutMs: 5000 });
+      if (inspection.code !== 0) return null;
+      const missing = inspection.stdout
+        .split(/\r?\n/)
+        .slice(1)
+        .map((line) => line.trim().split(" (")[0])
+        .filter((dependency) => dependency.startsWith("/") && !fs.existsSync(dependency));
+      if (missing.length) return null;
+    }
+    const result = await runCommand(candidate, ["--version"], { timeoutMs: 5000 });
+    return result.code === 0 ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
 function logAttemptFailure(jobId, label, result) {
   if (result.code !== 0) appendJobLog(jobId, `${label} failed: ${commandFailure(result)}`, "warning");
 }
@@ -682,6 +707,99 @@ async function processPdfEditor(job) {
   updateJob(job.id, { status: "completed", progress: 100, stage: "Complete", message: "The edited PDF is ready to download.", warnings: [], result });
 }
 
+async function processPdfCompressor(job) {
+  let options;
+  try { options = JSON.parse(job.options_json || "{}"); } catch { throw new Error("The PDF compression options could not be read."); }
+  const input = await fsp.readFile(job.source_path);
+  let inputDocument;
+  try {
+    inputDocument = await PDFDocument.load(input, { updateMetadata: false, throwOnInvalidObject: false });
+    if (inputDocument.getPageCount() < 1) throw new Error("The PDF has no pages.");
+  } catch {
+    throw new Error("The PDF is encrypted, corrupt, or unsupported.");
+  }
+
+  const settings = {
+    balanced: { pdfSettings: "ebook", label: "Balanced compression" },
+    small: { pdfSettings: "screen", label: "Smallest-file compression" },
+    quality: { pdfSettings: "prepress", label: "Higher-quality compression" },
+  }[options.compressionProfile || "balanced"];
+  if (!settings) throw new Error("Choose a supported compression level.");
+  const outputName = safePdfOutputFilename(options.outputFilename, `${stem(job.source_name)}_compressed.pdf`);
+  const jobDir = path.dirname(job.source_path);
+  const outputPath = path.join(jobDir, outputName);
+  const workPath = path.join(jobDir, `${outputName}.working`);
+  const warnings = [];
+  let method = "";
+
+  update(job.id, 10, "Inspecting PDF", `Opening ${inputDocument.getPageCount()} page${inputDocument.getPageCount() === 1 ? "" : "s"}.`);
+  const ghostscript = await usableGhostscript();
+  if (ghostscript) {
+    update(job.id, 28, "Compressing PDF", `${settings.label} with Ghostscript.`);
+    const compressed = await runCommand(ghostscript, [
+      "-sDEVICE=pdfwrite",
+      "-dCompatibilityLevel=1.4",
+      `-dPDFSETTINGS=/${settings.pdfSettings}`,
+      "-dDetectDuplicateImages=true",
+      "-dCompressFonts=true",
+      "-dSubsetFonts=true",
+      "-dNOPAUSE",
+      "-dBATCH",
+      "-dSAFER",
+      `-sOutputFile=${workPath}`,
+      job.source_path,
+    ], { timeoutMs: 15 * 60 * 1000 });
+    if (compressed.code === 0 && fs.existsSync(workPath)) {
+      method = `Ghostscript ${settings.label.toLowerCase()}`;
+    } else {
+      appendJobLog(job.id, `Ghostscript compression failed: ${commandFailure(compressed)}`, "warning");
+      warnings.push("The PDF optimizer could not complete on this worker; a safe structural rewrite was used instead.");
+    }
+  } else {
+    warnings.push("Ghostscript is not available or healthy on this worker; a safe structural rewrite was used instead.");
+  }
+
+  if (!method) {
+    update(job.id, 48, "Optimizing PDF structure", "Rewriting the PDF with compressed object streams.");
+    const rewritten = await inputDocument.save({ useObjectStreams: true, addDefaultPage: false, objectsPerTick: 50 });
+    await fsp.writeFile(workPath, rewritten);
+    method = "PDF structural optimization";
+  }
+
+  update(job.id, 82, "Validating PDF", "Checking that every page remains readable.");
+  let outputBytes = await fsp.readFile(workPath);
+  try {
+    const validation = await PDFDocument.load(outputBytes, { updateMetadata: false, throwOnInvalidObject: false });
+    if (validation.getPageCount() !== inputDocument.getPageCount()) throw new Error("The compressed PDF page count changed.");
+  } catch {
+    await fsp.rm(workPath, { force: true });
+    throw new Error("The compressed PDF could not be validated.");
+  }
+
+  const inputBytes = input.length;
+  if (outputBytes.length >= inputBytes) {
+    await fsp.copyFile(job.source_path, workPath);
+    outputBytes = input;
+    warnings.push("This PDF was already optimized; the original bytes were kept because the selected compression pass would not reduce its size.");
+    method = `${method} · original retained`;
+  }
+  await fsp.rename(workPath, outputPath);
+  const savedBytes = Math.max(0, inputBytes - outputBytes.length);
+  const reductionPercent = inputBytes ? Math.round((savedBytes / inputBytes) * 100) : 0;
+  const result = {
+    path: outputPath,
+    filename: outputName,
+    bytes: outputBytes.length,
+    inputBytes,
+    savedBytes,
+    reductionPercent,
+    pageCount: inputDocument.getPageCount(),
+    method,
+  };
+  appendJobLog(job.id, `Created ${outputName} successfully (${reductionPercent}% smaller).`, "complete");
+  updateJob(job.id, { status: "completed", progress: 100, stage: "Complete", message: reductionPercent ? `The PDF was compressed by ${reductionPercent}%.` : "The PDF was already optimized; a validated copy is ready.", warnings, result });
+}
+
 async function processPdfTextEditor(job) {
   let options;
   try { options = JSON.parse(job.options_json || "{}"); } catch { throw new Error("The PDF text editor options could not be read."); }
@@ -913,11 +1031,12 @@ async function processVideo(job) {
 }
 
 async function processJob(job) {
-  appendJobLog(job.id, `Worker started ${job.tool === "image-converter" ? "image conversion" : job.tool === "pdf-editor" ? "PDF editing" : job.tool === "pdf-text-editor" ? "PDF text editing" : "video repair"}.`, "info");
+  appendJobLog(job.id, `Worker started ${job.tool === "image-converter" ? "image conversion" : job.tool === "pdf-editor" ? "PDF editing" : job.tool === "pdf-text-editor" ? "PDF text editing" : job.tool === "pdf-compressor" ? "PDF compression" : "video repair"}.`, "info");
   try {
     if (job.tool === "image-converter") await processImage(job);
     else if (job.tool === "pdf-editor") await processPdfEditor(job);
     else if (job.tool === "pdf-text-editor") await processPdfTextEditor(job);
+    else if (job.tool === "pdf-compressor") await processPdfCompressor(job);
     else if (job.tool === "video-repair") await processVideo(job);
     else throw new Error("Unknown tool.");
   } catch (error) {
@@ -931,6 +1050,7 @@ async function writeCapabilities() {
   const imageTool = await firstAvailable(["magick", "convert"]);
   const identify = await firstAvailable(["identify"]);
   const sips = await commandExists("sips");
+  const ghostscript = await usableGhostscript();
   const heifTool = await firstAvailable(["heif-convert", "heif-enc"]);
   let imageMagickHeic = false;
   if (identify) {
@@ -949,7 +1069,7 @@ async function writeCapabilities() {
   const values = {
     status: "ready",
     checkedAt: new Date().toISOString(),
-    pdf: { textEditing: true, ocr: true, ocrLanguages: ["eng"] },
+    pdf: { textEditing: true, ocr: true, ocrLanguages: ["eng"], compressor: Boolean(ghostscript), compressorEngine: ghostscript ? "Ghostscript" : "PDF structural optimization" },
     image: { imagemagick: Boolean(imageTool), sharp: Boolean(sharp), sips, heic: heic || sips, libheif, formats: ["jpeg", "png", "heic", "tiff", "gif", "bmp"] },
     video: { ffmpeg, ffprobe: await commandExists("ffprobe"), mkvmerge, mkvFallback: ffmpeg, untrunc: Boolean(await firstAvailable(untruncCandidates)), defaultReference: fs.existsSync(config.untruncReferencePath) },
   };
@@ -989,7 +1109,7 @@ async function main() {
   }
 }
 
-export { processImage, processPdfEditor, processPdfTextEditor, processVideo, processJob, writeCapabilities };
+export { processImage, processPdfEditor, processPdfCompressor, processPdfTextEditor, processVideo, processJob, writeCapabilities };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
