@@ -588,11 +588,17 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
 
   const dragRef = useRef(null);
   const suppressClickRef = useRef(false);
+  const selectTextRun = (run) => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    onSelectRun(run);
+  };
   const startTextDrag = (event, run) => {
     if (!run.editable || event.button !== 0 || event.pointerType !== "mouse") return;
     event.preventDefault();
     event.stopPropagation();
-    onSelectRun(run);
     const offset = textOffset(textOffsets[run.runId]);
     dragRef.current = { runId: run.runId, startX: event.clientX, startY: event.clientY, startOffset: offset, moved: false, pointerId: event.pointerId };
     suppressClickRef.current = false;
@@ -635,7 +641,7 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
         type="button"
         className={`pdf-text-run ${run.mode === "ocr" ? "ocr" : ""} selected ${edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]) ? "edited" : ""}`}
         style={{ left: 0, top: 0, width: "100%", height: "100%", transform: `scale(${displayAppearance.scale})`, transformOrigin: "center center" }}
-        onClick={() => { if (suppressClickRef.current) { suppressClickRef.current = false; return; } onSelectRun(run); }}
+        onClick={() => selectTextRun(run)}
         onPointerDown={(event) => startTextDrag(event, run)}
         onPointerMove={(event) => moveTextDrag(event, run)}
         onPointerUp={(event) => endTextDrag(event, run)}
@@ -647,7 +653,7 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
       type="button"
       className={`pdf-text-run ${run.mode === "ocr" ? "ocr" : ""} ${edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]) ? "edited" : ""} ${!run.editable ? "not-editable" : ""}`}
       style={{ left: run.left, top: run.top, width: run.width || undefined, height: run.height || undefined, transform: `rotate(${displayAppearance.rotation}deg) scale(${displayAppearance.scale})`, transformOrigin: "center center" }}
-      onClick={() => onSelectRun(run)}
+      onClick={() => selectTextRun(run)}
       onPointerDown={(event) => startTextDrag(event, run)}
       onPointerMove={(event) => moveTextDrag(event, run)}
       onPointerUp={(event) => endTextDrag(event, run)}

@@ -82,6 +82,8 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /VirtualizedPdfTextRail/);
   assert.match(shell, /scrollToIndex/);
   assert.match(shell, /onPointerDown=\{\(event\) => startTextDrag/);
+  assert.match(shell, /const selectTextRun = \(run\) =>/);
+  assert.match(shell, /onClick=\{\(\) => selectTextRun\(run\)\}/);
   assert.match(shell, /onMoveRunEnd/);
   assert.match(shell, /offsetX: offset\.x/);
   assert.match(shell, /textTransforms/);
