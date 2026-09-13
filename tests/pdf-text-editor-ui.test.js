@@ -71,7 +71,8 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /devicePixelRatio/);
   assert.match(shell, /renderViewport/);
   assert.match(shell, /GlobalWorkerOptions\.workerSrc = "\/api\/pdf\/worker"/);
-  assert.match(await read("styles/globals.css"), /\.pdf-text-page-frame \{[^}]*overflow: auto/);
+  assert.match(await read("styles/globals.css"), /\.pdf-text-page-frame \{[^}]*height: auto[^}]*overflow: visible/);
+  assert.match(await read("styles/globals.css"), /\.pdf-text-page-frame \{[^}]*min-height: max\(/);
   assert.match(await read("styles/globals.css"), /\.pdf-text-page-surface \{[^}]*margin: 0 auto/);
   assert.match(shell, /const scale = .*previewZoom/);
   assert.match(shell, /surfaceSize/);
@@ -83,6 +84,11 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /onPointerDown=\{\(event\) => startTextDrag/);
   assert.match(shell, /onMoveRunEnd/);
   assert.match(shell, /offsetX: offset\.x/);
+  assert.match(shell, /textTransforms/);
+  assert.match(shell, /scale: transform\.scale/);
+  assert.match(shell, /rotation: transform\.rotation/);
+  assert.match(shell, /onAppearanceChange/);
+  assert.match(shell, /moveOnly/);
   assert.match(shell, /gesturechange/);
   assert.match(shell, /event\.preventDefault\(\)/);
   assert.doesNotMatch(shell, /pages\.map\(\(model\) => <PdfTextPage/);

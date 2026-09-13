@@ -196,6 +196,34 @@ test("OCR raster edits move the replacement while clearing the original region",
   assert.ok(lightPixels(15, 15, 145, 105) < 100, "the original OCR text region should be cleared before painting the moved text");
 });
 
+test("OCR raster edits apply size and rotation around the moved text region", () => {
+  const canvas = createCanvas(500, 240);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#101820";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#ffffff";
+  context.font = "700 42px Arial";
+  const text = "Rotate";
+  const baseline = 120;
+  const metrics = context.measureText(text);
+  context.fillText(text, 90, baseline);
+  const warnings = applyRasterTextEdits(canvas, [{
+    originalText: text,
+    replacementText: text,
+    bbox: { x0: 90, y0: baseline - metrics.actualBoundingBoxAscent, x1: 90 + metrics.width, y1: baseline + metrics.actualBoundingBoxDescent },
+    scale: 1.5,
+    rotation: 90,
+  }]);
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  let lightPixels = 0;
+  for (let y = 25; y < 215; y += 1) for (let x = 20; x < 300; x += 1) {
+    const offset = (y * canvas.width + x) * 4;
+    if (pixels[offset] > 180 && pixels[offset + 1] > 180 && pixels[offset + 2] > 180) lightPixels += 1;
+  }
+  assert.ok(lightPixels > 100, "the transformed OCR replacement should remain visible");
+  assert.ok(warnings.some((warning) => /wider than the original/i.test(warning)), "scaled text should report its possible overflow");
+});
+
 test("OCR font matching chooses a close installed family for image-only text", () => {
   const canvas = createCanvas(1000, 240);
   const context = canvas.getContext("2d");

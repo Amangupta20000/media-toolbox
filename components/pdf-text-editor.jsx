@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Download, FileText, Keyboard, LoaderCircle, Pencil, Printer, RotateCcw, Save, ShieldCheck, UploadCloud, X, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileText, Keyboard, LoaderCircle, Pencil, Printer, RotateCcw, RotateCw, Save, ShieldCheck, UploadCloud, X, ZoomIn, ZoomOut } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { FileDropzone, formatBytes } from "./file-dropzone.jsx";
 import { ProcessingMode } from "./processing-mode.jsx";
@@ -45,9 +45,44 @@ function textOffset(value) {
   return { x, y };
 }
 
+function textTransform(value) {
+  const rawScale = Number(value?.scale);
+  const rawRotation = Number(value?.rotation);
+  const scale = Number.isFinite(rawScale) ? Math.max(0.25, Math.min(4, rawScale)) : 1;
+  const rotation = Number.isFinite(rawRotation) ? rawRotation : 0;
+  return { scale, rotation };
+}
+
 function hasTextOffset(value) {
   const offset = textOffset(value);
   return Math.abs(offset.x) > 0.01 || Math.abs(offset.y) > 0.01;
+}
+
+function hasTextTransform(value) {
+  const transform = textTransform(value);
+  return Math.abs(transform.scale - 1) > 0.001 || Math.abs(transform.rotation) > 0.01;
+}
+
+function textOrigin(model, run, pdfLibrary) {
+  if (!model?.page || !pdfLibrary?.Util) return null;
+  const baseViewport = model.page.getViewport({ scale: 1 });
+  let displayCenter;
+  if (run.bbox && model.imageWidth && model.imageHeight) {
+    displayCenter = [
+      ((Number(run.bbox.x0) + Number(run.bbox.x1)) / 2) * baseViewport.width / Math.max(1, Number(model.imageWidth)),
+      ((Number(run.bbox.y0) + Number(run.bbox.y1)) / 2) * baseViewport.height / Math.max(1, Number(model.imageHeight)),
+    ];
+  } else if (run.item?.transform) {
+    const transformed = pdfLibrary.Util.transform(baseViewport.transform, run.item.transform);
+    const height = Math.max(7, Math.hypot(transformed[2], transformed[3]) || Number(run.item.height) || 12);
+    const width = Math.max(0, Number(run.item.width) || 0);
+    displayCenter = [transformed[4] + width / 2, transformed[5] - height / 2];
+  } else {
+    return null;
+  }
+  const inverse = pdfLibrary.Util.inverseTransform(baseViewport.transform);
+  const point = pdfLibrary.Util.applyTransform(displayCenter, inverse);
+  return point.every(Number.isFinite) ? { x: point[0], y: point[1] } : null;
 }
 
 function visualRunKey(run) {
@@ -282,7 +317,7 @@ function useVirtualWindow(containerRef, count, itemSize, axis = "vertical") {
   return { horizontal, start, end, totalSize: count * itemSize };
 }
 
-function useEstimatedPreviewPageHeight() {
+function useEstimatedPreviewPageHeight(previewZoom = 1) {
   const [height, setHeight] = useState(890);
   useEffect(() => {
     const update = () => {
@@ -291,16 +326,20 @@ function useEstimatedPreviewPageHeight() {
       // The virtual slot only needs to cover the page heading, frame, and
       // the page card's padding. The old 125/130px allowance left a large
       // empty gap after every rendered page, especially on mobile.
-      setHeight(Math.max(mobile ? 560 : 580, Math.ceil(frameHeight + 60)));
+      // A zoomed page is allowed to grow beyond the frame instead of creating
+      // a nested scrollbar, so reserve a larger virtual slot for the outer
+      // preview scroller as the page zoom increases.
+      const zoom = Math.max(0.6, Number(previewZoom) || 1);
+      setHeight(Math.max(mobile ? 560 : 580, Math.ceil((frameHeight + 60) * zoom)));
     };
     update();
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
-  }, []);
+  }, [previewZoom]);
   return height;
 }
 
-function PdfTextPage({ model, selectedRunId, edits, textOffsets, pdfLibrary, previewZoom, onSelectRun, onMoveRun, onMoveRunEnd, pageRef }) {
+function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms, pdfLibrary, previewZoom, onSelectRun, onMoveRun, onMoveRunEnd, pageRef }) {
   const frameRef = useRef(null);
   const surfaceRef = useRef(null);
   const canvasRef = useRef(null);
@@ -309,6 +348,7 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, pdfLibrary, pre
   const [viewport, setViewport] = useState(null);
   const [surfaceSize, setSurfaceSize] = useState(null);
   const rasterPreviewOffsets = model.ocr ? textOffsets : null;
+  const rasterPreviewTransforms = model.ocr ? textTransforms : null;
   useEffect(() => {
     let active = true;
     const render = async () => {
@@ -322,7 +362,12 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, pdfLibrary, pre
       if (!frame || !surface || !canvas) return;
       const base = model.page.getViewport({ scale: 1 });
       const availableWidth = Math.max(1, frame.clientWidth - 36);
-      const availableHeight = Math.max(1, frame.clientHeight - 36);
+      const mobile = window.matchMedia("(max-width: 760px)").matches;
+      const containerHeight = Math.max(mobile ? 300 : 420, Math.min(window.innerHeight * (mobile ? 0.68 : 0.7), mobile ? 520 : 760));
+      // The frame grows with a zoomed page. Keep the fit calculation tied to
+      // the viewport-sized minimum, otherwise the grown frame would trigger a
+      // feedback loop that keeps enlarging the page on every resize event.
+      const availableHeight = Math.max(1, Math.min(frame.clientHeight - 36, containerHeight - 36));
       const fitScale = Math.min(availableWidth / base.width, availableHeight / base.height);
       // Keep zoom attached to the page surface so the frame can scroll when
       // the user magnifies beyond the available preview area.
@@ -345,20 +390,25 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, pdfLibrary, pre
         await renderTask.promise;
         if (active && model.ocr) {
           const pageEdits = model.runs
-            .filter((run) => edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]))
-            .map((run) => ({
-              originalText: run.originalText,
-              replacementText: edits[run.runId] !== undefined ? edits[run.runId] : run.text,
-              bbox: {
-                x0: run.bbox.x0 * canvas.width / Math.max(1, Number(model.imageWidth) || canvas.width),
-                y0: run.bbox.y0 * canvas.height / Math.max(1, Number(model.imageHeight) || canvas.height),
-                x1: run.bbox.x1 * canvas.width / Math.max(1, Number(model.imageWidth) || canvas.width),
-                y1: run.bbox.y1 * canvas.height / Math.max(1, Number(model.imageHeight) || canvas.height),
-              },
-              offsetX: textOffset(textOffsets[run.runId]).x * canvas.width / Math.max(1, base.width),
-              offsetY: textOffset(textOffsets[run.runId]).y * canvas.height / Math.max(1, base.height),
-              confidence: run.confidence,
-            }));
+            .filter((run) => edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]))
+            .map((run) => {
+              const transform = textTransform(textTransforms[run.runId]);
+              return {
+                originalText: run.originalText,
+                replacementText: edits[run.runId] !== undefined ? edits[run.runId] : run.text,
+                bbox: {
+                  x0: run.bbox.x0 * canvas.width / Math.max(1, Number(model.imageWidth) || canvas.width),
+                  y0: run.bbox.y0 * canvas.height / Math.max(1, Number(model.imageHeight) || canvas.height),
+                  x1: run.bbox.x1 * canvas.width / Math.max(1, Number(model.imageWidth) || canvas.width),
+                  y1: run.bbox.y1 * canvas.height / Math.max(1, Number(model.imageHeight) || canvas.height),
+                },
+                offsetX: textOffset(textOffsets[run.runId]).x * canvas.width / Math.max(1, base.width),
+                offsetY: textOffset(textOffsets[run.runId]).y * canvas.height / Math.max(1, base.height),
+                scale: transform.scale,
+                rotation: transform.rotation,
+                confidence: run.confidence,
+              };
+            });
           applyRasterTextEdits(canvas, pageEdits);
         }
         if (active) setViewport(nextViewport);
@@ -376,7 +426,7 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, pdfLibrary, pre
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(() => render().catch(() => undefined)) : null;
     if (frameRef.current) observer?.observe(frameRef.current);
     return () => { active = false; rerenderRef.current = false; renderTaskRef.current?.cancel(); renderTaskRef.current = null; observer?.disconnect(); };
-  }, [edits, model, pdfLibrary, previewZoom, rasterPreviewOffsets]);
+  }, [edits, model, pdfLibrary, previewZoom, rasterPreviewOffsets, rasterPreviewTransforms]);
 
   const baseViewport = model.page.getViewport({ scale: 1 });
   const positions = useMemo(() => {
@@ -410,7 +460,7 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, pdfLibrary, pre
         previewFontStyle: font?.italic ? "italic" : "normal",
       };
     });
-  }, [model, pdfLibrary, textOffsets, viewport]);
+  }, [model, pdfLibrary, textOffsets, textTransforms, viewport]);
 
   const dragRef = useRef(null);
   const suppressClickRef = useRef(false);
@@ -448,8 +498,8 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, pdfLibrary, pre
     <Fragment key={run.runId}>
       <button
         type="button"
-        className={`pdf-text-run ${run.mode === "ocr" ? "ocr" : ""} ${selectedRunId === run.runId ? "selected" : ""} ${edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) ? "edited" : ""} ${!run.editable ? "not-editable" : ""}`}
-        style={{ left: run.left, top: run.top, width: run.width || undefined, height: run.height || undefined }}
+        className={`pdf-text-run ${run.mode === "ocr" ? "ocr" : ""} ${selectedRunId === run.runId ? "selected" : ""} ${edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]) ? "edited" : ""} ${!run.editable ? "not-editable" : ""}`}
+        style={{ left: run.left, top: run.top, width: run.width || undefined, height: run.height || undefined, transform: `rotate(${textTransform(textTransforms[run.runId]).rotation}deg) scale(${textTransform(textTransforms[run.runId]).scale})`, transformOrigin: "center center" }}
         onClick={() => { if (suppressClickRef.current) { suppressClickRef.current = false; return; } onSelectRun(run); }}
         onPointerDown={(event) => startTextDrag(event, run)}
         onPointerMove={(event) => moveTextDrag(event, run)}
@@ -472,10 +522,10 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, pdfLibrary, pre
   </article>;
 }
 
-const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview({ pages, selectedRunId, edits, textOffsets, pdfLibrary, previewZoom, previewRevision, onSelectRun, onMoveRun, onMoveRunEnd, onPinchZoom }, ref) {
+const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview({ pages, selectedRunId, edits, textOffsets, textTransforms, pdfLibrary, previewZoom, previewRevision, onSelectRun, onMoveRun, onMoveRunEnd, onPinchZoom }, ref) {
   const scrollRef = useRef(null);
   const previewZoomRef = useRef(previewZoom);
-  const pageHeight = useEstimatedPreviewPageHeight();
+  const pageHeight = useEstimatedPreviewPageHeight(previewZoom);
   const gap = 17;
   const stride = pageHeight + gap;
   const windowed = useVirtualWindow(scrollRef, pages.length, stride);
@@ -534,7 +584,7 @@ const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview(
       {pages.slice(windowed.start, windowed.end).map((model, offset) => {
         const index = windowed.start + offset;
         return <div key={`${model.pageIndex}-${previewRevision}`} className="pdf-text-virtual-item" style={{ top: `${index * stride}px`, left: 0, width: "100%", height: `${pageHeight}px` }}>
-          <PdfTextPage model={model} selectedRunId={selectedRunId} edits={edits} textOffsets={textOffsets} pdfLibrary={pdfLibrary} previewZoom={previewZoom} onSelectRun={onSelectRun} onMoveRun={onMoveRun} onMoveRunEnd={onMoveRunEnd} />
+          <PdfTextPage model={model} selectedRunId={selectedRunId} edits={edits} textOffsets={textOffsets} textTransforms={textTransforms} pdfLibrary={pdfLibrary} previewZoom={previewZoom} onSelectRun={onSelectRun} onMoveRun={onMoveRun} onMoveRunEnd={onMoveRunEnd} />
         </div>;
       })}
     </div>
@@ -565,10 +615,20 @@ function VirtualizedPdfTextRail({ pages, onSelect }) {
   </aside>;
 }
 
-function TextEditPopover({ run, value, onChange, onSave, onCancel, onRestore }) {
+function TextEditPopover({ run, value, onChange, onSave, onCancel, onRestore, appearance, onAppearanceChange }) {
   if (!run) return null;
   const overflow = graphemeCount(value) > graphemeCount(run.text);
-  return <div className="pdf-text-edit-popover" role="dialog" aria-label={`Edit ${run.text} on page ${run.pageIndex + 1}`}><div className="pdf-text-edit-heading"><div><span>Selected text · Page {run.pageIndex + 1}</span><strong title={run.text}>{run.text}</strong></div><button className="icon-button" type="button" onClick={onCancel} aria-label="Close text editor" title="Close"><X size={17} /></button></div><input autoFocus value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onSave(); if (event.key === "Escape") onCancel(); }} aria-label="Replacement text" /><div className="pdf-text-edit-actions"><button className="primary-button" type="button" onClick={onSave}><Save size={15} /> Save text</button><button className="secondary-button" type="button" onClick={onRestore}><RotateCcw size={15} /> Restore original</button><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button></div>{overflow && <DismissibleMessage className="pdf-text-overflow-warning" resetKey={run.runId}><AlertTriangle size={15} /><span>This replacement is longer. It will overflow if necessary; surrounding content will not reflow.</span></DismissibleMessage>}</div>;
+  const transform = textTransform(appearance);
+  const updateTransform = (patch) => onAppearanceChange?.(textTransform({ ...transform, ...patch }));
+  return <div className="pdf-text-edit-popover" role="dialog" aria-label={`Edit ${run.text} on page ${run.pageIndex + 1}`}>
+    <div className="pdf-text-edit-heading"><div><span>Selected text · Page {run.pageIndex + 1}</span><strong title={run.text}>{run.text}</strong></div><button className="icon-button" type="button" onClick={onCancel} aria-label="Close text editor" title="Close"><X size={17} /></button></div>
+    <input autoFocus value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onSave(); if (event.key === "Escape") onCancel(); }} aria-label="Replacement text" />
+    <div className="pdf-text-appearance-controls" aria-label="Text appearance controls">
+      <div className="pdf-text-appearance-group"><span>Size</span><button className="secondary-button" type="button" onClick={() => updateTransform({ scale: transform.scale - 0.1 })} aria-label="Decrease selected text size" title="Decrease size"><ZoomOut size={15} /></button><strong>{Math.round(transform.scale * 100)}%</strong><button className="secondary-button" type="button" onClick={() => updateTransform({ scale: transform.scale + 0.1 })} aria-label="Increase selected text size" title="Increase size"><ZoomIn size={15} /></button></div>
+      <div className="pdf-text-appearance-group"><span>Rotate</span><button className="secondary-button" type="button" onClick={() => updateTransform({ rotation: transform.rotation - 15 })} aria-label="Rotate selected text counterclockwise" title="Rotate left 15 degrees"><RotateCcw size={15} /></button><strong>{Math.round(transform.rotation)}°</strong><button className="secondary-button" type="button" onClick={() => updateTransform({ rotation: transform.rotation + 15 })} aria-label="Rotate selected text clockwise" title="Rotate right 15 degrees"><RotateCw size={15} /></button><button className="secondary-button" type="button" onClick={() => updateTransform({ scale: 1, rotation: 0 })}>Reset</button></div>
+    </div>
+    <div className="pdf-text-edit-actions"><button className="primary-button" type="button" onClick={onSave}><Save size={15} /> Save text</button><button className="secondary-button" type="button" onClick={onRestore}><RotateCcw size={15} /> Restore original</button><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button></div>{overflow && <DismissibleMessage className="pdf-text-overflow-warning" resetKey={run.runId}><AlertTriangle size={15} /><span>This replacement is longer. It will overflow if necessary; surrounding content will not reflow.</span></DismissibleMessage>}
+  </div>;
 }
 
 function formatLogTime(value) {
@@ -642,6 +702,7 @@ export function PdfTextEditor() {
   const [pages, setPages] = useState([]);
   const [edits, setEdits] = useState({});
   const [textOffsets, setTextOffsets] = useState({});
+  const [textTransforms, setTextTransforms] = useState({});
   const [selectedRun, setSelectedRun] = useState(null);
   const [editorValue, setEditorValue] = useState("");
   const [processingMode, setProcessingMode] = useState("server");
@@ -695,7 +756,7 @@ export function PdfTextEditor() {
     if (file.size > MAX_PDF_BYTES) { setError("The PDF must be 200 MB or smaller."); return; }
     if (!pdfLibrary) { setError("PDF preview support is still loading. Try again in a moment."); return; }
     previewRequestRef.current += 1;
-    setLoading(true); setSource(file); setPages([]); setEdits({}); setTextOffsets({}); setSelectedRun(null); setOcrProgress(0); setLoadingMessage("Reading PDF text and building previews…"); sourcePasswordRef.current = "";
+    setLoading(true); setSource(file); setPages([]); setEdits({}); setTextOffsets({}); setTextTransforms({}); setSelectedRun(null); setOcrProgress(0); setLoadingMessage("Reading PDF text and building previews…"); sourcePasswordRef.current = "";
     let pdfPassword = "";
     try {
       const data = new Uint8Array(await file.arrayBuffer());
@@ -777,8 +838,8 @@ export function PdfTextEditor() {
     ? `OCR on ${ocrPages.map((page) => `page ${page.pageIndex + 1}`).join(", ")}`
     : `OCR on ${ocrPages.length} pages`;
   const changedEdits = pages.flatMap((page) => page.runs
-    .filter((run) => run.editable && (edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId])))
-    .map((run) => [run.runId, edits[run.runId] !== undefined ? edits[run.runId] : run.text]));
+    .filter((run) => run.editable && (edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId])))
+    .map((run) => ({ runId: run.runId, replacementText: edits[run.runId] !== undefined ? edits[run.runId] : run.text, moveOnly: (run.mode || "native") !== "ocr" && edits[run.runId] === undefined, ...textTransform(textTransforms[run.runId]) })));
   const canSubmit = Boolean(source && sourceHash && changedEdits.length && !loading && !uploadProgress && isProcessingLocationReady(locations, processingMode));
 
   const chooseRun = (run) => {
@@ -795,13 +856,21 @@ export function PdfTextEditor() {
   };
   const changePreviewZoom = (delta) => setPreviewZoom((current) => Math.min(3, Math.max(0.6, Math.round((current + delta) * 10) / 10)));
   const resetPreviewZoom = () => setPreviewZoom(1);
-  const refreshEditedPreview = async (nextEdits, nextOffsets = textOffsets) => {
+  const refreshEditedPreview = async (nextEdits, nextOffsets = textOffsets, nextTransforms = textTransforms) => {
     if (!sourceBytesRef.current || !pdfLibrary) return;
     const requestId = previewRequestRef.current + 1;
     previewRequestRef.current = requestId;
     const previewEdits = pages.flatMap((page) => page.runs
-      .filter((run) => nextEdits[run.runId] !== undefined || hasTextOffset(nextOffsets[run.runId]))
-      .map((run) => { const offset = textOffset(nextOffsets[run.runId]); return { pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), originalText: run.text || run.originalText, replacementText: nextEdits[run.runId] !== undefined ? nextEdits[run.runId] : run.text || run.originalText, mode: run.mode || "native", offsetX: offset.x, offsetY: offset.y, ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) }; }));
+      .filter((run) => nextEdits[run.runId] !== undefined || hasTextOffset(nextOffsets[run.runId]) || hasTextTransform(nextTransforms[run.runId]))
+      .map((run) => {
+        const offset = textOffset(nextOffsets[run.runId]);
+        const textChanged = nextEdits[run.runId] !== undefined;
+        const nativeMoveOnly = (run.mode || "native") !== "ocr" && !textChanged;
+        const transform = textTransform(nextTransforms[run.runId]);
+        const model = pages.find((candidate) => candidate.pageIndex === run.pageIndex);
+        const origin = textOrigin(model, run, pdfLibrary);
+        return { pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), originalText: run.text || run.originalText, ...(nativeMoveOnly ? { moveOnly: true } : { replacementText: textChanged ? nextEdits[run.runId] : run.text || run.originalText }), mode: run.mode || "native", offsetX: offset.x, offsetY: offset.y, scale: transform.scale, rotation: transform.rotation, ...(origin ? { originX: origin.x, originY: origin.y } : {}), ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) };
+      }));
     setPreviewUpdating(true);
     try {
       const nativePreviewEdits = previewEdits.filter((edit) => edit.mode !== "ocr");
@@ -840,7 +909,12 @@ export function PdfTextEditor() {
   const finishMovingRun = (runId, offset) => {
     const nextOffsets = { ...textOffsets, [runId]: textOffset(offset) };
     setTextOffsets(nextOffsets);
-    refreshEditedPreview(edits, nextOffsets).catch(() => undefined);
+    refreshEditedPreview(edits, nextOffsets, textTransforms).catch(() => undefined);
+  };
+  const updateTextTransform = (runId, value) => {
+    const nextTransforms = { ...textTransforms, [runId]: textTransform(value) };
+    setTextTransforms(nextTransforms);
+    refreshEditedPreview(edits, textOffsets, nextTransforms).catch(() => undefined);
   };
   const saveEdit = () => {
     if (!selectedRun) return;
@@ -850,16 +924,18 @@ export function PdfTextEditor() {
       : { ...edits, [selectedRun.runId]: value };
     setEdits(nextEdits);
     setSelectedRun(null);
-    refreshEditedPreview(nextEdits, textOffsets).catch(() => undefined);
+    refreshEditedPreview(nextEdits, textOffsets, textTransforms).catch(() => undefined);
   };
   const restoreEdit = () => {
     if (!selectedRun) return;
     const nextEdits = Object.fromEntries(Object.entries(edits).filter(([key]) => key !== selectedRun.runId));
     const nextOffsets = Object.fromEntries(Object.entries(textOffsets).filter(([key]) => key !== selectedRun.runId));
+    const nextTransforms = Object.fromEntries(Object.entries(textTransforms).filter(([key]) => key !== selectedRun.runId));
     setEdits(nextEdits);
     setTextOffsets(nextOffsets);
+    setTextTransforms(nextTransforms);
     setEditorValue(selectedRun.text);
-    refreshEditedPreview(nextEdits, nextOffsets).catch(() => undefined);
+    refreshEditedPreview(nextEdits, nextOffsets, nextTransforms).catch(() => undefined);
   };
   const scrollToPage = (pageIndex) => {
     // Do not leave an editor popover from another page open while the newly
@@ -871,18 +947,21 @@ export function PdfTextEditor() {
   const reset = () => {
     previewRequestRef.current += 1;
     if (job && ["queued", "processing"].includes(job.status)) deleteProcessingJob(jobMode, job.id).catch(() => undefined);
-    setSource(null); setSourceHash(""); setPages([]); setEdits({}); setTextOffsets({}); setSelectedRun(null); setJob(null); setError(""); setUploadProgress(0); setPreviewUpdating(false); sourceBytesRef.current = null; sourcePasswordRef.current = "";
+    setSource(null); setSourceHash(""); setPages([]); setEdits({}); setTextOffsets({}); setTextTransforms({}); setSelectedRun(null); setJob(null); setError(""); setUploadProgress(0); setPreviewUpdating(false); sourceBytesRef.current = null; sourcePasswordRef.current = "";
   };
   const continueEditing = () => { setJob(null); setSelectedRun(null); setError(""); setUploadProgress(0); };
   const submit = async () => {
     if (!canSubmit) { setError(!source ? "Add a PDF first." : !changedEdits.length ? "Select and save at least one text replacement." : processingMode === "local" ? "Admin login or activation is required in the Local agent dashboard." : "Server processing is unavailable."); return; }
     const editPayload = [];
     const availableRuns = pages.flatMap((page) => page.runs);
-    for (const [runId, replacementText] of changedEdits) {
+    for (const { runId, replacementText, moveOnly } of changedEdits) {
       const run = availableRuns.find((item) => item.runId === runId);
       if (!run) { setError("A selected text run is no longer available. Reload the PDF and try again."); return; }
       const offset = textOffset(textOffsets[run.runId]);
-      editPayload.push({ pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), runId: run.runId, originalText: run.text || run.originalText, originalTextHash: run.originalTextHash, replacementText, mode: run.mode || "native", offsetX: offset.x, offsetY: offset.y, ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) });
+      const transform = textTransform(textTransforms[run.runId]);
+      const model = pages.find((page) => page.pageIndex === run.pageIndex);
+      const origin = textOrigin(model, run, pdfLibrary);
+      editPayload.push({ pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), runId: run.runId, originalText: run.text || run.originalText, originalTextHash: run.originalTextHash, ...(moveOnly ? { moveOnly: true } : { replacementText }), mode: run.mode || "native", offsetX: offset.x, offsetY: offset.y, scale: transform.scale, rotation: transform.rotation, ...(origin ? { originX: origin.x, originY: origin.y } : {}), ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) });
     }
     const form = new FormData();
     form.append("tool", "pdf-text-editor"); form.append("source", source, source.name); form.append("sourceHash", sourceHash); form.append("edits", JSON.stringify(editPayload)); if (processingMode === "local") form.append("retention", keepResult ? "keep" : "delete");
@@ -941,10 +1020,10 @@ export function PdfTextEditor() {
                 <div className="pdf-text-editor-layout">
                   <VirtualizedPdfTextRail pages={pages} onSelect={scrollToPage} />
                   <section className="pdf-text-workspace">
-                    {source && !loading && <TextEditPopover run={selectedRun} value={editorValue} onChange={setEditorValue} onSave={saveEdit} onCancel={() => setSelectedRun(null)} onRestore={restoreEdit} />}
+                    {source && !loading && <TextEditPopover run={selectedRun} value={editorValue} onChange={setEditorValue} onSave={saveEdit} onCancel={() => setSelectedRun(null)} onRestore={restoreEdit} appearance={selectedRun ? textTransforms[selectedRun.runId] : undefined} onAppearanceChange={(value) => selectedRun && updateTextTransform(selectedRun.runId, value)} />}
                     {loading && <div className="pdf-text-loading"><LoaderCircle className="spin" size={23} /><strong>{loadingMessage}</strong>{ocrProgress > 0 && <span>OCR progress: {ocrProgress}%</span>}</div>}
                     {!loading && !pages.length && <div className="pdf-text-empty"><UploadCloud size={27} /><strong>Upload a PDF to start editing</strong><span>Click a detected text run in the page preview to replace it.</span></div>}
-                    {pages.length > 0 && <VirtualizedPdfTextPreview ref={previewVirtualizerRef} pages={pages} selectedRunId={selectedRun?.runId} edits={edits} textOffsets={textOffsets} pdfLibrary={pdfLibrary} previewZoom={previewZoom} previewRevision={previewRevision} onSelectRun={chooseRun} onMoveRun={moveRun} onMoveRunEnd={finishMovingRun} onPinchZoom={setPreviewZoom} />}
+                    {pages.length > 0 && <VirtualizedPdfTextPreview ref={previewVirtualizerRef} pages={pages} selectedRunId={selectedRun?.runId} edits={edits} textOffsets={textOffsets} textTransforms={textTransforms} pdfLibrary={pdfLibrary} previewZoom={previewZoom} previewRevision={previewRevision} onSelectRun={chooseRun} onMoveRun={moveRun} onMoveRunEnd={finishMovingRun} onPinchZoom={setPreviewZoom} />}
                   </section>
                 </div>
               </div>

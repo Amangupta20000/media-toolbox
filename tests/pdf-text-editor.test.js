@@ -51,7 +51,7 @@ function xObjectCount(page) {
   return xObjects ? [...xObjects.entries()].length : 0;
 }
 
-function type0Fixture(operator = "Tj", baseFont = "Helvetica", cmapEntries = [["0001", "0041"], ["0002", "0042"]]) {
+function type0Fixture(operator = "Tj", baseFont = "Helvetica", cmapEntries = [["0001", "0041"], ["0002", "0042"]], textCodes = ["0001", "0002"]) {
   return (async () => {
     const document = await PDFDocument.create();
     const page = document.addPage([400, 260]);
@@ -81,7 +81,7 @@ endcmap CMapName currentdict /CMap defineresource pop end end`;
     }));
     const resources = page.node.Resources();
     resources.set(PDFName.Font, context.obj({ F1: type0Reference }));
-    const textOperator = operator === "TJ" ? "[<0001> -120 <0002>] TJ" : "<0001> Tj";
+    const textOperator = operator === "TJ" ? `[<${textCodes[0]}> -120 <${textCodes[1]}>] TJ` : `<${textCodes[0]}> Tj`;
     page.node.set(PDFName.Contents, context.register(context.flateStream(Buffer.from(`BT /F1 18 Tf 1 0 0 1 40 180 Tm ${textOperator} ET`, "latin1"))));
     return document.save({ useObjectStreams: false });
   })();
@@ -316,6 +316,43 @@ test("native text movement is applied to the selected operator in preview and ex
   const preview = await createPdfTextPreview(source, [{ ...edit, mode: "native" }]);
   const previewDocument = await PDFDocument.load(preview);
   assert.match(decodedPageContent(previewDocument, previewDocument.getPages()[0]), /q 1 0 0 1 -8 12 cm/);
+});
+
+test("movement-only edits preserve the original PDF text operator in preview and export", async () => {
+  // Both source glyph codes map to A. Re-encoding the displayed text would
+  // select 0001 even though the source artwork uses 0002.
+  const source = await type0Fixture("Tj", "LogoFont", [["0001", "0041"], ["0002", "0041"]], ["0002"]);
+  const extracted = await extractPdfTextRuns(source);
+  const run = extracted.pages[0].runs[0];
+  const edit = { pageIndex: 0, operatorOrdinal: run.ordinal, runId: run.runId, originalText: run.text, originalTextHash: run.originalTextHash, moveOnly: true, offsetX: 12, offsetY: -8 };
+
+  const output = await applyPdfTextEdits(source, [edit]);
+  const outputDocument = await PDFDocument.load(output.bytes);
+  const outputContent = decodedPageContent(outputDocument, outputDocument.getPages()[0]);
+  assert.match(outputContent, /q 1 0 0 1 12 8 cm <0002> Tj Q/);
+  assert.match((await searchableText(output.bytes))[0], /A/);
+
+  const preview = await createPdfTextPreview(source, [{ ...edit, mode: "native" }]);
+  const previewDocument = await PDFDocument.load(preview);
+  const previewContent = decodedPageContent(previewDocument, previewDocument.getPages()[0]);
+  assert.match(previewContent, /q 1 0 0 1 12 8 cm <0002> Tj Q/);
+});
+
+test("native text size and rotation preserve the original operator in preview and export", async () => {
+  const source = await type0Fixture("Tj", "LogoFont", [["0001", "0041"], ["0002", "0041"]], ["0002"]);
+  const extracted = await extractPdfTextRuns(source);
+  const run = extracted.pages[0].runs[0];
+  const edit = { pageIndex: 0, operatorOrdinal: run.ordinal, runId: run.runId, originalText: run.text, originalTextHash: run.originalTextHash, moveOnly: true, scale: 2, rotation: 90, originX: 40, originY: 180 };
+
+  const output = await applyPdfTextEdits(source, [edit]);
+  const outputDocument = await PDFDocument.load(output.bytes);
+  const outputContent = decodedPageContent(outputDocument, outputDocument.getPages()[0]);
+  assert.match(outputContent, /q 0 -2 2 0 -320 260 cm <0002> Tj Q/);
+
+  const preview = await createPdfTextPreview(source, [{ ...edit, mode: "native" }]);
+  const previewDocument = await PDFDocument.load(preview);
+  const previewContent = decodedPageContent(previewDocument, previewDocument.getPages()[0]);
+  assert.match(previewContent, /q 0 -2 2 0 -320 260 cm <0002> Tj Q/);
 });
 
 test("live PDF preview removes native text when the replacement is empty", async () => {
