@@ -176,6 +176,7 @@ jobs:
       - name: Package signed agent runtime update
         env:
           AGENT_RUNTIME_UPDATE_PRIVATE_KEY: ${{ secrets.AGENT_RUNTIME_UPDATE_PRIVATE_KEY }}
+          AGENT_UPDATE_TYPE: ${{ vars.AGENT_UPDATE_TYPE || 'runtime' }}
         shell: bash
         run: |
           set -euo pipefail

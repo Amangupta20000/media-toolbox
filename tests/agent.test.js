@@ -209,6 +209,9 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardRenderer, /Restart and install/);
   assert.match(dashboardRenderer, /status === "up-to-date"/);
   assert.match(dashboardRenderer, /Agent is up to date/);
+  assert.match(dashboardRenderer, /full-required/);
+  assert.match(dashboardRenderer, /Full agent update required/);
+  assert.match(dashboardRenderer, /update-full-required/);
   assert.match(dashboardRenderer, /downloadUpdate/);
   assert.match(dashboardRenderer, /open-release/);
   assert.match(dashboardRenderer, /Update manually from GitHub Releases/);
@@ -218,6 +221,8 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(electronMain, /globalThis\.fetch = net\.fetch\.bind\(net\)/);
   assert.match(electronMain, /setLicenseServerFetchImplementation/);
   assert.match(electronMain, /checkForRuntimeUpdates/);
+  assert.match(electronMain, /fullInstallerMessage/);
+  assert.match(electronMain, /updateType: "full"/);
   assert.match(electronMain, /readInstalledRuntime/);
   assert.match(electronMain, /compareVersions\(app\.getVersion\(\), installedRuntime\.manifest\.version\)/);
   assert.match(electronMain, /pathToFileURL/);

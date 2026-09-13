@@ -25,6 +25,7 @@ if (!app.requestSingleInstanceLock()) {
     currentVersion: app.getVersion(),
     checkedAt: null,
     version: null,
+    updateType: null,
     releaseDate: null,
     releaseNotes: null,
     progress: 0,
@@ -47,6 +48,10 @@ if (!app.requestSingleInstanceLock()) {
       return "Automatic macOS updates are unavailable for this unsigned build. Download the latest Mac release manually from GitHub Releases.";
     }
     return "Updates are checked by packaged agent releases.";
+  }
+
+  function fullInstallerMessage(version = "") {
+    return `This release${version ? ` (v${version})` : ""} requires a full agent installer update. Download and install the latest release from GitHub Releases.`;
   }
 
   function isUnsignedMacPackage() {
@@ -82,6 +87,17 @@ if (!app.requestSingleInstanceLock()) {
   async function checkForRuntimeUpdates() {
     if (!runtimeUpdater) return publishUpdateState({ kind: "runtime", status: "unavailable", error: "Verified runtime updates are not configured in this agent build.", checkedAt: new Date().toISOString() });
     const nextState = await runtimeUpdater.check();
+    if (nextState.status === "full-required") {
+      return publishUpdateState({
+        kind: "electron",
+        status: "full-required",
+        updateType: "full",
+        version: nextState.version || null,
+        runtimeVersion: nextState.runtimeVersion || null,
+        error: nextState.error || fullInstallerMessage(nextState.version),
+        checkedAt: new Date().toISOString(),
+      });
+    }
     if (nextState.status === "unavailable" || (nextState.status === "error" && /HTTP 404/i.test(nextState.error || ""))) {
       return publishUpdateState({ kind: "electron", status: "manual", error: updateUnavailableMessage(), checkedAt: new Date().toISOString() });
     }

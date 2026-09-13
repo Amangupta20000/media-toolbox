@@ -7,6 +7,8 @@ const { Readable } = require("node:stream");
 const RUNTIME_MANIFEST_SCHEMA = 1;
 const RUNTIME_MANIFEST_FILE = "runtime-manifest.json";
 const RUNTIME_MANIFEST_PREFIX = "agent-runtime-manifest-";
+const RUNTIME_UPDATE_TYPE = "runtime";
+const FULL_UPDATE_TYPE = "full";
 const RUNTIME_MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
 const RUNTIME_MAX_FILES_BYTES = 1024 * 1024 * 1024;
 const RUNTIME_CHECK_TIMEOUT_MS = 15000;
@@ -34,6 +36,12 @@ function compareVersions(left, right) {
   return a.prerelease.localeCompare(b.prerelease);
 }
 
+function manifestUpdateType(manifest) {
+  const hasExplicitType = Object.prototype.hasOwnProperty.call(manifest || {}, "updateType");
+  const value = hasExplicitType ? String(manifest.updateType || "").trim().toLowerCase() : RUNTIME_UPDATE_TYPE;
+  return value === FULL_UPDATE_TYPE || value === RUNTIME_UPDATE_TYPE ? value : "";
+}
+
 function manifestPayload(manifest) {
   const files = Array.isArray(manifest?.files)
     ? manifest.files.map((entry) => ({
@@ -43,7 +51,7 @@ function manifestPayload(manifest) {
       mode: Number(entry.mode) || 0,
     })).sort((left, right) => left.path.localeCompare(right.path))
     : [];
-  return JSON.stringify({
+  const payload = {
     schema: RUNTIME_MANIFEST_SCHEMA,
     version: safeVersion(manifest?.version),
     platform: String(manifest?.platform || ""),
@@ -54,7 +62,12 @@ function manifestPayload(manifest) {
     size: Number(manifest?.size),
     files,
     generatedAt: String(manifest?.generatedAt || ""),
-  });
+  };
+  // Manifests before updateType was introduced omitted the field from their
+  // signed payload. Keep that payload stable so already-published runtime
+  // updates remain verifiable by newer agents.
+  if (Object.prototype.hasOwnProperty.call(manifest || {}, "updateType")) payload.updateType = String(manifest.updateType || "").trim().toLowerCase();
+  return JSON.stringify(payload);
 }
 
 function safeRelativePath(value) {
@@ -76,6 +89,7 @@ function validateManifestShape(manifest, { platform = process.platform, arch = p
   if (!manifest || Number(manifest.schema) !== RUNTIME_MANIFEST_SCHEMA) throw new Error("The runtime update manifest version is unsupported.");
   if (safeVersion(manifest.version) !== String(manifest.version || "").replace(/^v/i, "")) throw new Error("The runtime update version is invalid.");
   if (String(manifest.platform) !== platform || String(manifest.arch) !== arch) throw new Error("The runtime update is for a different platform or CPU architecture.");
+  if (!manifestUpdateType(manifest)) throw new Error("The runtime update type is invalid.");
   if (!safeFileName(manifest.fileName) || manifest.url !== manifest.fileName) throw new Error("The runtime update asset name is invalid.");
   if (!/^[a-f0-9]{64}$/i.test(String(manifest.sha256 || ""))) throw new Error("The runtime update checksum is invalid.");
   if (!Number.isSafeInteger(Number(manifest.size)) || Number(manifest.size) <= 0 || Number(manifest.size) > RUNTIME_MAX_ARCHIVE_BYTES) throw new Error("The runtime update size is invalid.");
@@ -251,6 +265,7 @@ async function readInstalledRuntime({ userDataPath, moduleDirectory = __dirname,
   try { manifest = JSON.parse(await fsp.readFile(installedManifest(userDataPath), "utf8")); } catch { return null; }
   try {
     await verifyRuntimeDirectory(directory, manifest, publicKey);
+    if (manifestUpdateType(manifest) === FULL_UPDATE_TYPE) return null;
     return { directory, manifest };
   } catch {
     return null;
@@ -333,6 +348,7 @@ function createRuntimeUpdater({
     currentVersion: safeVersion(getCurrentVersion()),
     runtimeVersion: null,
     version: null,
+    updateType: null,
     progress: 0,
     checkedAt: null,
     error: publicKey ? "" : "Verified runtime updates are not configured in this agent build.",
@@ -385,12 +401,39 @@ function createRuntimeUpdater({
       const installedVersion = await currentInstalledVersion();
       manifest = nextManifest;
       const pendingManifest = await readPending();
-      if (pendingManifest && compareVersions(pendingManifest.version, installedVersion) > 0) {
-        manifest = pendingManifest;
-        return publish({ status: "downloaded", version: pendingManifest.version, runtimeVersion: installedVersion, error: "", progress: 100, checkedAt: new Date().toISOString() });
+      const nextUpdateType = manifestUpdateType(nextManifest);
+      const nextIsNewer = compareVersions(nextManifest.version, installedVersion) > 0;
+      const pendingIsNewer = pendingManifest && compareVersions(pendingManifest.version, installedVersion) > 0;
+      if (nextIsNewer && nextUpdateType === FULL_UPDATE_TYPE) {
+        return publish({
+          kind: "runtime",
+          status: "full-required",
+          updateType: FULL_UPDATE_TYPE,
+          version: nextManifest.version,
+          runtimeVersion: installedVersion,
+          error: `This release${nextManifest.version ? ` (v${nextManifest.version})` : ""} requires a full agent installer update. Download and install it from GitHub Releases.`,
+          progress: 0,
+          checkedAt: new Date().toISOString(),
+        });
       }
-      if (compareVersions(nextManifest.version, installedVersion) <= 0) return publish({ status: "up-to-date", version: nextManifest.version, runtimeVersion: installedVersion, error: "", progress: 0, checkedAt: new Date().toISOString() });
-      return publish({ status: "available", version: nextManifest.version, runtimeVersion: installedVersion, error: "", progress: 0, checkedAt: new Date().toISOString() });
+      if (pendingIsNewer) {
+        if (manifestUpdateType(pendingManifest) === FULL_UPDATE_TYPE) {
+          return publish({
+            kind: "runtime",
+            status: "full-required",
+            updateType: FULL_UPDATE_TYPE,
+            version: pendingManifest.version,
+            runtimeVersion: installedVersion,
+            error: `This release${pendingManifest.version ? ` (v${pendingManifest.version})` : ""} requires a full agent installer update. Download and install it from GitHub Releases.`,
+            progress: 0,
+            checkedAt: new Date().toISOString(),
+          });
+        }
+        manifest = pendingManifest;
+        return publish({ status: "downloaded", updateType: RUNTIME_UPDATE_TYPE, version: pendingManifest.version, runtimeVersion: installedVersion, error: "", progress: 100, checkedAt: new Date().toISOString() });
+      }
+      if (!nextIsNewer) return publish({ status: "up-to-date", updateType: nextUpdateType, version: nextManifest.version, runtimeVersion: installedVersion, error: "", progress: 0, checkedAt: new Date().toISOString() });
+      return publish({ status: "available", updateType: nextUpdateType, version: nextManifest.version, runtimeVersion: installedVersion, error: "", progress: 0, checkedAt: new Date().toISOString() });
     } catch (error) {
       return publish({ status: "error", error: error instanceof Error ? error.message : "The runtime update could not be checked.", checkedAt: new Date().toISOString() });
     }
@@ -398,9 +441,11 @@ function createRuntimeUpdater({
 
   async function download() {
     if (!publicKey) throw new Error("Verified runtime updates are not configured in this agent build.");
+    if (state.status === "full-required" || manifestUpdateType(manifest) === FULL_UPDATE_TYPE) throw new Error(state.error || "This release requires a full agent installer update. Open the latest GitHub release and install it manually.");
     if (state.status !== "available" && state.status !== "error") throw new Error("Check for a runtime update before downloading it.");
     if (!manifest) await check();
     if (!manifest || state.status !== "available") throw new Error(state.error || "There is no runtime update ready to download.");
+    if (manifestUpdateType(manifest) !== RUNTIME_UPDATE_TYPE) throw new Error("This release requires a full agent installer update. Open the latest GitHub release and install it manually.");
     const assetUrl = assetUrlFor(manifestUrl, manifest);
     const temporaryArchive = path.join(userDataPath, `.agent-runtime-${randomUUID()}.zip`);
     publish({ status: "downloading", version: manifest.version, progress: 0, error: "" });
@@ -445,6 +490,7 @@ function createRuntimeUpdater({
   async function install() {
     const pendingManifest = await readPending();
     if (!pendingManifest) throw new Error("The verified runtime update is not ready to install.");
+    if (manifestUpdateType(pendingManifest) !== RUNTIME_UPDATE_TYPE) throw new Error("This release requires a full agent installer update. Open the latest GitHub release and install it manually.");
     const activeDirectory = runtimeDirectory(userDataPath);
     const backupDirectory = path.join(userDataPath, `.agent-runtime-backup-${randomUUID()}`);
     await fsp.mkdir(userDataPath, { recursive: true });
@@ -479,12 +525,15 @@ function createRuntimeUpdater({
 }
 
 module.exports = {
+  FULL_UPDATE_TYPE,
   RUNTIME_MANIFEST_FILE,
   RUNTIME_MANIFEST_PREFIX,
+  RUNTIME_UPDATE_TYPE,
   compareVersions,
   createRuntimeUpdater,
   extractZipArchive,
   manifestPayload,
+  manifestUpdateType,
   readPublicKey,
   readInstalledRuntime,
   verifyRuntimeDirectory,

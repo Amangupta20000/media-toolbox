@@ -27,10 +27,12 @@
     const progressBar = el("agent-update-progress-bar");
     if (!panel || !title || !message || !action || !progress || !progressBar) return;
     const status = value.status || "unavailable";
-    const runtime = value.kind === "runtime";
-    const visible = ["checking", "available", "up-to-date", "downloading", "downloaded", "error", "manual"].includes(status);
+    const fullRequired = status === "full-required" || value.updateType === "full";
+    const runtime = value.kind === "runtime" && !fullRequired;
+    const visible = ["checking", "available", "up-to-date", "downloading", "downloaded", "error", "manual", "full-required"].includes(status);
     panel.classList.toggle("hidden", !visible);
     panel.classList.toggle("update-error", status === "error" || status === "manual");
+    panel.classList.toggle("update-full-required", status === "full-required");
     panel.classList.toggle("update-ready", status === "downloaded");
     progress.classList.toggle("hidden", status !== "downloading");
     progressBar.style.width = `${Math.max(0, Math.min(100, Number(value.progress) || 0))}%`;
@@ -41,19 +43,19 @@
       action.dataset.action = "";
       action.disabled = true;
     } else if (status === "available") {
-      title.textContent = runtime ? `Verified processing update available${value.version ? ` · v${value.version}` : ""}` : `Agent update available${value.version ? ` · v${value.version}` : ""}`;
-      message.textContent = runtime ? "Download the verified processing package. The Electron application will not be replaced." : "Download the signed update. The agent will remain available until you choose to restart and install it.";
+      title.textContent = runtime ? `Verified processing update available${value.version ? ` · v${value.version}` : ""}` : `Full agent update available${value.version ? ` · v${value.version}` : ""}`;
+      message.textContent = runtime ? "Download the verified processing package. The Electron application will not be replaced." : "Download the full signed agent update. The application will be replaced after you restart and install it.";
       action.textContent = "Update now";
       action.dataset.action = "download";
       action.disabled = false;
     } else if (status === "downloading") {
-      title.textContent = runtime ? `Downloading verified processing update${value.version ? ` · v${value.version}` : ""}` : `Downloading agent update${value.version ? ` · v${value.version}` : ""}`;
+      title.textContent = runtime ? `Downloading verified processing update${value.version ? ` · v${value.version}` : ""}` : `Downloading full agent update${value.version ? ` · v${value.version}` : ""}`;
       message.textContent = `${Math.max(0, Math.min(100, Math.round(Number(value.progress) || 0)))}% downloaded. Keep the dashboard open until the download completes.`;
       action.textContent = "Downloading…";
       action.dataset.action = "";
       action.disabled = true;
     } else if (status === "downloaded") {
-      title.textContent = runtime ? `Verified processing update ready${value.version ? ` · v${value.version}` : ""}` : `Agent update ready${value.version ? ` · v${value.version}` : ""}`;
+      title.textContent = runtime ? `Verified processing update ready${value.version ? ` · v${value.version}` : ""}` : `Full agent update ready${value.version ? ` · v${value.version}` : ""}`;
       message.textContent = runtime ? "The runtime package passed SHA-256 and Ed25519 verification. Restart the agent to activate it." : "The update is downloaded and will be verified before installation. Restart the agent to finish.";
       action.textContent = "Restart and install";
       action.dataset.action = "install";
@@ -68,6 +70,12 @@
       title.textContent = "Update manually from GitHub Releases";
       message.textContent = value.error || "Automatic macOS updates require an Apple Developer ID signed build.";
       action.textContent = "Open latest release";
+      action.dataset.action = "open-release";
+      action.disabled = false;
+    } else if (status === "full-required") {
+      title.textContent = `Full agent update required${value.version ? ` · v${value.version}` : ""}`;
+      message.textContent = value.error || "This release changes the desktop application and cannot be installed by the in-app runtime updater. Download and install the latest release from GitHub Releases.";
+      action.textContent = "Download full installer";
       action.dataset.action = "open-release";
       action.disabled = false;
     } else {

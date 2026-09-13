@@ -10,7 +10,9 @@ const outputDirectory = path.resolve(process.argv[3] || path.join(sourceDirector
 const platform = String(process.argv[4] || process.platform);
 const arch = String(process.argv[5] || process.arch);
 const privateKey = String(process.env.AGENT_RUNTIME_UPDATE_PRIVATE_KEY || "").trim();
+const updateType = String(process.env.AGENT_UPDATE_TYPE || "runtime").trim().toLowerCase();
 if (!privateKey.includes("BEGIN PRIVATE KEY")) throw new Error("Set AGENT_RUNTIME_UPDATE_PRIVATE_KEY before creating a signed runtime update.");
+if (!new Set(["runtime", "full"]).has(updateType)) throw new Error("AGENT_UPDATE_TYPE must be either runtime or full.");
 
 const packageJson = JSON.parse(await fs.readFile(path.join(sourceDirectory, "package.json"), "utf8"));
 const version = String(packageJson.version || "").replace(/^v/i, "");
@@ -185,6 +187,7 @@ const manifest = {
   arch,
   fileName,
   url: fileName,
+  updateType,
   sha256: createHash("sha256").update(archive).digest("hex"),
   size: archive.length,
   files,

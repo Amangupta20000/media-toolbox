@@ -12,6 +12,7 @@ const {
   compareVersions,
   createRuntimeUpdater,
   manifestPayload,
+  manifestUpdateType,
   readInstalledRuntime,
   verifyRuntimeManifest,
   extractZipArchive,
@@ -75,7 +76,7 @@ function storedZip(entries) {
   return Buffer.concat([...locals, centralDirectory, end]);
 }
 
-function makeFixture(version = "1.0.27") {
+function makeFixture(version = "1.0.27", updateType = "runtime") {
   const keys = generateKeyPairSync("ed25519", {
     publicKeyEncoding: { type: "spki", format: "pem" },
     privateKeyEncoding: { type: "pkcs8", format: "pem" },
@@ -96,6 +97,7 @@ function makeFixture(version = "1.0.27") {
     arch: process.arch,
     fileName: `Media-Toolbox-Agent-Runtime-${version}-${process.platform}-${process.arch}.zip`,
     url: `Media-Toolbox-Agent-Runtime-${version}-${process.platform}-${process.arch}.zip`,
+    updateType,
     sha256: createHash("sha256").update(archive).digest("hex"),
     size: archive.length,
     files,
@@ -179,8 +181,56 @@ test("runtime updater rejects modified archives, invalid signatures, unsafe path
 test("runtime updater version comparison and missing-key behavior are deterministic", async () => {
   assert.equal(compareVersions("1.0.10", "1.0.9"), 1);
   assert.equal(compareVersions("1.0.0-beta", "1.0.0"), -1);
+  assert.equal(manifestUpdateType({}), "runtime");
+  assert.equal(manifestUpdateType({ updateType: "full" }), "full");
+  assert.equal(manifestUpdateType({ updateType: "unsupported" }), "");
   const updater = createRuntimeUpdater({ userDataPath: await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-runtime-update-no-key-")), latestReleaseUrl: "https://updates.example.test/releases/latest", env: {}, getCurrentVersion: () => "1.0.26" });
   assert.equal((await updater.check()).status, "unavailable");
+});
+
+test("full installer manifests block runtime installation and are surfaced clearly", async () => {
+  const fixture = makeFixture("1.2.0", "full");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-runtime-update-full-test-"));
+  try {
+    const updater = createRuntimeUpdater({
+      userDataPath: root,
+      latestReleaseUrl: "https://updates.example.test/releases/latest",
+      env: { AGENT_RUNTIME_UPDATE_PUBLIC_KEY: fixture.keys.publicKey },
+      fetchImpl: async () => responseFor(JSON.stringify(fixture.manifest)),
+      getCurrentVersion: () => "1.1.5",
+    });
+    const state = await updater.check();
+    assert.equal(state.status, "full-required");
+    assert.equal(state.updateType, "full");
+    assert.match(state.error, /full agent installer update/i);
+    await assert.rejects(() => updater.download(), /full agent installer update/i);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("an installed full release is considered current after manual installation", async () => {
+  const fixture = makeFixture("1.1.5", "full");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-runtime-update-full-current-test-"));
+  const activeDirectory = path.join(root, "agent-runtime");
+  try {
+    await fs.mkdir(path.join(activeDirectory, "agent"), { recursive: true });
+    await fs.writeFile(path.join(activeDirectory, "package.json"), JSON.stringify({ name: "media-toolbox-agent-runtime", version: fixture.manifest.version, type: "module" }));
+    await fs.writeFile(path.join(activeDirectory, "agent", "server.js"), "export const runtimeFixture = true;\n");
+    await fs.writeFile(path.join(activeDirectory, "runtime-manifest.json"), `${JSON.stringify(fixture.manifest)}\n`);
+    const updater = createRuntimeUpdater({
+      userDataPath: root,
+      latestReleaseUrl: "https://updates.example.test/releases/latest",
+      env: { AGENT_RUNTIME_UPDATE_PUBLIC_KEY: fixture.keys.publicKey },
+      fetchImpl: async () => responseFor(JSON.stringify(fixture.manifest)),
+      getCurrentVersion: () => "1.1.5",
+    });
+    const state = await updater.check();
+    assert.equal(state.status, "up-to-date");
+    assert.equal(state.version, "1.1.5");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });
 
 test("full installer version takes precedence over an older saved runtime", async () => {
@@ -263,6 +313,13 @@ test("runtime package includes the verified dashboard shell used after an unsign
     "agent/legal/privacy-policy.html",
     "agent/legal/terms.html",
   ]) assert.match(source, new RegExp(JSON.stringify(file).replaceAll(".", "\\.")));
+});
+
+test("runtime packaging declares the update type and validates its value", async () => {
+  const source = await fs.readFile(new URL("../scripts/package-agent-runtime.mjs", import.meta.url), "utf8");
+  assert.match(source, /AGENT_UPDATE_TYPE/);
+  assert.match(source, /updateType/);
+  assert.match(source, /either runtime or full/);
 });
 
 test("runtime package dependency discovery supports Windows npm shims", async () => {

@@ -47,6 +47,8 @@ Packaged agents check GitHub Releases shortly after startup and periodically whi
 
 Unsigned macOS builds also support a separate verified runtime update. This downloads the Node-based processing runtime and the compatible dashboard shell into the agent's application-data directory; it never replaces the unsigned Electron application. The dashboard verifies the archive with SHA-256 and an Ed25519 signature, installs it atomically, and restarts the agent. This allows dashboard fixes, such as removing an obsolete widget, to appear after the verified update. If the runtime update signing keys are not configured, the dashboard keeps the manual GitHub Releases option.
 
+Every signed runtime manifest also declares an `updateType`. It defaults to `runtime`, which enables the verified in-app update. Set the GitHub Actions repository variable `AGENT_UPDATE_TYPE` to `full` for a release that changes the Electron application or another component that cannot be replaced from application data. The dashboard then blocks the runtime installer and clearly instructs the user to download and install the full release. Developer ID-signed macOS builds continue to use the full Electron updater for these releases.
+
 Create the runtime update key pair once outside the repository:
 
 ```bash
