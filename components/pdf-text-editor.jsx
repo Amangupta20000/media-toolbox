@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Download, FileText, Keyboard, LoaderCircle, Pencil, Printer, RotateCcw, Save, ShieldCheck, UploadCloud, X, ZoomIn, ZoomOut } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { FileDropzone, formatBytes } from "./file-dropzone.jsx";
@@ -34,6 +34,51 @@ function normalizeText(value) {
   return String(value || "").replace(/\s+/g, "");
 }
 
+function visualRunKey(run) {
+  const geometry = run.bbox
+    ? [run.bbox.x0, run.bbox.y0, run.bbox.x1, run.bbox.y1]
+    : [...(run.item?.transform || []), run.item?.width, run.item?.height];
+  return [run.mode || "native", normalizeText(run.text), ...geometry.map((value) => Number.isFinite(Number(value)) ? Number(value).toFixed(3) : "")].join("|");
+}
+
+function operatorGroupForRun(run) {
+  return {
+    operatorOrdinal: run.ordinal,
+    operatorOrdinals: Array.isArray(run.operatorOrdinals) && run.operatorOrdinals.length ? run.operatorOrdinals : [run.ordinal],
+    runId: run.runId,
+    originalTextHash: run.originalTextHash,
+    originalText: run.text,
+  };
+}
+
+function mergeVisualDuplicateRuns(runs) {
+  const merged = [];
+  const byVisualKey = new Map();
+  for (const run of runs) {
+    const key = visualRunKey(run);
+    const existing = byVisualKey.get(key);
+    if (!existing) {
+      const logicalRun = { ...run, duplicateCount: 1, operatorGroups: [operatorGroupForRun(run)] };
+      byVisualKey.set(key, logicalRun);
+      merged.push(logicalRun);
+      continue;
+    }
+    existing.duplicateCount += 1;
+    existing.operatorGroups.push(operatorGroupForRun(run));
+    existing.editable = existing.editable && run.editable;
+    if (!existing.editable && run.reason) existing.reason = run.reason;
+  }
+  return merged;
+}
+
+function serializedOperatorGroups(run) {
+  if (!Array.isArray(run.operatorGroups) || run.operatorGroups.length < 2) return undefined;
+  return run.operatorGroups.map((group) => ({
+    operatorOrdinal: group.operatorOrdinal,
+    operatorOrdinals: group.operatorOrdinals,
+  }));
+}
+
 function operatorText(args) {
   const characters = Array.isArray(args?.[0]) ? args[0] : [];
   return characters.map((character) => typeof character === "string" ? character : character?.unicode || "").join("");
@@ -50,38 +95,84 @@ function fillColorFromOperator(fn, args, pdfLibrary, current) {
   return current;
 }
 
+function likelyFullPageImageIndexes(operatorList, pdfPage, pdfLibrary) {
+  const view = pdfPage.view || [];
+  const pageWidth = Math.abs(Number(view[2]) - Number(view[0]));
+  const pageHeight = Math.abs(Number(view[3]) - Number(view[1]));
+  const pageRatio = Math.min(pageWidth, pageHeight) / Math.max(pageWidth, pageHeight);
+  if (!Number.isFinite(pageRatio) || pageRatio <= 0) return [];
+  const imageFunctions = new Set([
+    pdfLibrary.OPS.paintImageXObject,
+    pdfLibrary.OPS.paintImageMaskXObject,
+    pdfLibrary.OPS.paintSolidColorImageMask,
+  ].filter((value) => value !== undefined));
+  return operatorList.fnArray.flatMap((fn, index) => {
+    if (!imageFunctions.has(fn)) return [];
+    const args = operatorList.argsArray[index];
+    const width = Number(args?.[1]);
+    const height = Number(args?.[2]);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width < 300 || height < 300) return [];
+    const imageRatio = Math.min(width, height) / Math.max(width, height);
+    return Math.abs(imageRatio - pageRatio) <= 0.04 ? [index] : [];
+  });
+}
+
 async function inspectPage(pdfPage, pageIndex, pdfLibrary, sourceHash) {
   const [textContent, operatorList] = await Promise.all([pdfPage.getTextContent({ disableCombineTextItems: true }), pdfPage.getOperatorList()]);
+  const fullPageImageIndexes = likelyFullPageImageIndexes(operatorList, pdfPage, pdfLibrary);
   const operators = [];
   let fillColor = "#000000";
   let ordinal = 0;
+  const textOperatorFunctions = new Set([
+    pdfLibrary.OPS.showText,
+    pdfLibrary.OPS.showSpacedText,
+    pdfLibrary.OPS.nextLineShowText,
+    pdfLibrary.OPS.nextLineSetSpacingShowText,
+  ].filter((value) => value !== undefined));
   for (let index = 0; index < operatorList.fnArray.length; index += 1) {
     fillColor = fillColorFromOperator(operatorList.fnArray[index], operatorList.argsArray[index], pdfLibrary, fillColor);
-    if (operatorList.fnArray[index] !== pdfLibrary.OPS.showText) continue;
+    if (!textOperatorFunctions.has(operatorList.fnArray[index])) continue;
     const text = operatorText(operatorList.argsArray[index]);
     operators.push({ ordinal, text, operatorIndex: index, color: fillColor });
     ordinal += 1;
   }
-  let itemCursor = 0;
-  const runs = [];
+  const operatorByOrdinal = new Map(operators.map((operator) => [operator.ordinal, operator]));
+  const normalizedStream = [];
+  const streamOrdinals = [];
   for (const operator of operators) {
-    let item = null;
-    for (let index = itemCursor; index < textContent.items.length; index += 1) {
-      const candidate = textContent.items[index];
-      if (!item && normalizeText(candidate.str) === normalizeText(operator.text) && normalizeText(candidate.str)) {
-        item = candidate;
-        itemCursor = index + 1;
-        break;
-      }
+    for (const character of normalizeText(operator.text)) {
+      normalizedStream.push(character);
+      streamOrdinals.push(operator.ordinal);
     }
-    if (!item && textContent.items[itemCursor]) item = textContent.items[itemCursor++];
-    const text = item?.str || operator.text;
+  }
+  const streamText = normalizedStream.join("");
+  let streamCursor = 0;
+  const runs = [];
+  for (const item of textContent.items) {
+    const text = String(item?.str || "");
+    const normalizedText = normalizeText(text);
+    if (!normalizedText) continue;
+    const start = streamText.indexOf(normalizedText, streamCursor);
+    if (start < 0) continue;
+    const end = start + normalizedText.length;
+    const matchedOrdinals = streamOrdinals.slice(start, end);
+    const firstMatchedOrdinal = matchedOrdinals[0];
+    const lastMatchedOrdinal = matchedOrdinals[matchedOrdinals.length - 1];
+    const operatorOrdinals = operators.slice(firstMatchedOrdinal, lastMatchedOrdinal + 1).map((candidate) => candidate.ordinal);
+    const operator = operatorByOrdinal.get(operatorOrdinals.find((value) => normalizeText(operatorByOrdinal.get(value)?.text) !== "") ?? firstMatchedOrdinal);
+    if (!operator || !operatorOrdinals.length) continue;
+    const groupedText = operatorOrdinals.map((value) => operatorByOrdinal.get(value)?.text || "").join("");
+    if (normalizeText(groupedText) !== normalizedText) continue;
+    streamCursor = end;
     const sourceText = operator.text || text;
     runs.push({
       ...operator,
       pageIndex,
       text,
-      originalText: sourceText,
+      originalText: text,
+      operatorText: sourceText,
+      operatorOrdinals,
+      operatorEndIndex: operatorByOrdinal.get(lastMatchedOrdinal)?.operatorIndex ?? operator.operatorIndex,
       originalTextHash: await textHash(sourceText),
       runId: await runId(pageIndex, operator.ordinal, sourceText, sourceHash),
       item,
@@ -90,7 +181,16 @@ async function inspectPage(pdfPage, pageIndex, pdfLibrary, sourceHash) {
       reason: text ? "This text run could not be mapped safely to the PDF text layer." : "This page does not expose selectable text.",
     });
   }
-  return { pageIndex, page: pdfPage, runs, textItemCount: textContent.items.length, pageLabel: `Page ${pageIndex + 1}` };
+  const visibleRuns = runs.filter((run) => !fullPageImageIndexes.some((imageIndex) => imageIndex > run.operatorEndIndex));
+  const hasTextItems = textContent.items.some((item) => normalizeText(item?.str));
+  return {
+    pageIndex,
+    page: pdfPage,
+    runs: mergeVisualDuplicateRuns(visibleRuns),
+    textItemCount: textContent.items.length,
+    requiresOcr: hasTextItems && visibleRuns.length === 0,
+    pageLabel: `Page ${pageIndex + 1}`,
+  };
 }
 
 function PdfTextThumbnail({ model, onSelect }) {
@@ -107,6 +207,69 @@ function PdfTextThumbnail({ model, onSelect }) {
     return () => renderTask?.cancel();
   }, [model]);
   return <button className="pdf-text-thumbnail" type="button" onClick={onSelect} aria-label={`Select ${model.pageLabel}`}><canvas ref={canvasRef} /><span>{model.pageLabel}</span></button>;
+}
+
+const MAX_VIRTUAL_ITEMS = 50;
+const VIRTUAL_OVERSCAN = 3;
+
+function useResponsiveVirtualAxis() {
+  const [horizontal, setHorizontal] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 760px)");
+    const update = () => setHorizontal(media.matches);
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
+  return horizontal;
+}
+
+function useVirtualWindow(containerRef, count, itemSize, axis = "vertical") {
+  const horizontal = axis === "horizontal";
+  const [metrics, setMetrics] = useState({ offset: 0, viewport: 760 });
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+    let frame = 0;
+    const update = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        const viewport = horizontal ? container.clientWidth : container.clientHeight;
+        const offset = horizontal ? container.scrollLeft : container.scrollTop;
+        setMetrics({ offset, viewport: Math.max(1, viewport) });
+      });
+    };
+    update();
+    container.addEventListener("scroll", update, { passive: true });
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(update) : null;
+    observer?.observe(container);
+    return () => {
+      container.removeEventListener("scroll", update);
+      observer?.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [containerRef, count, horizontal, itemSize]);
+
+  const visibleCount = Math.max(1, Math.ceil(metrics.viewport / Math.max(1, itemSize)));
+  const start = Math.max(0, Math.floor(metrics.offset / Math.max(1, itemSize)) - VIRTUAL_OVERSCAN);
+  const end = Math.min(count, start + Math.min(MAX_VIRTUAL_ITEMS, visibleCount + VIRTUAL_OVERSCAN * 2));
+  return { horizontal, start, end, totalSize: count * itemSize };
+}
+
+function useEstimatedPreviewPageHeight() {
+  const [height, setHeight] = useState(890);
+  useEffect(() => {
+    const update = () => {
+      const mobile = window.matchMedia("(max-width: 760px)").matches;
+      const frameHeight = Math.min(window.innerHeight * (mobile ? 0.68 : 0.7), mobile ? 520 : 760);
+      setHeight(Math.max(mobile ? 620 : 520, Math.ceil(frameHeight + (mobile ? 125 : 130))));
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  return height;
 }
 
 function PdfTextPage({ model, selectedRunId, edits, pdfLibrary, previewZoom, onSelectRun, pageRef }) {
@@ -239,6 +402,56 @@ function PdfTextPage({ model, selectedRunId, edits, pdfLibrary, previewZoom, onS
   </article>;
 }
 
+const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview({ pages, selectedRunId, edits, pdfLibrary, previewZoom, previewRevision, onSelectRun }, ref) {
+  const scrollRef = useRef(null);
+  const pageHeight = useEstimatedPreviewPageHeight();
+  const gap = 17;
+  const stride = pageHeight + gap;
+  const windowed = useVirtualWindow(scrollRef, pages.length, stride);
+
+  useImperativeHandle(ref, () => ({
+    scrollToIndex(index) {
+      const target = Math.max(0, Math.min(pages.length - 1, Number(index) || 0));
+      scrollRef.current?.scrollTo({ top: target * stride, behavior: "smooth" });
+    },
+  }), [pages.length, stride]);
+
+  return <div ref={scrollRef} className="pdf-text-preview-scroll" aria-label="PDF page previews">
+    <div className="pdf-text-virtual-content" style={{ height: `${Math.max(0, pages.length * stride - gap)}px` }}>
+      {pages.slice(windowed.start, windowed.end).map((model, offset) => {
+        const index = windowed.start + offset;
+        return <div key={`${model.pageIndex}-${previewRevision}`} className="pdf-text-virtual-item" style={{ top: `${index * stride}px`, height: `${pageHeight}px` }}>
+          <PdfTextPage model={model} selectedRunId={selectedRunId} edits={edits} pdfLibrary={pdfLibrary} previewZoom={previewZoom} onSelectRun={onSelectRun} />
+        </div>;
+      })}
+    </div>
+  </div>;
+});
+
+function VirtualizedPdfTextRail({ pages, onSelect }) {
+  const scrollRef = useRef(null);
+  const horizontal = useResponsiveVirtualAxis();
+  const itemSize = horizontal ? 145 : 235;
+  const windowed = useVirtualWindow(scrollRef, pages.length, itemSize, horizontal ? "horizontal" : "vertical");
+  const contentStyle = horizontal
+    ? { width: `${windowed.totalSize}px`, height: "100%" }
+    : { width: "100%", height: `${windowed.totalSize}px` };
+  return <aside className="pdf-text-page-rail">
+    <div className="pdf-text-rail-heading"><strong>Pages</strong><span>{pages.length || 0}</span></div>
+    {pages.length ? <div ref={scrollRef} className="pdf-text-page-rail-scroll">
+      <div className="pdf-text-rail-virtual-content" style={contentStyle}>
+        {pages.slice(windowed.start, windowed.end).map((model, offset) => {
+          const index = windowed.start + offset;
+          const itemStyle = horizontal
+            ? { left: `${index * itemSize}px`, top: 0, width: `${itemSize}px`, height: "100%" }
+            : { left: 0, top: `${index * itemSize}px`, width: "100%", height: `${itemSize}px` };
+          return <div key={model.pageIndex} className="pdf-text-rail-virtual-item" style={itemStyle}><PdfTextThumbnail model={model} onSelect={() => onSelect(index)} /></div>;
+        })}
+      </div>
+    </div> : <div className="pdf-text-rail-empty">Thumbnails appear here.</div>}
+  </aside>;
+}
+
 function TextEditPopover({ run, value, onChange, onSave, onCancel, onRestore }) {
   if (!run) return null;
   const overflow = value.length > run.text.length;
@@ -313,7 +526,7 @@ export function PdfTextEditor() {
   const [activeView, setActiveView] = useState("tool");
   const [previewUpdating, setPreviewUpdating] = useState(false);
   const [previewRevision, setPreviewRevision] = useState(0);
-  const pageRefs = useRef(new Map());
+  const previewVirtualizerRef = useRef(null);
   const sourceBytesRef = useRef(null);
   const sourcePasswordRef = useRef("");
 
@@ -327,7 +540,7 @@ export function PdfTextEditor() {
       if (target instanceof HTMLElement && target.closest("input, textarea, select, button, [contenteditable=\"true\"]")) return;
       if (event.key === "+" || event.key === "=") {
         event.preventDefault();
-        setPreviewZoom((current) => Math.min(2, Math.round((current + 0.1) * 10) / 10));
+        setPreviewZoom((current) => Math.min(3, Math.round((current + 0.1) * 10) / 10));
       } else if (event.key === "-") {
         event.preventDefault();
         setPreviewZoom((current) => Math.max(0.6, Math.round((current - 0.1) * 10) / 10));
@@ -363,7 +576,25 @@ export function PdfTextEditor() {
       const models = [];
       for (let pageIndex = 0; pageIndex < loaded.numPages; pageIndex += 1) models.push(await inspectPage(await loaded.getPage(pageIndex + 1), pageIndex, pdfLibrary, digest));
       setSourceHash(digest);
-      if (models.some((model) => model.runs.some((run) => run.editable))) {
+      const ocrPageIndexes = models.filter((model) => model.requiresOcr).map((model) => model.pageIndex);
+      if (ocrPageIndexes.length && !isProcessingLocationReady(locations, processingMode)) {
+        setPages(models);
+        setError("Some pages contain hidden or unsupported text. Connect the Local agent or Server to run OCR on those pages.");
+      } else if (ocrPageIndexes.length && processingMode === "local" && capabilities && capabilities.pdf?.ocr !== true) {
+        setPages(models);
+        setError("PDF OCR is not available in this Local Agent. Update the agent, restart it, and try the PDF again.");
+      } else if (ocrPageIndexes.length) {
+        setLoadingMessage(`Some pages need visual text detection. Running OCR on ${ocrPageIndexes.length} page${ocrPageIndexes.length === 1 ? "" : "s"}…`);
+        const ocrResult = await inspectPdfWithOcr(file, processingMode, setOcrProgress, pdfPassword, ocrPageIndexes);
+        const ocrByPage = new Map((ocrResult.pages || []).map((page) => [page.pageIndex, page]));
+        const mergedModels = models.map((model) => {
+          const ocrPage = ocrByPage.get(model.pageIndex);
+          return ocrPage ? { ...ocrPage, page: model.page, textItemCount: model.textItemCount, ocr: true } : model;
+        });
+        setOcrDetected(Number(ocrResult.totalRuns) > 0);
+        setPages(mergedModels);
+        if (!Number(ocrResult.totalRuns)) setError("OCR could not detect readable text on the affected PDF pages. Scanned pages may have low resolution or unsupported handwriting.");
+      } else if (models.some((model) => model.runs.some((run) => run.editable))) {
         setPages(models);
       } else if (!isProcessingLocationReady(locations, processingMode)) {
         setPages(models);
@@ -393,9 +624,16 @@ export function PdfTextEditor() {
   const canSubmit = Boolean(source && sourceHash && changedEdits.length && !loading && !uploadProgress && isProcessingLocationReady(locations, processingMode));
 
   const chooseRun = (run) => {
-    setSelectedRun(run);
-    setEditorValue(edits[run.runId] ?? run.text);
-    setError(run.editable ? "" : run.reason);
+    // Resolve the clicked run from the current page model. PDF.js page
+    // proxies are replaced after a live preview rebuild, so keeping the
+    // object supplied by an older render can leave the editor input pointing
+    // at a different run than the hitbox under the pointer.
+    const currentRun = pages
+      .find((page) => page.pageIndex === run.pageIndex)
+      ?.runs.find((candidate) => candidate.runId === run.runId) || run;
+    setSelectedRun(currentRun);
+    setEditorValue(edits[currentRun.runId] ?? currentRun.text);
+    setError(currentRun.editable ? "" : currentRun.reason);
   };
   const changePreviewZoom = (delta) => setPreviewZoom((current) => Math.min(3, Math.max(0.6, Math.round((current + delta) * 10) / 10)));
   const resetPreviewZoom = () => setPreviewZoom(1);
@@ -403,10 +641,11 @@ export function PdfTextEditor() {
     if (!sourceBytesRef.current || !pdfLibrary) return;
     const previewEdits = pages.flatMap((page) => page.runs
       .filter((run) => nextEdits[run.runId] !== undefined)
-      .map((run) => ({ pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, replacementText: nextEdits[run.runId], mode: run.mode || "native", ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence, originalText: run.originalText } : {}) })));
+      .map((run) => ({ pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), originalText: run.text || run.originalText, replacementText: nextEdits[run.runId], mode: run.mode || "native", ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) })));
     setPreviewUpdating(true);
     try {
-      if (pages.some((page) => page.ocr)) {
+      const nativePreviewEdits = previewEdits.filter((edit) => edit.mode !== "ocr");
+      if (!nativePreviewEdits.length) {
         // OCR pages are rendered from the original PDF page and edited on the
         // canvas by PdfTextPage. This gives immediate feedback and keeps the
         // preview on the exact same raster path as the worker export.
@@ -414,7 +653,7 @@ export function PdfTextEditor() {
         return;
       }
       const { createPdfTextPreview } = await import("../lib/pdf-text-preview.js");
-      const previewBytes = await createPdfTextPreview(sourceBytesRef.current, previewEdits);
+      const previewBytes = await createPdfTextPreview(sourceBytesRef.current, nativePreviewEdits);
       const previewPdf = await pdfLibrary.getDocument({ data: previewBytes }).promise;
       // PDF.js returns a Promise from getPage(). Passing that Promise into the
       // page model leaves the old canvas in place and prevents an empty
@@ -449,7 +688,13 @@ export function PdfTextEditor() {
     setEditorValue(selectedRun.text);
     refreshEditedPreview(nextEdits).catch(() => undefined);
   };
-  const scrollToPage = (pageIndex) => pageRefs.current.get(pageIndex)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const scrollToPage = (pageIndex) => {
+    // Do not leave an editor popover from another page open while the newly
+    // scrolled page is receiving pointer events.
+    setSelectedRun(null);
+    setEditorValue("");
+    previewVirtualizerRef.current?.scrollToIndex(pageIndex);
+  };
   const reset = () => {
     if (job && ["queued", "processing"].includes(job.status)) deleteProcessingJob(jobMode, job.id).catch(() => undefined);
     setSource(null); setSourceHash(""); setPages([]); setEdits({}); setSelectedRun(null); setJob(null); setError(""); setUploadProgress(0); setPreviewUpdating(false); sourceBytesRef.current = null; sourcePasswordRef.current = "";
@@ -462,7 +707,7 @@ export function PdfTextEditor() {
     for (const [runId, replacementText] of changedEdits) {
       const run = availableRuns.find((item) => item.runId === runId);
       if (!run) { setError("A selected text run is no longer available. Reload the PDF and try again."); return; }
-      editPayload.push({ pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, runId: run.runId, originalText: run.originalText, originalTextHash: run.originalTextHash, replacementText, mode: run.mode || "native", ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) });
+      editPayload.push({ pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), runId: run.runId, originalText: run.text || run.originalText, originalTextHash: run.originalTextHash, replacementText, mode: run.mode || "native", ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) });
     }
     const form = new FormData();
     form.append("tool", "pdf-text-editor"); form.append("source", source, source.name); form.append("sourceHash", sourceHash); form.append("edits", JSON.stringify(editPayload)); if (processingMode === "local") form.append("retention", keepResult ? "keep" : "delete");
@@ -517,17 +762,14 @@ export function PdfTextEditor() {
                     </button>
                   </div>
                 </div>
-                {ocrDetected && <div className="pdf-text-ocr-notice"><AlertTriangle size={17} /><div><strong>OCR mode</strong><span>This PDF has no embedded text. OCR regions are editable, but affected areas are reconstructed visually with an approximate font; exact original font, opacity, and hidden pixels cannot be recovered.</span></div></div>}
+                {ocrDetected && <div className="pdf-text-ocr-notice"><AlertTriangle size={17} /><div><strong>OCR mode</strong><span>OCR is used only for pages where the embedded text is unavailable or hidden behind page artwork. OCR regions are reconstructed visually with an approximate font; exact original font, opacity, and hidden pixels cannot be recovered.</span></div></div>}
                 <div className="pdf-text-editor-layout">
-                  <aside className="pdf-text-page-rail">
-                    <div className="pdf-text-rail-heading"><strong>Pages</strong><span>{pages.length || 0}</span></div>
-                    {pages.length ? pages.map((model) => <PdfTextThumbnail key={model.pageIndex} model={model} onSelect={() => scrollToPage(model.pageIndex)} />) : <div className="pdf-text-rail-empty">Thumbnails appear here.</div>}
-                  </aside>
+                  <VirtualizedPdfTextRail pages={pages} onSelect={scrollToPage} />
                   <section className="pdf-text-workspace">
                     {source && !loading && <TextEditPopover run={selectedRun} value={editorValue} onChange={setEditorValue} onSave={saveEdit} onCancel={() => setSelectedRun(null)} onRestore={restoreEdit} />}
                     {loading && <div className="pdf-text-loading"><LoaderCircle className="spin" size={23} /><strong>{loadingMessage}</strong>{ocrProgress > 0 && <span>OCR progress: {ocrProgress}%</span>}</div>}
                     {!loading && !pages.length && <div className="pdf-text-empty"><UploadCloud size={27} /><strong>Upload a PDF to start editing</strong><span>Click a detected text run in the page preview to replace it.</span></div>}
-                    {pages.length > 0 && <div className="pdf-text-preview-scroll" aria-label="PDF page previews">{pages.map((model) => <PdfTextPage key={`${model.pageIndex}-${previewRevision}`} model={model} selectedRunId={selectedRun?.runId} edits={edits} pdfLibrary={pdfLibrary} previewZoom={previewZoom} onSelectRun={chooseRun} pageRef={(element) => { if (element) pageRefs.current.set(model.pageIndex, element); else pageRefs.current.delete(model.pageIndex); }} />)}</div>}
+                    {pages.length > 0 && <VirtualizedPdfTextPreview ref={previewVirtualizerRef} pages={pages} selectedRunId={selectedRun?.runId} edits={edits} pdfLibrary={pdfLibrary} previewZoom={previewZoom} previewRevision={previewRevision} onSelectRun={chooseRun} />}
                   </section>
                 </div>
               </div>

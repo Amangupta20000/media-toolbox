@@ -611,11 +611,20 @@ async function processPdfTextEditor(job) {
   let options;
   try { options = JSON.parse(job.options_json || "{}"); } catch { throw new Error("The PDF text editor options could not be read."); }
   const input = await fsp.readFile(job.source_path);
-  const isOcr = Boolean(options.ocr || options.edits?.some((edit) => edit.mode === "ocr"));
+  const ocrEdits = (options.edits || []).filter((edit) => edit.mode === "ocr");
+  const nativeEdits = (options.edits || []).filter((edit) => edit.mode !== "ocr");
+  const isOcr = Boolean(options.ocr || ocrEdits.length);
   update(job.id, 8, isOcr ? "Reading OCR text" : "Reading PDF text", isOcr ? "Verifying the selected OCR regions against the original PDF." : "Verifying the selected text runs against the original PDF.");
-  const edited = isOcr
-    ? await applyPdfOcrEdits(input, options.edits, { sourceHash: options.sourceHash, password: Boolean(options.passwordProvided) })
-    : await applyPdfTextEdits(input, options.edits, { password: Boolean(options.passwordProvided) });
+  let edited;
+  if (ocrEdits.length && nativeEdits.length) {
+    const native = await applyPdfTextEdits(input, nativeEdits, { password: Boolean(options.passwordProvided) });
+    const ocr = await applyPdfOcrEdits(native.bytes, ocrEdits, { runSourceHash: options.sourceHash, password: Boolean(options.passwordProvided) });
+    edited = { bytes: ocr.bytes, warnings: [...native.warnings, ...ocr.warnings] };
+  } else if (ocrEdits.length || options.ocr) {
+    edited = await applyPdfOcrEdits(input, ocrEdits.length ? ocrEdits : options.edits, { sourceHash: options.sourceHash, password: Boolean(options.passwordProvided) });
+  } else {
+    edited = await applyPdfTextEdits(input, nativeEdits, { password: Boolean(options.passwordProvided) });
+  }
   update(job.id, 82, "Writing PDF", isOcr ? "Rebuilding only the edited OCR page regions." : "Replacing the selected text operators without rasterizing the document.", edited.warnings);
   const outputName = `${stem(job.source_name)}_${isOcr ? "ocr_text" : "text"}_edited.pdf`;
   const outputPath = path.join(path.dirname(job.source_path), outputName);

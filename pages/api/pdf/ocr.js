@@ -22,6 +22,10 @@ export default async function handler(request, response) {
     const source = sources[0];
     if (!likelyFileForTool(source, "pdf-text-editor")) throw new Error("The uploaded file is not a PDF.");
     if (source.size > appConfig.pdfMaxBytes) throw new Error("The PDF is larger than the 200 MB limit.");
+    let pageIndexes;
+    if (fields.pageIndexes) {
+      try { pageIndexes = JSON.parse(fields.pageIndexes); } catch { throw new Error("The OCR page selection is invalid."); }
+    }
     response.statusCode = 200;
     response.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
     response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -31,6 +35,7 @@ export default async function handler(request, response) {
     writeOcrEvent(response, { type: "progress", progress: 1, status: "starting", message: "Starting OCR…" });
     const result = await recognizePdfText(await fsPromises.readFile(source.path), {
       password: fields.password || "",
+      pageIndexes,
       onProgress: (progress) => writeOcrEvent(response, { type: "progress", ...progress }),
     });
     writeOcrEvent(response, { type: "result", result });

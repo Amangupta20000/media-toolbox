@@ -626,6 +626,10 @@ async function handle(request, response) {
       if (sources.length !== 1) return json(response, 400, { error: "Add exactly one PDF for OCR." }, request, origin);
       const source = sources[0];
       if (!likelyFileForTool(source, "pdf-text-editor")) return json(response, 400, { error: "The uploaded file is not a PDF." }, request, origin);
+      let pageIndexes;
+      if (fields.pageIndexes) {
+        try { pageIndexes = JSON.parse(fields.pageIndexes); } catch { return json(response, 400, { error: "The OCR page selection is invalid." }, request, origin); }
+      }
       response.statusCode = 200;
       response.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
       response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -636,6 +640,7 @@ async function handle(request, response) {
       writeEvent({ type: "progress", progress: 1, status: "starting", message: "Starting OCR…" });
       const result = await recognizePdfText(await fsp.readFile(source.path), {
         password: fields.password || "",
+        pageIndexes,
         onProgress: (progress) => writeEvent({ type: "progress", ...progress }),
       });
       writeEvent({ type: "result", result });

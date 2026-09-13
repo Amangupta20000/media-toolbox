@@ -6,7 +6,7 @@ import { PDFDocument } from "pdf-lib";
 import { applyPdfOcrEdits, recognizePdfText, sha256Hex } from "../lib/pdf-ocr.js";
 import { applyRasterTextEdits } from "../lib/pdf-ocr-raster.js";
 
-async function rasterPdf() {
+async function rasterPdf(pageCount = 1) {
   const canvas = createCanvas(1200, 360);
   const context = canvas.getContext("2d");
   context.fillStyle = "#ffffff";
@@ -17,9 +17,11 @@ async function rasterPdf() {
   context.font = "700 58px sans-serif";
   context.fillText("Bold English text", 80, 270);
   const document = await PDFDocument.create();
-  const page = document.addPage([600, 180]);
   const image = await document.embedPng(canvas.toBuffer("image/png"));
-  page.drawImage(image, { x: 0, y: 0, width: 600, height: 180 });
+  for (let index = 0; index < pageCount; index += 1) {
+    const page = document.addPage([600, 180]);
+    page.drawImage(image, { x: 0, y: 0, width: 600, height: 180 });
+  }
   return document.save({ useObjectStreams: false });
 }
 
@@ -69,6 +71,15 @@ test("OCR detects image-only PDF text and exports a verified visual edit", async
   assert.equal(output.getPageCount(), 1);
   assert.ok(edited.warnings.some((warning) => /OCR edits reconstruct/i.test(warning)));
   assert.notEqual(crypto.createHash("sha256").update(edited.bytes).digest("hex"), sha256Hex(source));
+});
+
+test("OCR can scan only the pages identified as visually text-bearing", async () => {
+  const source = await rasterPdf(2);
+  const detected = await recognizePdfText(source, { pageIndexes: [1] });
+  assert.equal(detected.pageCount, 2);
+  assert.equal(detected.scannedPageCount, 1);
+  assert.deepEqual(detected.pages.map((page) => page.pageIndex), [1]);
+  assert.ok(detected.totalRuns >= 2);
 });
 
 test("OCR export rejects stale source hashes and tampered text identities", async () => {

@@ -356,11 +356,12 @@ export function uploadWithProgress(form, mode, onProgress) {
   })();
 }
 
-export async function inspectPdfWithOcr(file, mode, onProgress, password = "") {
+export async function inspectPdfWithOcr(file, mode, onProgress, password = "", pageIndexes = undefined) {
   if (mode === "local") await ensureLocalAgentSession();
   const form = new FormData();
   form.append("source", file, file.name);
   if (password) form.append("password", password);
+  if (Array.isArray(pageIndexes) && pageIndexes.length) form.append("pageIndexes", JSON.stringify(pageIndexes));
   onProgress?.(1);
   try {
     return await fetchOcrProgress(endpoint(mode, "/pdf/ocr"), requestOptions(mode, { method: "POST", body: form }), onProgress, 15 * 60 * 1000);

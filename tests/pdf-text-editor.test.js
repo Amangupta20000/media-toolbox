@@ -218,6 +218,56 @@ test("PDF text editor preserves numeric TJ positioning adjustments", async () =>
   assert.match((await searchableText(output.bytes))[0], /CD/);
 });
 
+test("PDF text editor replaces grouped text operators without leaving the original glyphs", async () => {
+  const document = await PDFDocument.create();
+  const page = document.addPage([400, 220]);
+  const context = document.context;
+  const fontReference = context.register(context.obj({ Type: PDFName.Font, Subtype: PDFName.of("Type1"), BaseFont: PDFName.of("Helvetica"), Encoding: PDFName.of("WinAnsiEncoding") }));
+  page.node.Resources().set(PDFName.Font, context.obj({ F1: fontReference }));
+  page.node.set(PDFName.Contents, context.register(context.flateStream(Buffer.from("BT /F1 18 Tf 40 120 Tm (A) Tj 14 0 Td (B) Tj ET", "latin1"))));
+  const source = await document.save({ useObjectStreams: false });
+  const extracted = await extractPdfTextRuns(source);
+  const first = extracted.pages[0].runs[0];
+  const second = extracted.pages[0].runs[1];
+  const output = await applyPdfTextEdits(source, [{ pageIndex: 0, runId: first.runId, originalTextHash: first.originalTextHash, originalText: "AB", operatorOrdinals: [first.ordinal, second.ordinal], replacementText: "CD" }]);
+  const text = (await searchableText(output.bytes))[0];
+  assert.match(text, /CD/);
+  assert.doesNotMatch(text, /AB/);
+});
+
+test("PDF text editor replaces identical same-position copies together", async () => {
+  const document = await PDFDocument.create();
+  const page = document.addPage([400, 220]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  page.drawText("Same", { x: 40, y: 120, font, size: 18 });
+  page.drawText("Same", { x: 40, y: 120, font, size: 18 });
+  const source = await document.save({ useObjectStreams: false });
+  const extracted = await extractPdfTextRuns(source);
+  const copies = extracted.pages[0].runs.filter((run) => run.text === "Same");
+  assert.equal(copies.length, 2);
+  const output = await applyPdfTextEdits(source, [{
+    pageIndex: 0,
+    runId: copies[0].runId,
+    originalText: "Same",
+    originalTextHash: copies[0].originalTextHash,
+    operatorGroups: copies.map((run) => ({ operatorOrdinal: run.ordinal, operatorOrdinals: [run.ordinal] })),
+    replacementText: "Changed",
+  }]);
+  const text = (await searchableText(output.bytes))[0];
+  assert.equal((text.match(/Changed/g) || []).length, 2);
+  assert.doesNotMatch(text, /Same/);
+  const preview = await createPdfTextPreview(source, [{
+    pageIndex: 0,
+    operatorOrdinal: copies[0].ordinal,
+    operatorGroups: copies.map((run) => ({ operatorOrdinal: run.ordinal, operatorOrdinals: [run.ordinal] })),
+    replacementText: "Previewed",
+    mode: "native",
+  }]);
+  const previewText = (await searchableText(preview))[0];
+  assert.equal((previewText.match(/Previewed/g) || []).length, 2);
+  assert.doesNotMatch(previewText, /Same/);
+});
+
 test("live PDF preview rewrites native text instead of drawing over the original", async () => {
   const source = await createFixture();
   const extracted = await extractPdfTextRuns(source);
