@@ -48,9 +48,13 @@ function textOffset(value) {
 function textTransform(value) {
   const rawScale = Number(value?.scale);
   const rawRotation = Number(value?.rotation);
+  const rawScaleX = Number(value?.scaleX);
+  const rawScaleY = Number(value?.scaleY);
   const scale = Number.isFinite(rawScale) ? Math.max(0.25, Math.min(4, rawScale)) : 1;
+  const scaleX = Number.isFinite(rawScaleX) ? Math.max(0.25, Math.min(4, rawScaleX)) : scale;
+  const scaleY = Number.isFinite(rawScaleY) ? Math.max(0.25, Math.min(4, rawScaleY)) : scale;
   const rotation = Number.isFinite(rawRotation) ? rawRotation : 0;
-  return { scale, rotation };
+  return { scale, scaleX, scaleY, rotation };
 }
 
 function hasTextOffset(value) {
@@ -60,7 +64,7 @@ function hasTextOffset(value) {
 
 function hasTextTransform(value) {
   const transform = textTransform(value);
-  return Math.abs(transform.scale - 1) > 0.001 || Math.abs(transform.rotation) > 0.01;
+  return Math.abs(transform.scaleX - 1) > 0.001 || Math.abs(transform.scaleY - 1) > 0.001 || Math.abs(transform.rotation) > 0.01;
 }
 
 function textOrigin(model, run, pdfLibrary) {
@@ -344,7 +348,7 @@ function TextSelectionControls({ run, appearance, onChange, position }) {
   const update = (patch) => onChange?.(run.runId, textTransform({ ...transform, ...patch }));
   const stopPointer = (event) => event.stopPropagation();
   return <div className="pdf-text-selection-controls" style={position} role="toolbar" aria-label={`Controls for selected text ${run.text}`} onPointerDown={stopPointer} onClick={stopPointer}>
-    <button type="button" className="pdf-text-selection-reset" onClick={() => update({ scale: 1, rotation: 0 })} aria-label="Reset selected text size and rotation" title="Reset size and rotation">Reset</button>
+    <button type="button" className="pdf-text-selection-reset" onClick={() => update({ scale: 1, scaleX: 1, scaleY: 1, rotation: 0 })} aria-label="Reset selected text size and rotation" title="Reset size and rotation">Reset</button>
   </div>;
 }
 
@@ -369,8 +373,8 @@ const resizeHandleDirections = {
 
 function selectionHandlePoint(run, appearance, handle, outward = 0) {
   const transform = textTransform(appearance);
-  const width = Math.max(4, run.width || 0) * transform.scale;
-  const height = Math.max(7, run.height || 0) * transform.scale;
+  const width = Math.max(4, run.width || 0) * transform.scaleX;
+  const height = Math.max(7, run.height || 0) * transform.scaleY;
   const [directionX, directionY] = resizeHandleDirections[handle] || [0, -1];
   return {
     left: Math.max(4, run.width || 0) / 2 + directionX * width / 2,
@@ -404,6 +408,11 @@ function TextRotationHandle({ run, appearance, surfaceRef, position, onPreviewCh
   const moveRotation = (event) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
+    if (event.pointerType === "mouse" && (event.buttons & 1) !== 1) {
+      dragRef.current = null;
+      onPreviewChange?.(run.runId, null);
+      return;
+    }
     const angle = pointerAngle(event, drag.center);
     const delta = shortestAngleDelta(angle - drag.lastAngle);
     if (Math.abs(delta) < 0.01) return;
@@ -418,12 +427,15 @@ function TextRotationHandle({ run, appearance, surfaceRef, position, onPreviewCh
 function TextResizeHandle({ run, appearance, surfaceRef, handle, position, onPreviewChange, onChange }) {
   const dragRef = useRef(null);
   const transform = textTransform(appearance);
+  const isHorizontalSide = handle === "left" || handle === "right";
+  const isVerticalSide = handle === "top" || handle === "bottom";
+  const direction = resizeHandleDirections[handle] || [1, 1];
   const endResize = (event) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     dragRef.current = null;
     event.currentTarget.releasePointerCapture?.(event.pointerId);
-    if (drag.moved) onChange?.(run.runId, { scale: drag.scale });
+    if (drag.moved) onChange?.(run.runId, { scaleX: drag.scaleX, scaleY: drag.scaleY });
     onPreviewChange?.(run.runId, null);
   };
   const startResize = (event) => {
@@ -434,19 +446,49 @@ function TextResizeHandle({ run, appearance, surfaceRef, handle, position, onPre
     event.preventDefault();
     event.stopPropagation();
     const center = { x: bounds.left + run.left + Math.max(4, run.width || 0) / 2, y: bounds.top + run.top + Math.max(7, run.height || 0) / 2 };
-    const startDistance = Math.max(1, Math.hypot(event.clientX - center.x, event.clientY - center.y));
-    dragRef.current = { pointerId: event.pointerId, center, startDistance, startScale: transform.scale, scale: transform.scale, moved: false };
+    const radians = transform.rotation * Math.PI / 180;
+    const deltaX = event.clientX - center.x;
+    const deltaY = event.clientY - center.y;
+    const startLocalX = Math.cos(radians) * deltaX + Math.sin(radians) * deltaY;
+    const startLocalY = -Math.sin(radians) * deltaX + Math.cos(radians) * deltaY;
+    const startDistance = Math.max(1, Math.hypot(startLocalX, startLocalY));
+    dragRef.current = { pointerId: event.pointerId, center, startDistance, startLocalX, startLocalY, startScaleX: transform.scaleX, startScaleY: transform.scaleY, scaleX: transform.scaleX, scaleY: transform.scaleY, moved: false };
     event.currentTarget.setPointerCapture?.(event.pointerId);
   };
   const moveResize = (event) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
-    const distance = Math.hypot(event.clientX - drag.center.x, event.clientY - drag.center.y);
-    const scale = textTransform({ ...transform, scale: drag.startScale * distance / drag.startDistance }).scale;
-    if (Math.abs(scale - drag.scale) < 0.001) return;
-    drag.scale = scale;
+    if (event.pointerType === "mouse" && (event.buttons & 1) !== 1) {
+      dragRef.current = null;
+      onPreviewChange?.(run.runId, null);
+      return;
+    }
+    const radians = transform.rotation * Math.PI / 180;
+    const deltaX = event.clientX - drag.center.x;
+    const deltaY = event.clientY - drag.center.y;
+    const localX = Math.cos(radians) * deltaX + Math.sin(radians) * deltaY;
+    const localY = -Math.sin(radians) * deltaX + Math.cos(radians) * deltaY;
+    let scaleX = drag.startScaleX;
+    let scaleY = drag.startScaleY;
+    if (isHorizontalSide) {
+      const startExtent = Math.max(1, direction[0] * drag.startLocalX);
+      const extent = Math.max(1, direction[0] * localX);
+      scaleX = textTransform({ scaleX: drag.startScaleX * extent / startExtent }).scaleX;
+    } else if (isVerticalSide) {
+      const startExtent = Math.max(1, direction[1] * drag.startLocalY);
+      const extent = Math.max(1, direction[1] * localY);
+      scaleY = textTransform({ scaleY: drag.startScaleY * extent / startExtent }).scaleY;
+    } else {
+      const distance = Math.hypot(localX, localY);
+      const factor = distance / drag.startDistance;
+      scaleX = textTransform({ scaleX: drag.startScaleX * factor }).scaleX;
+      scaleY = textTransform({ scaleY: drag.startScaleY * factor }).scaleY;
+    }
+    if (Math.abs(scaleX - drag.scaleX) < 0.001 && Math.abs(scaleY - drag.scaleY) < 0.001) return;
+    drag.scaleX = scaleX;
+    drag.scaleY = scaleY;
     drag.moved = true;
-    onPreviewChange?.(run.runId, { scale });
+    onPreviewChange?.(run.runId, { scaleX, scaleY });
   };
   return <button type="button" className={`pdf-text-resize-handle ${handle}`} style={position} aria-label={`Resize selected text ${run.text} from the ${handle} handle`} title="Drag to resize" onPointerDown={startResize} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={endResize} />;
 }
@@ -529,6 +571,8 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
                 offsetX: textOffset(textOffsets[run.runId]).x * canvas.width / Math.max(1, base.width),
                 offsetY: textOffset(textOffsets[run.runId]).y * canvas.height / Math.max(1, base.height),
                 scale: transform.scale,
+                scaleX: transform.scaleX,
+                scaleY: transform.scaleY,
                 rotation: transform.rotation,
                 confidence: run.confidence,
               };
@@ -588,6 +632,11 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
 
   const dragRef = useRef(null);
   const suppressClickRef = useRef(false);
+  useEffect(() => {
+    dragRef.current = null;
+    suppressClickRef.current = false;
+    return () => { dragRef.current = null; };
+  }, [model.pageIndex, selectedRunId]);
   const selectTextRun = (run) => {
     if (suppressClickRef.current) {
       suppressClickRef.current = false;
@@ -607,6 +656,15 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
   const moveTextDrag = (event, run) => {
     const drag = dragRef.current;
     if (!drag || drag.runId !== run.runId || drag.pointerId !== event.pointerId) return;
+    // A missed pointerup can leave a captured drag record behind while the
+    // pointer continues to hover over the run. Never move text without the
+    // primary mouse button still held down.
+    if (event.pointerType === "mouse" && (event.buttons & 1) !== 1) {
+      dragRef.current = null;
+      suppressClickRef.current = false;
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      return;
+    }
     const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
     if (distance < 2) return;
     drag.moved = true;
@@ -640,24 +698,26 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
       <button
         type="button"
         className={`pdf-text-run ${run.mode === "ocr" ? "ocr" : ""} selected ${edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]) ? "edited" : ""}`}
-        style={{ left: 0, top: 0, width: "100%", height: "100%", transform: `scale(${displayAppearance.scale})`, transformOrigin: "center center" }}
+        style={{ left: 0, top: 0, width: "100%", height: "100%", transform: `scale(${displayAppearance.scaleX}, ${displayAppearance.scaleY})`, transformOrigin: "center center" }}
         onClick={() => selectTextRun(run)}
         onPointerDown={(event) => startTextDrag(event, run)}
         onPointerMove={(event) => moveTextDrag(event, run)}
         onPointerUp={(event) => endTextDrag(event, run)}
         onPointerCancel={(event) => endTextDrag(event, run)}
+        onLostPointerCapture={(event) => { if (dragRef.current?.pointerId === event.pointerId) { dragRef.current = null; suppressClickRef.current = false; } }}
         title={`Edit “${run.text}”`}
         aria-label={`Edit text ${run.text}`}
       />
     </div> : <button
       type="button"
       className={`pdf-text-run ${run.mode === "ocr" ? "ocr" : ""} ${edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]) ? "edited" : ""} ${!run.editable ? "not-editable" : ""}`}
-      style={{ left: run.left, top: run.top, width: run.width || undefined, height: run.height || undefined, transform: `rotate(${displayAppearance.rotation}deg) scale(${displayAppearance.scale})`, transformOrigin: "center center" }}
+      style={{ left: run.left, top: run.top, width: run.width || undefined, height: run.height || undefined, transform: `rotate(${displayAppearance.rotation}deg) scale(${displayAppearance.scaleX}, ${displayAppearance.scaleY})`, transformOrigin: "center center" }}
       onClick={() => selectTextRun(run)}
       onPointerDown={(event) => startTextDrag(event, run)}
       onPointerMove={(event) => moveTextDrag(event, run)}
       onPointerUp={(event) => endTextDrag(event, run)}
       onPointerCancel={(event) => endTextDrag(event, run)}
+      onLostPointerCapture={(event) => { if (dragRef.current?.pointerId === event.pointerId) { dragRef.current = null; suppressClickRef.current = false; } }}
       title={run.editable ? `Edit “${run.text}”` : run.reason}
       aria-label={run.editable ? `Edit text ${run.text}` : `Text not editable: ${run.reason}`}
     />;
@@ -1023,7 +1083,7 @@ export function PdfTextEditor() {
         const transform = textTransform(nextTransforms[run.runId]);
         const model = pages.find((candidate) => candidate.pageIndex === run.pageIndex);
         const origin = textOrigin(model, run, pdfLibrary);
-        return { pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), originalText: run.text || run.originalText, ...(moveOnly ? { moveOnly: true } : { replacementText: nextEdits[run.runId] }), mode: run.mode || "native", offsetX: offset.x, offsetY: offset.y, scale: transform.scale, rotation: transform.rotation, ...(origin ? { originX: origin.x, originY: origin.y } : {}), ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) };
+        return { pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), originalText: run.text || run.originalText, ...(moveOnly ? { moveOnly: true } : { replacementText: nextEdits[run.runId] }), mode: run.mode || "native", offsetX: offset.x, offsetY: offset.y, scale: transform.scale, scaleX: transform.scaleX, scaleY: transform.scaleY, rotation: transform.rotation, ...(origin ? { originX: origin.x, originY: origin.y } : {}), ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) };
       }));
     setPreviewUpdating(true);
     try {
@@ -1115,7 +1175,7 @@ export function PdfTextEditor() {
       const transform = textTransform(textTransforms[run.runId]);
       const model = pages.find((page) => page.pageIndex === run.pageIndex);
       const origin = textOrigin(model, run, pdfLibrary);
-      editPayload.push({ pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), runId: run.runId, originalText: run.text || run.originalText, originalTextHash: run.originalTextHash, ...(moveOnly ? { moveOnly: true } : { replacementText }), mode: run.mode || "native", offsetX: offset.x, offsetY: offset.y, scale: transform.scale, rotation: transform.rotation, ...(origin ? { originX: origin.x, originY: origin.y } : {}), ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) });
+      editPayload.push({ pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), runId: run.runId, originalText: run.text || run.originalText, originalTextHash: run.originalTextHash, ...(moveOnly ? { moveOnly: true } : { replacementText }), mode: run.mode || "native", offsetX: offset.x, offsetY: offset.y, scale: transform.scale, scaleX: transform.scaleX, scaleY: transform.scaleY, rotation: transform.rotation, ...(origin ? { originX: origin.x, originY: origin.y } : {}), ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) });
     }
     const form = new FormData();
     form.append("tool", "pdf-text-editor"); form.append("source", source, source.name); form.append("sourceHash", sourceHash); form.append("edits", JSON.stringify(editPayload)); if (processingMode === "local") form.append("retention", keepResult ? "keep" : "delete");

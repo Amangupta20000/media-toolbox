@@ -355,6 +355,23 @@ test("native text size and rotation preserve the original operator in preview an
   assert.match(previewContent, /q 0 -2 2 0 -320 260 cm <0002> Tj Q/);
 });
 
+test("native text side scaling changes one axis in preview and export", async () => {
+  const source = await type0Fixture("Tj", "LogoFont", [["0001", "0041"], ["0002", "0041"]], ["0002"]);
+  const extracted = await extractPdfTextRuns(source);
+  const run = extracted.pages[0].runs[0];
+  const edit = { pageIndex: 0, operatorOrdinal: run.ordinal, runId: run.runId, originalText: run.text, originalTextHash: run.originalTextHash, moveOnly: true, scale: 1, scaleX: 2, scaleY: 0.5, originX: 40, originY: 180 };
+
+  const output = await applyPdfTextEdits(source, [edit]);
+  const outputDocument = await PDFDocument.load(output.bytes);
+  const outputContent = decodedPageContent(outputDocument, outputDocument.getPages()[0]);
+  assert.match(outputContent, /q 2 0 0 0\.5 -40 90 cm <0002> Tj Q/);
+
+  const preview = await createPdfTextPreview(source, [{ ...edit, mode: "native" }]);
+  const previewDocument = await PDFDocument.load(preview);
+  const previewContent = decodedPageContent(previewDocument, previewDocument.getPages()[0]);
+  assert.match(previewContent, /q 2 0 0 0\.5 -40 90 cm <0002> Tj Q/);
+});
+
 test("live PDF preview removes native text when the replacement is empty", async () => {
   const source = await createFixture();
   const extracted = await extractPdfTextRuns(source);
