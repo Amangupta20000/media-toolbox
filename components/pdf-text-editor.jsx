@@ -13,7 +13,7 @@ import { MAX_PDF_BYTES } from "../lib/pdf-limits.js";
 
 async function loadPdfLibrary() {
   const library = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  if (library.GlobalWorkerOptions) library.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+  if (library.GlobalWorkerOptions) library.GlobalWorkerOptions.workerSrc = "/api/pdf/worker";
   return library;
 }
 

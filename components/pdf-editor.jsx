@@ -127,10 +127,10 @@ function clipboardImageFiles(clipboardData) {
 async function loadPdfLibrary() {
   const library = await import("pdfjs-dist/legacy/build/pdf.mjs");
   if (typeof window !== "undefined" && library.GlobalWorkerOptions) {
-    // Serve the worker from the application origin instead of relying on
-    // Next.js to publish a dynamically imported node_modules asset. The
-    // latter can produce a hashed URL that is missing on the result page.
-    library.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+    // Serve the worker through the traced Pages API route. This keeps the
+    // worker available on Vercel even when generated public files are not
+    // included by the platform's default Next.js build command.
+    library.GlobalWorkerOptions.workerSrc = "/api/pdf/worker";
   }
   return library;
 }

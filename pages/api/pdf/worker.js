@@ -1,8 +1,11 @@
 import fs from "node:fs/promises";
-import { createRequire } from "node:module";
+import path from "node:path";
 
-const require = createRequire(import.meta.url);
-const workerPath = require.resolve("pdfjs-dist/legacy/build/pdf.worker.min.mjs");
+// Keep this path explicit so Next/Vercel can trace the worker file without
+// needing pdfjs-dist's package metadata at runtime. The previous
+// require.resolve() approach worked in a full checkout but returned 500 in
+// the deployed serverless bundle because only the worker asset was traced.
+const workerPath = path.join(process.cwd(), "node_modules", "pdfjs-dist", "legacy", "build", "pdf.worker.min.mjs");
 
 export default async function handler(request, response) {
   if (request.method !== "GET") {

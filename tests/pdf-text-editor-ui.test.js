@@ -54,6 +54,7 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(await read("lib/pdf-ocr.js"), /applyRasterTextEdits/);
   assert.match(shell, /devicePixelRatio/);
   assert.match(shell, /renderViewport/);
+  assert.match(shell, /GlobalWorkerOptions\.workerSrc = "\/api\/pdf\/worker"/);
   assert.match(await read("styles/globals.css"), /\.pdf-text-page-frame \{[^}]*overflow: hidden/);
   assert.match(await read("styles/globals.css"), /\.pdf-text-page \{ zoom: var\(--pdf-text-preview-zoom, 1\); \}/);
   assert.match(intake, /pdf-text-editor/);
