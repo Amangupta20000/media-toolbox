@@ -168,6 +168,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   const updateConfig = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "build", "app-update.yml"), "utf8");
   const releaseWorkflow = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".github", "workflows", "agent-release.yml"), "utf8");
   assert.match(dashboardHtml, /id="start-trial-button"/);
+  assert.match(dashboardHtml, /id="authorization-panel" class="panel authorization-panel"/);
   assert.doesNotMatch(dashboardHtml, /Authorize processing/);
   assert.doesNotMatch(dashboardHtml, /class="divider"/);
   assert.doesNotMatch(dashboardHtml, /Device details/);
