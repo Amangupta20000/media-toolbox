@@ -4,6 +4,7 @@ import { AppShell } from "../components/app-shell.jsx";
 
 const plannedTools = [
   ["PDF editor", "Merge PDFs, reorder pages, and add or remove pages in one document.", FileText, "Beta", "/pdf-editor"],
+  ["PDF text editor", "Edit text inside PDFs and save a clean, shareable copy.", PenLine, "Beta", "/pdf-text-editor"],
   ["Audio converter", "Convert music and audio between MP3, WAV, AAC, FLAC, and more.", AudioLines],
   ["Video compressor", "Reduce video file size while keeping the best practical quality.", FileVideo],
   ["Audio extractor", "Pull a clean audio track from any supported video file.", FileMusic],
@@ -14,7 +15,6 @@ const plannedTools = [
   ["Image background remover", "Remove a simple background and export a clean cutout.", ImagePlus],
   ["PDF to images", "Convert PDF pages into high-quality JPG or PNG images.", FileImage],
   ["Media cleanup", "Inspect files and remove metadata before sharing them.", SlidersHorizontal],
-  ["PDF text editor", "Edit text inside PDFs and save a clean, shareable copy.", PenLine, "Beta", "/pdf-text-editor"],
 ];
 
 export default function ComingSoonPage() {

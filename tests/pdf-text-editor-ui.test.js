@@ -23,6 +23,9 @@ test("PDF text editor is exposed as a dedicated tool with history navigation", a
   assert.match(navigation, /label: "PDF editor"[^\n]+beta: true/);
   assert.match(navigation, /label: "PDF text editor"[^\n]+beta: true/);
   assert.match(navigation, /nav-beta/);
+  const pdfEditorPosition = comingSoon.indexOf('["PDF editor"');
+  const pdfTextEditorPosition = comingSoon.indexOf('["PDF text editor"');
+  assert.ok(pdfEditorPosition >= 0 && pdfTextEditorPosition > pdfEditorPosition, "PDF text editor should follow PDF editor in Coming soon");
   assert.match(comingSoon, /\["PDF text editor"[^\n]+"Beta", "\/pdf-text-editor"\]/);
 });
 
