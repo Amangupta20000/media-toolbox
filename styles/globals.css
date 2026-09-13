@@ -355,11 +355,11 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .small-button { min-height: 35px !important; padding-inline: 12px !important; font-size: 10px !important; }
 .delete-page-button { width: 35px; height: 35px; margin-left: 0; color: #9b8a8a; border-color: #eddcdc; background: #fff8f8; }
 .delete-page-button:hover { color: var(--danger); background: var(--danger-bg); border-color: #e6baba; }
-.pdf-page-canvas-wrap { --preview-height: calc(min(70vh, 760px) - 38px); width: min(100%, 760px); height: min(70vh, 760px); min-height: 420px; box-sizing: border-box; display: grid; place-items: center; overflow: visible; padding: 18px; background: #e9eff2; border: 1px solid #dce7eb; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.7); }
-.pdf-page-canvas-surface { position: relative; width: min(100%, calc(var(--preview-height) * var(--page-ratio))); height: auto; aspect-ratio: var(--page-ratio); min-width: 0; min-height: 0; overflow: visible; background: #fff; box-shadow: 0 8px 22px rgba(33, 57, 77, .14); }
+.pdf-page-canvas-wrap { --preview-height: calc(min(70vh, 760px) - 38px); width: min(100%, 760px); height: min(70vh, 760px); min-height: 420px; box-sizing: border-box; display: block; overflow: auto; padding: 18px; background: #e9eff2; border: 1px solid #dce7eb; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.7); }
+.pdf-page-canvas-surface { position: relative; width: min(100%, calc(var(--preview-height) * var(--page-ratio))); height: auto; aspect-ratio: var(--page-ratio); min-width: 0; min-height: 0; margin: 0 auto; overflow: visible; background: #fff; box-shadow: 0 8px 22px rgba(33, 57, 77, .14); }
 .pdf-page-canvas-surface canvas { display: block; width: 100%; height: 100%; background: #fff; }
 .pdf-document-preview { width: min(100%, 760px); max-height: min(76vh, 900px); overflow: auto; display: grid; align-content: start; gap: 18px; padding: 16px; box-sizing: border-box; background: #e9eff2; border: 1px solid #dce7eb; border-radius: 10px; overscroll-behavior: auto; scrollbar-color: #b7cbd4 transparent; }
-.pdf-preview-page { width: 100%; display: flex; align-items: center; flex-direction: column; gap: 9px; padding: 12px; box-sizing: border-box; background: rgba(255,255,255,.42); border: 2px solid transparent; border-radius: 12px; scroll-margin: 18px; transition: border-color .2s ease, background .2s ease, box-shadow .2s ease; zoom: var(--pdf-preview-zoom, 1); }
+.pdf-preview-page { width: 100%; display: flex; align-items: center; flex-direction: column; gap: 9px; padding: 12px; box-sizing: border-box; background: rgba(255,255,255,.42); border: 2px solid transparent; border-radius: 12px; scroll-margin: 18px; transition: border-color .2s ease, background .2s ease, box-shadow .2s ease; }
 .pdf-preview-page.selected { background: rgba(255,255,255,.78); border-color: #55bfc0; box-shadow: 0 0 0 4px rgba(85, 191, 192, .14); }
 .pdf-preview-page-heading { width: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; color: var(--navy); }
 .pdf-preview-page-heading strong { font-size: 11px; font-weight: 850; }
@@ -908,10 +908,10 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .pdf-text-page-heading { width: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; color: var(--navy); }
 .pdf-text-page-heading strong { font-size: 11px; }
 .pdf-text-page-heading span { color: #8194a3; font-size: 9px; }
-.pdf-text-page-frame { --preview-height: calc(min(70vh, 760px) - 38px); width: min(100%, 790px); height: min(70vh, 760px); min-height: 420px; box-sizing: border-box; display: grid; place-items: center; overflow: hidden; padding: 18px; background: #dfe8ec; border: 1px solid #d2dfe4; border-radius: 8px; }
-.pdf-text-page-surface { position: relative; width: min(100%, calc(var(--preview-height) * var(--page-ratio))); height: auto; aspect-ratio: var(--page-ratio); flex: 0 0 auto; overflow: visible; background: #fff; box-shadow: 0 8px 22px rgba(33,57,77,.14); }
+.pdf-text-page-frame { --preview-height: calc(min(70vh, 760px) - 38px); width: min(100%, 790px); height: min(70vh, 760px); min-height: 420px; box-sizing: border-box; display: block; overflow: auto; padding: 18px; background: #dfe8ec; border: 1px solid #d2dfe4; border-radius: 8px; }
+.pdf-text-page-surface { position: relative; width: min(100%, calc(var(--preview-height) * var(--page-ratio))); height: auto; aspect-ratio: var(--page-ratio); margin: 0 auto; overflow: visible; background: #fff; box-shadow: 0 8px 22px rgba(33,57,77,.14); }
 .pdf-text-page-surface canvas { display: block; width: 100%; height: 100%; }
-.pdf-text-page { zoom: var(--pdf-text-preview-zoom, 1); }
+.pdf-text-page { min-width: 0; }
 .pdf-text-run { position: absolute; z-index: 2; min-width: 4px; min-height: 5px; padding: 0; background: transparent; border: 1px solid transparent; border-radius: 2px; cursor: text; }
 .pdf-text-run:hover { background: rgba(85,191,192,.13); border-color: rgba(39,143,148,.65); }
 .pdf-text-run.selected { background: rgba(85,191,192,.24); border: 2px solid #1e9fa3; box-shadow: 0 0 0 2px rgba(85,191,192,.16); }

@@ -463,7 +463,7 @@ export function PdfEditor() {
     if (!selectedPage) setMoreToolsOpen(false);
   }, [selectedPage]);
 
-  const changePreviewZoom = (delta) => setPreviewZoom((current) => Math.min(2, Math.max(0.6, Math.round((current + delta) * 10) / 10)));
+  const changePreviewZoom = (delta) => setPreviewZoom((current) => Math.min(3, Math.max(0.6, Math.round((current + delta) * 10) / 10)));
   const resetPreviewZoom = () => setPreviewZoom(1);
 
   const rotateSelectedPage = (delta) => {
@@ -1184,7 +1184,7 @@ export function PdfEditor() {
       {processingMode === "local" && <label className="keep-result-check pdf-retention-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label>}
       {!pdfFiles.length && !pages.length ? <PdfEmptyState onBrowse={() => pdfInputRef.current?.click()} loading={loadingFiles} dragActive={pdfDragActive} /> : !pages.length ? <PdfNoPagesState onBrowse={() => pdfInputRef.current?.click()} onBlank={addBlankPage} /> : <div className="pdf-editor-layout">
         <aside className="pdf-page-rail"><div className="pdf-rail-heading"><span>Pages</span><small>Pages load as you scroll</small></div><div ref={pageListRef} className="pdf-page-list" onDragOver={handlePageListDragOver} onDrop={handlePageListDrop}>{renderPageList()}</div></aside>
-        <section className="pdf-selected-panel"><div className="pdf-selected-heading"><div><span>Selected page {selectedPage ? pages.findIndex((page) => page.id === selectedPage.id) + 1 : "—"}</span><small>{selectedPage?.kind === "blank" ? "Blank page" : selectedPage?.sourceName || "Choose a page"}{selectedPage?.kind === "source" ? ` · Original page ${selectedPage.pageNumber}` : ""}</small></div></div><div ref={previewScrollRef} className="pdf-document-preview" style={{ "--pdf-preview-zoom": previewZoom }} onScroll={handlePreviewScroll}>{pages.map((page, index) => <Fragment key={page.id}><PdfPreviewPage page={page} index={index} selected={page.id === selectedPage?.id} pdfDocument={documentsRef.current[page.pdfIndex]} previewRootRef={previewScrollRef} elementRef={(element) => { if (element) previewElementRefs.current.set(page.id, element); else previewElementRefs.current.delete(page.id); }} onChange={(images) => updatePage(page.id, { images })} onRemove={(imageId) => removeImage(page.id, imageId)} onAddImages={() => openImagePickerForPage(page.id)} onError={setPreviewError} /><PdfInsertPageButton pageNumber={index + 1} onClick={() => addBlankPageAfter(page.id)} /></Fragment>)}</div>{previewError && <div className="pdf-preview-error"><AlertTriangle size={16} /><span>{previewError}</span></div>}<p className="pdf-editor-tip"><GripVertical size={15} /> Scroll the preview to select a page. Click + Add page between previews to insert a blank page.</p></section>
+        <section className="pdf-selected-panel"><div className="pdf-selected-heading"><div><span>Selected page {selectedPage ? pages.findIndex((page) => page.id === selectedPage.id) + 1 : "—"}</span><small>{selectedPage?.kind === "blank" ? "Blank page" : selectedPage?.sourceName || "Choose a page"}{selectedPage?.kind === "source" ? ` · Original page ${selectedPage.pageNumber}` : ""}</small></div></div><div ref={previewScrollRef} className="pdf-document-preview" onScroll={handlePreviewScroll}>{pages.map((page, index) => <Fragment key={page.id}><PdfPreviewPage page={page} index={index} selected={page.id === selectedPage?.id} previewZoom={previewZoom} pdfDocument={documentsRef.current[page.pdfIndex]} previewRootRef={previewScrollRef} elementRef={(element) => { if (element) previewElementRefs.current.set(page.id, element); else previewElementRefs.current.delete(page.id); }} onChange={(images) => updatePage(page.id, { images })} onRemove={(imageId) => removeImage(page.id, imageId)} onAddImages={() => openImagePickerForPage(page.id)} onError={setPreviewError} /><PdfInsertPageButton pageNumber={index + 1} onClick={() => addBlankPageAfter(page.id)} /></Fragment>)}</div>{previewError && <div className="pdf-preview-error"><AlertTriangle size={16} /><span>{previewError}</span></div>}<p className="pdf-editor-tip"><GripVertical size={15} /> Scroll the preview to select a page. Click + Add page between previews to insert a blank page.</p></section>
       </div>}
       {error && <div className="error-banner"><AlertTriangle size={18} /><span>{error}</span></div>}
     </section>}
@@ -1200,7 +1200,7 @@ function PdfNoPagesState({ onBrowse, onBlank }) {
   return <div className="pdf-empty-state pdf-no-pages-state"><div className="pdf-empty-icon"><FileText size={28} /></div><h2>No pages left</h2><p>Add another PDF or add a blank page to continue building your document.</p><div className="pdf-empty-actions"><button className="primary-button" type="button" onClick={onBrowse}><Plus size={18} /> Add PDF</button><button className="secondary-button" type="button" onClick={onBlank}><FilePlus2 size={18} /> Add blank page</button></div></div>;
 }
 
-function PdfPreviewPage({ page, index, selected, pdfDocument, previewRootRef, elementRef, onChange, onRemove, onAddImages, onError }) {
+function PdfPreviewPage({ page, index, selected, previewZoom, pdfDocument, previewRootRef, elementRef, onChange, onRemove, onAddImages, onError }) {
   const nodeRef = useRef(null);
   const [shouldRender, setShouldRender] = useState(index < 2);
 
@@ -1226,7 +1226,7 @@ function PdfPreviewPage({ page, index, selected, pdfDocument, previewRootRef, el
   const pageLabel = page.kind === "source" || page.kind === "raster" ? `Original page ${page.pageNumber}` : "New blank page";
   return <article ref={setNode} className={`pdf-preview-page ${selected ? "selected" : ""}`} aria-label={`Final page ${index + 1}, ${pageLabel}`}>
     <div className="pdf-preview-page-heading"><strong>Final page {index + 1}</strong><span>{pageLabel}{page.kind === "source" || page.kind === "raster" ? ` · ${page.sourceName}` : ""}{page.kind === "raster" ? " · Password-protected source" : ""}</span></div>
-    {shouldRender ? page.kind === "blank" ? <BlankPageCanvas page={page} onChange={onChange} onRemove={onRemove} onAddImages={onAddImages} /> : page.previewFallback ? <PdfFallbackPreview page={page} compact onChange={onChange} onRemove={onRemove} /> : <PdfPageCanvas page={page} pdfDocument={pdfDocument} pageNumber={page.pageNumber} onError={onError} onChange={onChange} onRemove={onRemove} /> : <div className="pdf-preview-page-placeholder" style={{ "--page-ratio": pageDisplayRatio(page) }}><FileText size={24} /><span>Loading page {index + 1}</span></div>}
+    {shouldRender ? page.kind === "blank" ? <BlankPageCanvas page={page} onChange={onChange} onRemove={onRemove} onAddImages={onAddImages} /> : page.previewFallback ? <PdfFallbackPreview page={page} compact onChange={onChange} onRemove={onRemove} /> : <PdfPageCanvas page={page} pdfDocument={pdfDocument} pageNumber={page.pageNumber} previewZoom={previewZoom} onError={onError} onChange={onChange} onRemove={onRemove} /> : <div className="pdf-preview-page-placeholder" style={{ "--page-ratio": pageDisplayRatio(page) }}><FileText size={24} /><span>Loading page {index + 1}</span></div>}
   </article>;
 }
 
@@ -1298,10 +1298,12 @@ function BlankPageMiniature({ page }) {
   return <div className="blank-page-mini" style={{ aspectRatio: pageDisplayRatio(page) }}>{images.map((image, index) => { const placement = imageDisplayPlacement(page, image); return <img key={image.id || index} src={image.url} alt={`Image ${index + 1} on blank page`} style={{ left: `${placement.x / placement.pageWidth * 100}%`, top: `${placement.y / placement.pageHeight * 100}%`, width: `${placement.width / placement.pageWidth * 100}%`, height: `${placement.height / placement.pageHeight * 100}%` }} />; })}</div>;
 }
 
-function PdfPageCanvas({ page, pdfDocument, pageNumber, onError, onChange, onRemove }) {
+function PdfPageCanvas({ page, pdfDocument, pageNumber, previewZoom = 1, onError, onChange, onRemove }) {
   const canvasRef = useRef(null);
+  const frameRef = useRef(null);
   const surfaceRef = useRef(null);
   const [pageInfo, setPageInfo] = useState(null);
+  const [surfaceSize, setSurfaceSize] = useState(null);
   useEffect(() => {
     let active = true;
     if (!pdfDocument) return undefined;
@@ -1315,19 +1317,28 @@ function PdfPageCanvas({ page, pdfDocument, pageNumber, onError, onChange, onRem
 
   useEffect(() => {
     let active = true;
-    if (!pageInfo || !surfaceRef.current || !canvasRef.current) return undefined;
+    if (!pageInfo || !frameRef.current || !surfaceRef.current || !canvasRef.current) return undefined;
     let drawing = false;
     const draw = async () => {
-      if (!active || drawing || !surfaceRef.current || !canvasRef.current) return;
+      if (!active || drawing || !frameRef.current || !surfaceRef.current || !canvasRef.current) return;
       drawing = true;
+      const frame = frameRef.current;
       const surface = surfaceRef.current;
-      const scale = Math.min(1.35, Math.max(0.45, Math.min(surface.clientWidth / pageInfo.width, surface.clientHeight / pageInfo.height)));
       const rotation = normalizeRotation(page.rotation);
+      const baseViewport = pageInfo.pdfPage.getViewport({ scale: 1, rotation });
+      const availableWidth = Math.max(1, frame.clientWidth - 36);
+      const availableHeight = Math.max(1, frame.clientHeight - 36);
+      const fitScale = Math.min(availableWidth / baseViewport.width, availableHeight / baseViewport.height);
+      // Zoom is applied to the actual page dimensions, not only to the
+      // surrounding card. Once the page exceeds the frame, the frame scrolls.
+      const scale = Math.min(1.35, Math.max(0.45, fitScale)) * previewZoom;
       // Keep the displayed page at the same CSS size, but render its backing
       // canvas at 2x (or the display's native density) so text and vector
       // artwork stay sharp in the full preview. Thumbnails intentionally use
       // their smaller render path.
       const pixelRatio = Math.min(3, Math.max(2, Number(window.devicePixelRatio) || 1));
+      const displayViewport = pageInfo.pdfPage.getViewport({ scale, rotation });
+      setSurfaceSize({ width: displayViewport.width, height: displayViewport.height });
       const renderViewport = pageInfo.pdfPage.getViewport({ scale: scale * pixelRatio, rotation });
       const canvas = canvasRef.current;
       canvas.width = Math.ceil(renderViewport.width);
@@ -1341,13 +1352,13 @@ function PdfPageCanvas({ page, pdfDocument, pageNumber, onError, onChange, onRem
       }
     };
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(() => { draw().catch(() => { if (active) onError("This PDF page could not be rendered in the browser."); }); }) : null;
-    observer?.observe(surfaceRef.current);
+    observer?.observe(frameRef.current);
     draw().catch(() => { if (active) onError("This PDF page could not be rendered in the browser."); });
     return () => { active = false; observer?.disconnect(); };
-  }, [pageInfo, page.rotation, onError]);
+  }, [pageInfo, page.rotation, previewZoom, onError]);
 
   const ratio = pageInfo ? pageDisplayRatio({ ...page, width: pageInfo.width, height: pageInfo.height }) : pageDisplayRatio(page);
-  return <div className="pdf-page-canvas-wrap"><div ref={surfaceRef} className="pdf-page-canvas-surface" style={{ "--page-ratio": ratio }}><canvas ref={canvasRef} aria-label={`PDF page ${pageNumber}`} /><ImageOverlayLayer page={page} onChange={onChange} onRemove={onRemove} /></div></div>;
+  return <div ref={frameRef} className="pdf-page-canvas-wrap"><div ref={surfaceRef} className="pdf-page-canvas-surface" style={{ "--page-ratio": ratio, ...(surfaceSize ? { width: `${surfaceSize.width}px`, height: `${surfaceSize.height}px` } : {}) }}><canvas ref={canvasRef} aria-label={`PDF page ${pageNumber}`} /><ImageOverlayLayer page={page} onChange={onChange} onRemove={onRemove} /></div></div>;
 }
 
 function PdfFallbackPreview({ page, compact = false, onChange, onRemove }) {

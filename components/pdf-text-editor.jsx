@@ -116,6 +116,7 @@ function PdfTextPage({ model, selectedRunId, edits, pdfLibrary, previewZoom, onS
   const renderTaskRef = useRef(null);
   const rerenderRef = useRef(false);
   const [viewport, setViewport] = useState(null);
+  const [surfaceSize, setSurfaceSize] = useState(null);
   useEffect(() => {
     let active = true;
     const render = async () => {
@@ -128,9 +129,12 @@ function PdfTextPage({ model, selectedRunId, edits, pdfLibrary, previewZoom, onS
       const canvas = canvasRef.current;
       if (!frame || !surface || !canvas) return;
       const base = model.page.getViewport({ scale: 1 });
-      const availableWidth = surface.clientWidth || Math.max(1, frame.clientWidth - 24);
-      const availableHeight = surface.clientHeight || Math.max(1, frame.clientHeight - 24);
-      const scale = Math.min(1.35, Math.max(0.45, Math.min(availableWidth / base.width, availableHeight / base.height)));
+      const availableWidth = Math.max(1, frame.clientWidth - 36);
+      const availableHeight = Math.max(1, frame.clientHeight - 36);
+      const fitScale = Math.min(availableWidth / base.width, availableHeight / base.height);
+      // Keep zoom attached to the page surface so the frame can scroll when
+      // the user magnifies beyond the available preview area.
+      const scale = Math.min(1.35, Math.max(0.45, fitScale)) * previewZoom;
       // Keep the layout viewport in CSS pixels, but render the canvas at the
       // device pixel ratio so uploaded PDFs stay crisp on Retina/high-density
       // displays. The canvas is then downsampled by CSS without changing the
@@ -138,6 +142,7 @@ function PdfTextPage({ model, selectedRunId, edits, pdfLibrary, previewZoom, onS
       const pixelRatio = Math.min(3, Math.max(1, Number(window.devicePixelRatio) || 1));
       const nextViewport = model.page.getViewport({ scale });
       const renderViewport = model.page.getViewport({ scale: scale * pixelRatio });
+      setSurfaceSize({ width: nextViewport.width, height: nextViewport.height });
       canvas.width = Math.ceil(renderViewport.width);
       canvas.height = Math.ceil(renderViewport.height);
       canvas.style.width = "100%";
@@ -177,7 +182,7 @@ function PdfTextPage({ model, selectedRunId, edits, pdfLibrary, previewZoom, onS
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(() => render().catch(() => undefined)) : null;
     if (frameRef.current) observer?.observe(frameRef.current);
     return () => { active = false; rerenderRef.current = false; renderTaskRef.current?.cancel(); renderTaskRef.current = null; observer?.disconnect(); };
-  }, [edits, model, pdfLibrary]);
+  }, [edits, model, pdfLibrary, previewZoom]);
 
   const positions = useMemo(() => {
     if (!viewport) return [];
@@ -222,10 +227,10 @@ function PdfTextPage({ model, selectedRunId, edits, pdfLibrary, previewZoom, onS
       />
     </Fragment>
   );
-  return <article ref={pageRef} className="pdf-text-page" style={{ "--pdf-text-preview-zoom": previewZoom }} aria-label={model.pageLabel}>
+  return <article ref={pageRef} className="pdf-text-page" aria-label={model.pageLabel}>
     <div className="pdf-text-page-heading"><strong>{model.pageLabel}</strong><span>{model.runs.length ? `${model.runs.length} ${model.ocr ? "OCR text regions" : "detected text runs"}` : "No editable text detected"}</span></div>
     <div ref={frameRef} className="pdf-text-page-frame">
-      <div ref={surfaceRef} className="pdf-text-page-surface" style={{ "--page-ratio": baseViewport.width / baseViewport.height }}>
+      <div ref={surfaceRef} className="pdf-text-page-surface" style={{ "--page-ratio": baseViewport.width / baseViewport.height, ...(surfaceSize ? { width: `${surfaceSize.width}px`, height: `${surfaceSize.height}px` } : {}) }}>
         <canvas ref={canvasRef} aria-label={`Preview of ${model.pageLabel}`} />
         {positions.map(renderRun)}
       </div>
@@ -392,7 +397,7 @@ export function PdfTextEditor() {
     setEditorValue(edits[run.runId] ?? run.text);
     setError(run.editable ? "" : run.reason);
   };
-  const changePreviewZoom = (delta) => setPreviewZoom((current) => Math.min(2, Math.max(0.6, Math.round((current + delta) * 10) / 10)));
+  const changePreviewZoom = (delta) => setPreviewZoom((current) => Math.min(3, Math.max(0.6, Math.round((current + delta) * 10) / 10)));
   const resetPreviewZoom = () => setPreviewZoom(1);
   const refreshEditedPreview = async (nextEdits) => {
     if (!sourceBytesRef.current || !pdfLibrary) return;

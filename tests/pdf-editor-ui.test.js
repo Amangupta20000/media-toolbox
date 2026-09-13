@@ -18,5 +18,7 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /canvas\.style\.width = "100%"/);
   assert.match(previewRoute, /request\.query\.thumbnail === "1" \? "40" : "180"/);
   assert.match(shell, /GlobalWorkerOptions\.workerSrc = "\/api\/pdf\/worker"/);
+  assert.match(shell, /const scale = .*previewZoom/);
+  assert.match(shell, /surfaceSize/);
   assert.match(workerRoute, /path\.join\(process\.cwd\(\), "node_modules", "pdfjs-dist"/);
 });
