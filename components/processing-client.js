@@ -114,9 +114,9 @@ export function localAgentToken() {
   return storedAgentToken();
 }
 
-async function fetchJson(url, options = {}) {
+async function fetchJson(url, options = {}, timeoutMs = 8000) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, { cache: "no-store", ...options, signal: controller.signal });
     let payload = {};
@@ -131,6 +131,65 @@ async function fetchJson(url, options = {}) {
     return payload;
   } catch (error) {
     if (error?.name === "AbortError") throw new Error("The request timed out. Check that the local agent is running.");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchOcrProgress(url, options, onProgress, timeoutMs) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { cache: "no-store", ...options, signal: controller.signal });
+    if (!response.ok) {
+      let payload = {};
+      try { payload = await response.json(); } catch { /* non-JSON response */ }
+      const error = new Error(payload.error || `Request failed (${response.status}).`);
+      error.status = response.status;
+      error.code = payload.code || "";
+      error.authorization = payload.authorization;
+      throw error;
+    }
+    if (!response.body || !response.headers.get("content-type")?.includes("application/x-ndjson")) {
+      const result = await response.json();
+      onProgress?.(100);
+      return result;
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let result = null;
+    let lastProgress = 0;
+    const consume = (line) => {
+      if (!line.trim()) return;
+      const event = JSON.parse(line);
+      if (event.type === "progress") {
+        const progress = Number(event.progress);
+        if (Number.isFinite(progress)) {
+          lastProgress = Math.max(lastProgress, Math.min(99, Math.max(1, Math.round(progress))));
+          onProgress?.(lastProgress);
+        }
+      } else if (event.type === "error") {
+        throw new Error(event.error || "The PDF could not be scanned with OCR.");
+      } else if (event.type === "result") {
+        result = event.result;
+      }
+    };
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || "";
+      for (const line of lines) consume(line);
+      if (done) break;
+    }
+    consume(buffer);
+    if (!result) throw new Error("The OCR service ended before returning its result.");
+    onProgress?.(100);
+    return result;
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("OCR timed out. The PDF may be too large or complex to scan.");
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -295,6 +354,29 @@ export function uploadWithProgress(form, mode, onProgress) {
     if (mode === "local") await ensureLocalAgentSession();
     return startUpload();
   })();
+}
+
+export async function inspectPdfWithOcr(file, mode, onProgress, password = "") {
+  if (mode === "local") await ensureLocalAgentSession();
+  const form = new FormData();
+  form.append("source", file, file.name);
+  if (password) form.append("password", password);
+  onProgress?.(1);
+  try {
+    return await fetchOcrProgress(endpoint(mode, "/pdf/ocr"), requestOptions(mode, { method: "POST", body: form }), onProgress, 15 * 60 * 1000);
+  } catch (error) {
+    // Older installed agents predate the streaming OCR route. Surface an
+    // actionable update message instead of the generic "Agent route not
+    // found" response, which otherwise looks like an upload failure.
+    if (mode === "local" && error?.status === 404 && /Agent route not found/i.test(error?.message || "")) {
+      const compatibilityError = new Error("PDF OCR requires the latest Local Agent. Update the agent, restart it, and try the PDF again.");
+      compatibilityError.code = "agent_update_required";
+      compatibilityError.status = 426;
+      compatibilityError.cause = error;
+      throw compatibilityError;
+    }
+    throw error;
+  }
 }
 
 export async function getProcessingJob(mode, id) {

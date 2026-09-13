@@ -14,7 +14,7 @@ const plannedTools = [
   ["Image background remover", "Remove a simple background and export a clean cutout.", ImagePlus],
   ["PDF to images", "Convert PDF pages into high-quality JPG or PNG images.", FileImage],
   ["Media cleanup", "Inspect files and remove metadata before sharing them.", SlidersHorizontal],
-  ["PDF text editor", "Edit text inside PDFs and save a clean, shareable copy.", PenLine],
+  ["PDF text editor", "Edit text inside PDFs and save a clean, shareable copy.", PenLine, "Beta", "/pdf-text-editor"],
 ];
 
 export default function ComingSoonPage() {

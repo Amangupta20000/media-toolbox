@@ -254,10 +254,10 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(releaseWorkflow, /AGENT_RUNTIME_UPDATE_PRIVATE_KEY/);
   assert.match(releaseWorkflow, /agent-runtime-manifest-\*\.json/);
   assert.match(releaseWorkflow, /name: media-toolbox-agent-\$\{\{ matrix\.artifact \}\}/);
-  assert.deepEqual(Object.keys(agentPackage.dependencies).sort(), ["@ffmpeg-installer/ffmpeg", "@ffprobe-installer/ffprobe", "better-sqlite3", "busboy", "electron-updater", "pdf-lib", "selfsigned", "sharp"]);
+  assert.deepEqual(Object.keys(agentPackage.dependencies).sort(), ["@ffmpeg-installer/ffmpeg", "@ffprobe-installer/ffprobe", "@napi-rs/canvas", "@pdf-lib/standard-fonts", "@tesseract.js-data/eng", "better-sqlite3", "busboy", "electron-updater", "pdf-lib", "pdfjs-dist", "selfsigned", "sharp", "tesseract.js"]);
   assert.equal(agentPackage.dependencies.next, undefined);
   assert.equal(agentPackage.dependencies.react, undefined);
-  assert.equal(agentPackage.dependencies["pdfjs-dist"], undefined);
+  assert.equal(agentPackage.dependencies["pdfjs-dist"], "^6.3.289");
   assert.match(dashboardRenderer, /setLicenseServerNotice/);
   assert.match(dashboardRenderer, /LICENSE_DATA_DIR=\$\{shellQuote\(dataDir\)\} npm run license-server/);
   assert.match(dashboardRenderer, /copy-license-server-command/);
@@ -892,6 +892,18 @@ test("agent reports health, rejects unauthenticated jobs, and pairs with a one-t
   // still authorize the request; this also covers the browser pairing race.
   const capabilitiesWithoutOrigin = await fetch(url("/v1/capabilities"), { headers: { Authorization: `Bearer ${paired.token}` } });
   assert.equal(capabilitiesWithoutOrigin.status, 200);
+
+  // The OCR route must be present in the packaged/source agent. An older
+  // installed runtime returns the catch-all 404 "Agent route not found", so
+  // this protects the route contract used by the PDF text editor.
+  const emptyOcrForm = new FormData();
+  const ocrRoute = await fetch(url("/v1/pdf/ocr"), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${paired.token}`, Origin: "http://localhost:3000" },
+    body: emptyOcrForm,
+  });
+  assert.equal(ocrRoute.status, 400);
+  assert.match((await ocrRoute.json()).error, /exactly one PDF/i);
 });
 
 test("agent rejects a different origin after pairing", async () => {

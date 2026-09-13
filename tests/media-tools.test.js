@@ -6,7 +6,7 @@ import path from "node:path";
 import { once } from "node:events";
 import { PassThrough } from "node:stream";
 import test, { after, before } from "node:test";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 import { commandExists, firstAvailable, runCommand } from "../lib/command.js";
 
 const projectDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
@@ -548,6 +548,38 @@ test("PDF editor fails clearly for an invalid source page and serves a PDF with 
   await previewOutputEnded;
   assert.equal(previewOutputHeaders["content-type"], "image/png");
   assert.equal(Buffer.concat(previewOutputChunks).subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+});
+
+test("PDF text editor intake and worker preserve searchable output and live job state", async () => {
+  const sourcePath = path.join(testRoot, "text-edit-source.pdf");
+  const document = await PDFDocument.create();
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  const page = document.addPage([360, 240]);
+  page.drawText("Server and local worker", { x: 24, y: 180, font, size: 18 });
+  await fs.writeFile(sourcePath, await document.save());
+  const { extractPdfTextRuns } = await import("../lib/pdf-text-editor.js");
+  const extracted = await extractPdfTextRuns(await fs.readFile(sourcePath));
+  const run = extracted.pages[0].runs[0];
+  const result = await createJobFromMultipart({
+    id: crypto.randomUUID(),
+    jobDir: testRoot,
+    fields: {
+      tool: "pdf-text-editor",
+      edits: JSON.stringify([{ pageIndex: 0, runId: run.runId, originalTextHash: run.originalTextHash, replacementText: "Local and server" }]),
+    },
+    files: [{ field: "source", name: "text-edit-source.pdf", mime: "application/pdf", path: sourcePath, size: (await fs.stat(sourcePath)).size }],
+  });
+  const job = db.getJob(result.ids[0]);
+  await worker.processJob(job);
+  const completed = db.getJob(job.id);
+  const publicJob = db.getJobForPublic(job.id);
+  const output = JSON.parse(completed.result_json);
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.progress, 100);
+  assert.equal(publicJob.logs.some((entry) => entry.message.includes("PDF text editing")), true);
+  assert.equal(output.editCount, 1);
+  const edited = await extractPdfTextRuns(await fs.readFile(output.path));
+  assert.equal(edited.pages[0].runs[0].text, "Local and server");
 });
 
 test("video repair recovers a truncated MP4 with a matching reference", async (t) => {

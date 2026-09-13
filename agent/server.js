@@ -9,7 +9,8 @@ import { randomInt, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { getJob, getJobForPublic, claimNextJob, deleteJob, listExpiredJobs, listRetainedJobs, updateJob, appendJobLog } from "../lib/db.js";
 import { config, paths } from "../lib/config.js";
-import { acceptMultipartJob } from "../lib/job-intake.js";
+import { acceptMultipartJob, likelyFileForTool, parseMultipart } from "../lib/job-intake.js";
+import { recognizePdfText } from "../lib/pdf-ocr.js";
 import { firstAvailable, runCommand } from "../lib/command.js";
 import { processJob, writeCapabilities } from "../worker/index.js";
 import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, activateOnline, activateTester, authorizeProcessing, ensureAgentAuth, getActivationRequestStatus as getActivationRequestStatusAgent, getAuthorizationState as getAuthorizationStateAgent, getDeviceId as getDeviceIdFromAuth, getLicenseAdminAudit as getLicenseAdminAuditAgent, getLicenseAdminRequests as getLicenseAdminRequestsAgent, getLicenseAdminState as getLicenseAdminStateAgent, getLicenseRequestConfig as getLicenseRequestConfigAgent, hasOnlineLicenseServer, loginActivation as loginActivationAgent, loginAdmin as loginAdminAgent, loginLicenseAdmin as loginLicenseAdminAgent, logoutActivation as logoutActivationAgent, logoutAdmin as logoutAdminAgent, logoutLicenseAdmin as logoutLicenseAdminAgent, requestActivationCode as requestActivationCodeAgent, approveLicenseRequest as approveLicenseRequestAgent, declineLicenseRequest as declineLicenseRequestAgent, startTrial as startTrialAgent, TESTER_ACTIVATION_CODE } from "./auth.js";
@@ -18,7 +19,7 @@ const AGENT_VERSION = process.env.AGENT_VERSION || "0.2.1";
 const PROTOCOL_VERSION = 1;
 const DEFAULT_PORT = 4789;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const HISTORY_TOOLS = new Set(["image-converter", "video-repair", "pdf-editor"]);
+const HISTORY_TOOLS = new Set(["image-converter", "video-repair", "pdf-editor", "pdf-text-editor"]);
 const state = {
   server: null,
   port: DEFAULT_PORT,
@@ -615,12 +616,50 @@ async function handle(request, response) {
   // has already verified that it matches the origin used during pairing.
   if (origin && origin !== auth.session.origin) return json(response, 403, { error: "This website origin is not paired with the local agent." }, request, origin);
 
+  if (url.pathname === "/v1/pdf/ocr" && request.method === "POST") {
+    const ocrDirectory = path.join(paths.jobs, `ocr-${randomUUID()}`);
+    await fsp.mkdir(ocrDirectory, { recursive: true });
+    let streamed = false;
+    try {
+      const { fields, files } = await parseMultipart(request, ocrDirectory, { fileSize: config.pdfMaxBytes });
+      const sources = files.filter((file) => file.field === "source");
+      if (sources.length !== 1) return json(response, 400, { error: "Add exactly one PDF for OCR." }, request, origin);
+      const source = sources[0];
+      if (!likelyFileForTool(source, "pdf-text-editor")) return json(response, 400, { error: "The uploaded file is not a PDF." }, request, origin);
+      response.statusCode = 200;
+      response.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+      response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      response.setHeader("X-Accel-Buffering", "no");
+      response.flushHeaders?.();
+      streamed = true;
+      const writeEvent = (payload) => { if (!response.writableEnded) response.write(`${JSON.stringify(payload)}\n`); };
+      writeEvent({ type: "progress", progress: 1, status: "starting", message: "Starting OCR…" });
+      const result = await recognizePdfText(await fsp.readFile(source.path), {
+        password: fields.password || "",
+        onProgress: (progress) => writeEvent({ type: "progress", ...progress }),
+      });
+      writeEvent({ type: "result", result });
+      response.end();
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The PDF could not be scanned with OCR.";
+      if (streamed) {
+        response.write(`${JSON.stringify({ type: "error", error: message })}\n`);
+        response.end();
+        return;
+      }
+      return json(response, /PasswordException|password/i.test(message) ? 422 : 400, { error: message }, request, origin);
+    } finally {
+      await fsp.rm(ocrDirectory, { recursive: true, force: true });
+    }
+  }
+
   if (url.pathname === "/v1/capabilities" && request.method === "GET") {
     try {
       const value = JSON.parse(await fsp.readFile(paths.capabilities, "utf8"));
       return json(response, 200, { ...value, agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION }, request, origin);
     } catch {
-      return json(response, 200, { status: "starting", agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, image: {}, video: {} }, request, origin);
+      return json(response, 200, { status: "starting", agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, pdf: {}, image: {}, video: {} }, request, origin);
     }
   }
 

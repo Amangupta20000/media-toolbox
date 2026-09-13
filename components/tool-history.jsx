@@ -11,12 +11,14 @@ const toolNames = {
   "image-converter": "Image conversion",
   "video-repair": "Video repair",
   "pdf-editor": "PDF editing",
+  "pdf-text-editor": "PDF text editing",
 };
 
 const toolIcons = {
   "image-converter": ImageIcon,
   "video-repair": Film,
   "pdf-editor": FileText,
+  "pdf-text-editor": FileText,
 };
 
 export function ToolViewTabs({ value, onChange }) {
@@ -179,7 +181,7 @@ export function ToolHistory({ tool }) {
       return;
     }
     rememberHistoryEdit({ tool, downloadUrl: result.downloadUrl, filename: result.filename, mime: result.mime });
-    window.location.assign(tool === "pdf-editor" ? "/pdf-editor" : tool === "video-repair" ? "/video-repair" : "/image-converter");
+    window.location.assign(tool === "pdf-editor" ? "/pdf-editor" : tool === "pdf-text-editor" ? "/pdf-text-editor" : tool === "video-repair" ? "/video-repair" : "/image-converter");
   };
 
   return <section className="history-panel" aria-labelledby={`${tool}-history-title`}>
@@ -242,7 +244,7 @@ function HistoryPreviewModal({ item, onClose, onDelete, onEdit, deleting }) {
         {!previewUrl && <div className="preview-unavailable"><AlertTriangle size={18} /><span>This saved result is no longer available for preview.</span></div>}
         {previewUrl && tool === "image-converter" && (previewError ? <div className="preview-unavailable"><AlertTriangle size={18} /><span>This image cannot be previewed in this browser, but it can still be downloaded.</span></div> : <img className="history-preview-image" src={previewUrl} alt={`Preview of ${result.filename || "saved image"}`} onError={() => setPreviewError(true)} />)}
         {previewUrl && tool === "video-repair" && (previewError ? <div className="preview-unavailable"><AlertTriangle size={18} /><span>This video cannot be previewed in this browser, but it can still be downloaded.</span></div> : <video className="history-preview-video" controls autoPlay={false} preload="metadata" playsInline onError={() => setPreviewError(true)} aria-label={`Preview of ${result.filename || "saved video"}`}><source src={previewUrl} /></video>)}
-        {previewUrl && tool === "pdf-editor" && <iframe className="history-preview-pdf" src={previewUrl} title={`Preview of ${result.filename || "saved PDF"}`} />}
+        {(previewUrl && (tool === "pdf-editor" || tool === "pdf-text-editor")) && <iframe className="history-preview-pdf" src={previewUrl} title={`Preview of ${result.filename || "saved PDF"}`} />}
       </div>
       <div className="history-preview-actions"><button className="secondary-button history-modal-delete" type="button" onClick={handleDelete} disabled={deleting}><Trash2 size={16} /> {deleting ? "Deleting…" : "Delete file"}</button><a className="primary-button" href={result.downloadUrl} download={result.filename}><Download size={17} /> Download</a><button className="secondary-button" type="button" onClick={onEdit}><Pencil size={16} /> Edit file</button></div>
     </div>

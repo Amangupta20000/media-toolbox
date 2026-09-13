@@ -1,12 +1,12 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { FileImage, FileVideo, UploadCloud, X } from "lucide-react";
+import { FileImage, FileText, FileVideo, UploadCloud, X } from "lucide-react";
 
 export function FileDropzone({ file, files, onFile, onFiles, onClear, onRemoveFile, accept, label, hint, variant = "image", disabled = false, required = false, multiple = false }) {
   const inputRef = useRef(null);
   const [dragging, setDragging] = useState(false);
-  const Icon = variant === "image" ? FileImage : FileVideo;
+  const Icon = variant === "image" ? FileImage : variant === "pdf" ? FileText : FileVideo;
   const selectedFiles = Array.isArray(files) ? files : file ? [file] : [];
   const choose = (candidate) => {
     if (disabled || !candidate) return;

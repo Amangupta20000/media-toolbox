@@ -6,6 +6,8 @@ import { PDFDocument, degrees } from "pdf-lib";
 import { config, paths, untruncCandidates } from "../lib/config.js";
 import { appendJobLog, claimNextJob, deleteJob, getJob, listExpiredJobs, updateJob } from "../lib/db.js";
 import { commandExists, firstAvailable, runCommand } from "../lib/command.js";
+import { applyPdfTextEdits } from "../lib/pdf-text-editor.js";
+import { applyPdfOcrEdits } from "../lib/pdf-ocr.js";
 
 let sharpPromise;
 
@@ -605,6 +607,39 @@ async function processPdfEditor(job) {
   updateJob(job.id, { status: "completed", progress: 100, stage: "Complete", message: "The edited PDF is ready to download.", warnings: [], result });
 }
 
+async function processPdfTextEditor(job) {
+  let options;
+  try { options = JSON.parse(job.options_json || "{}"); } catch { throw new Error("The PDF text editor options could not be read."); }
+  const input = await fsp.readFile(job.source_path);
+  const isOcr = Boolean(options.ocr || options.edits?.some((edit) => edit.mode === "ocr"));
+  update(job.id, 8, isOcr ? "Reading OCR text" : "Reading PDF text", isOcr ? "Verifying the selected OCR regions against the original PDF." : "Verifying the selected text runs against the original PDF.");
+  const edited = isOcr
+    ? await applyPdfOcrEdits(input, options.edits, { sourceHash: options.sourceHash, password: Boolean(options.passwordProvided) })
+    : await applyPdfTextEdits(input, options.edits, { password: Boolean(options.passwordProvided) });
+  update(job.id, 82, "Writing PDF", isOcr ? "Rebuilding only the edited OCR page regions." : "Replacing the selected text operators without rasterizing the document.", edited.warnings);
+  const outputName = `${stem(job.source_name)}_${isOcr ? "ocr_text" : "text"}_edited.pdf`;
+  const outputPath = path.join(path.dirname(job.source_path), outputName);
+  await fsp.writeFile(outputPath, edited.bytes);
+  let outputDocument;
+  try {
+    outputDocument = await PDFDocument.load(edited.bytes, { updateMetadata: false, throwOnInvalidObject: false });
+    if (outputDocument.getPageCount() < 1) throw new Error("The edited PDF has no pages.");
+  } catch {
+    throw new Error("The edited PDF could not be validated.");
+  }
+  const result = {
+    path: outputPath,
+    filename: outputName,
+    bytes: await bytes(outputPath),
+    inputBytes: input.length,
+    pageCount: outputDocument.getPageCount(),
+    editCount: options.edits.length,
+    method: isOcr ? "PDF OCR text editor" : "PDF text editor",
+  };
+  appendJobLog(job.id, `Created ${outputName} successfully.`, "complete");
+  updateJob(job.id, { status: "completed", progress: 100, stage: "Complete", message: "The edited PDF is ready to download.", warnings: edited.warnings, result });
+}
+
 async function probe(ffprobe, file) {
   return runCommand(ffprobe, ["-v", "error", "-i", file]);
 }
@@ -787,10 +822,11 @@ async function processVideo(job) {
 }
 
 async function processJob(job) {
-  appendJobLog(job.id, `Worker started ${job.tool === "image-converter" ? "image conversion" : job.tool === "pdf-editor" ? "PDF editing" : "video repair"}.`, "info");
+  appendJobLog(job.id, `Worker started ${job.tool === "image-converter" ? "image conversion" : job.tool === "pdf-editor" ? "PDF editing" : job.tool === "pdf-text-editor" ? "PDF text editing" : "video repair"}.`, "info");
   try {
     if (job.tool === "image-converter") await processImage(job);
     else if (job.tool === "pdf-editor") await processPdfEditor(job);
+    else if (job.tool === "pdf-text-editor") await processPdfTextEditor(job);
     else if (job.tool === "video-repair") await processVideo(job);
     else throw new Error("Unknown tool.");
   } catch (error) {
@@ -822,6 +858,7 @@ async function writeCapabilities() {
   const values = {
     status: "ready",
     checkedAt: new Date().toISOString(),
+    pdf: { textEditing: true, ocr: true, ocrLanguages: ["eng"] },
     image: { imagemagick: Boolean(imageTool), sharp: Boolean(sharp), sips, heic: heic || sips, libheif, formats: ["jpeg", "png", "heic", "tiff", "gif", "bmp"] },
     video: { ffmpeg, ffprobe: await commandExists("ffprobe"), mkvmerge, mkvFallback: ffmpeg, untrunc: Boolean(await firstAvailable(untruncCandidates)), defaultReference: fs.existsSync(config.untruncReferencePath) },
   };
@@ -861,7 +898,7 @@ async function main() {
   }
 }
 
-export { processImage, processPdfEditor, processVideo, processJob, writeCapabilities };
+export { processImage, processPdfEditor, processPdfTextEditor, processVideo, processJob, writeCapabilities };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {

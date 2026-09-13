@@ -3,7 +3,7 @@ import path from "node:path";
 import { config } from "../../../lib/config.js";
 import { getJobForPublic, listCompletedJobs } from "../../../lib/db.js";
 
-const HISTORY_TOOLS = new Set(["image-converter", "video-repair", "pdf-editor"]);
+const HISTORY_TOOLS = new Set(["image-converter", "video-repair", "pdf-editor", "pdf-text-editor"]);
 
 function resultPathFor(row) {
   let result;

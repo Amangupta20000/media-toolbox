@@ -9,7 +9,8 @@ import { probeLocalAgent } from "./processing-client.js";
 const navigation = [
   { href: "/image-converter", label: "Image converter", detail: "Resize-free format conversion", icon: ImageIcon },
   { href: "/video-repair", label: "Video repair", detail: "Layered recovery workflow", icon: Film },
-  { href: "/pdf-editor", label: "PDF editor", detail: "Merge and arrange pages", icon: FileText },
+  { href: "/pdf-editor", label: "PDF editor", detail: "Merge and arrange pages", icon: FileText, beta: true },
+  { href: "/pdf-text-editor", label: "PDF text editor", detail: "Edit existing PDF text", icon: FileText, beta: true },
   { href: "/local-agent", label: "Local agent", detail: "Process files on this device", icon: Bot },
 ];
 
@@ -104,7 +105,7 @@ export function AppShell({ children }) {
           const active = pathname === item.href;
           return <Link key={item.href} href={item.href} className={`tool-nav-item ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}>
             <span className="nav-icon"><Icon size={19} /></span>
-            <span className="nav-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>
+            <span className="nav-copy"><span className="nav-label-row"><strong>{item.label}</strong>{item.beta && <span className="nav-beta">Beta</span>}</span><small>{item.detail}</small></span>
             {active && <span className="active-dot" />}
           </Link>;
         })}
