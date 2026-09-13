@@ -48,7 +48,7 @@ for (const file of [
 ]) {
   try { await copy(file); } catch (error) { if (!["agent/license-public-key.pem", "agent/license-server-url.txt"].includes(file) || error?.code !== "ENOENT") throw error; }
 }
-for (const directory of ["lib", "worker", "vendor/untrunc"]) await copy(directory);
+for (const directory of ["lib", "worker", "vendor/untrunc", "public/fonts"]) await copy(directory);
 await copy("components/processing-client.js");
 
 const minimalPackage = {

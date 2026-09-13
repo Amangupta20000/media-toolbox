@@ -412,8 +412,9 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .pdf-text-box-overlay-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; overflow: visible; }
 .pdf-text-box-overlay { position: absolute; box-sizing: border-box; min-width: 24px; min-height: 24px; cursor: move; border: 2px solid #9b72c8; box-shadow: 0 0 0 3px rgba(155, 114, 200, .16); pointer-events: auto; }
 .pdf-text-box-content { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
-.pdf-text-box-content textarea { display: block; width: 100%; height: 100%; box-sizing: border-box; padding: 5px 7px; color: inherit; background: transparent; border: 0; border-radius: 0; outline: 0; resize: none; overflow: auto; font: inherit; line-height: 1.2; white-space: pre-wrap; word-break: break-word; pointer-events: auto; }
-.pdf-text-box-content textarea::placeholder { color: currentColor; opacity: .45; }
+.pdf-text-box-editor { display: block; width: 100%; height: 100%; box-sizing: border-box; padding: 5px 7px; color: inherit; background: transparent; border: 0; border-radius: 0; outline: 0; overflow: auto; font: inherit; line-height: 1.2; white-space: pre-wrap; word-break: break-word; pointer-events: auto; cursor: text; user-select: text; }
+.pdf-text-box-editor:empty::before { content: attr(data-placeholder); color: currentColor; opacity: .45; pointer-events: none; }
+.pdf-text-box-editor span { white-space: pre-wrap; }
 .pdf-text-box-controls { position: absolute; z-index: 5; top: -31px; left: 50%; display: flex; align-items: center; gap: 2px; min-height: 23px; max-width: min(92vw, 390px); padding: 3px; color: #174558; background: rgba(247, 252, 252, .97); border: 1px solid #b99bda; border-radius: 5px; box-shadow: 0 3px 8px rgba(33, 57, 77, .2); transform: translateX(-50%); white-space: nowrap; }
 .pdf-text-box-controls select { width: 90px; height: 21px; padding: 1px 2px; color: #174558; background: #fff; border: 1px solid #d5c9e2; border-radius: 3px; font: 700 9px/1 system-ui, sans-serif; }
 .pdf-text-box-controls input[type="number"] { width: 38px; height: 21px; padding: 1px 2px; color: #174558; background: #fff; border: 1px solid #d5c9e2; border-radius: 3px; text-align: center; font: 700 9px/1 system-ui, sans-serif; }
@@ -989,6 +990,8 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .pdf-text-run.ocr:hover { background: rgba(214,170,39,.2); border-color: rgba(185,119,23,.72); }
 .pdf-text-run.ocr.edited { background: rgba(43,166,126,.2); border-color: rgba(37,145,111,.7); }
 .pdf-text-run.not-editable { cursor: not-allowed; background: rgba(185,119,23,.08); border-color: rgba(185,119,23,.28); }
+.pdf-text-run.graphic { cursor: grab; background: rgba(126,144,154,.1); border-color: rgba(126,144,154,.38); }
+.pdf-text-run.graphic:hover { background: rgba(85,191,192,.18); border-color: rgba(39,143,148,.7); }
 .pdf-text-selection-frame { position: absolute; z-index: 20; pointer-events: none; overflow: visible; }
 .pdf-text-selection-frame > .pdf-text-run, .pdf-text-selection-frame > .pdf-text-resize-handle, .pdf-text-selection-frame > .pdf-text-rotation-handle { pointer-events: auto; }
 .pdf-text-rotation-handle { position: absolute; z-index: 31; width: 19px; height: 28px; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; user-select: none; transform: translate(-50%, -50%); }
@@ -1015,6 +1018,14 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .pdf-text-edit-popover > input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(30,159,163,.12); }
 .pdf-text-edit-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
 .pdf-text-edit-actions .primary-button, .pdf-text-edit-actions .secondary-button { min-height: 33px; padding-inline: 11px; font-size: 10px; }
+.pdf-text-graphic-note { display: flex; align-items: flex-start; gap: 8px; padding: 10px 11px; color: #536b79; background: #edf5f6; border: 1px solid #cfe3e7; border-radius: 8px; font-size: 10px; line-height: 1.5; }
+.pdf-text-graphic-note svg { flex: 0 0 auto; color: var(--teal-dark); margin-top: 1px; }
+.pdf-text-ocr-choice { display: grid; gap: 10px; margin-top: 13px; padding: 13px 14px; color: #536b79; background: #f3f9fa; border: 1px solid #b9dfe1; border-radius: 10px; }
+.pdf-text-ocr-choice-copy { display: grid; gap: 3px; }
+.pdf-text-ocr-choice-copy strong { color: var(--navy); font-size: 12px; }
+.pdf-text-ocr-choice-copy span, .pdf-text-ocr-choice small { font-size: 10px; line-height: 1.45; }
+.pdf-text-ocr-choice-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.pdf-text-ocr-choice-actions .primary-button, .pdf-text-ocr-choice-actions .secondary-button { min-height: 34px; padding-inline: 12px; font-size: 10px; }
 .pdf-text-overflow-warning, .pdf-text-export-warnings { display: flex; align-items: flex-start; gap: 7px; margin-top: 9px; padding: 9px 10px; color: #8b721e; background: #fff8e8; border: 1px solid #f2dfac; border-radius: 8px; font-size: 10px; line-height: 1.45; }
 .pdf-text-export-warnings { margin: 18px 0 0; }
 .pdf-text-export-warnings > div { display: grid; gap: 4px; }
@@ -1034,6 +1045,8 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .pdf-text-page:has(.pdf-text-run.selected) { background: rgba(28,67,76,.76); }
 [data-theme="dark"] .pdf-text-edit-popover { background: #102b38; border-color: #2c6970; }
 [data-theme="dark"] .pdf-text-edit-popover > input { color: #dcebf2; background: #102230; border-color: #2f4859; }
+[data-theme="dark"] .pdf-text-graphic-note, [data-theme="dark"] .pdf-text-ocr-choice { color: #b8ccd5; background: #172f3c; border-color: #2c6970; }
+[data-theme="dark"] .pdf-text-ocr-choice-copy strong { color: #dcebf2; }
 [data-theme="dark"] .pdf-text-rotation-handle::before { background: #55cfd0; }
 [data-theme="dark"] .pdf-text-rotation-handle::after { background: #102b38; border-color: #55cfd0; }
 [data-theme="dark"] .pdf-text-rotation-handle:hover::after, [data-theme="dark"] .pdf-text-rotation-handle:active::after { background: #205763; border-color: #83e0df; }
@@ -1064,3 +1077,33 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
   .pdf-text-edit-actions { display: grid; grid-template-columns: 1fr 1fr; }
   .pdf-text-edit-actions .primary-button { width: auto; }
 }
+@font-face{font-family:Roboto;src:url('/fonts/roboto-regular.ttf') format('truetype');font-style:normal;font-weight:400;font-display:swap}
+@font-face{font-family:Roboto;src:url('/fonts/roboto-bold.ttf') format('truetype');font-style:normal;font-weight:700;font-display:swap}
+@font-face{font-family:Roboto;src:url('/fonts/roboto-italic.ttf') format('truetype');font-style:italic;font-weight:400;font-display:swap}
+@font-face{font-family:Roboto;src:url('/fonts/roboto-bold-italic.ttf') format('truetype');font-style:italic;font-weight:700;font-display:swap}
+@font-face{font-family:'Open Sans';src:url('/fonts/open-sans-regular.ttf') format('truetype');font-style:normal;font-weight:400;font-display:swap}
+@font-face{font-family:'Open Sans';src:url('/fonts/open-sans-bold.ttf') format('truetype');font-style:normal;font-weight:700;font-display:swap}
+@font-face{font-family:'Open Sans';src:url('/fonts/open-sans-italic.ttf') format('truetype');font-style:italic;font-weight:400;font-display:swap}
+@font-face{font-family:'Open Sans';src:url('/fonts/open-sans-bold-italic.ttf') format('truetype');font-style:italic;font-weight:700;font-display:swap}
+@font-face{font-family:Lato;src:url('/fonts/lato-regular.ttf') format('truetype');font-style:normal;font-weight:400;font-display:swap}
+@font-face{font-family:Lato;src:url('/fonts/lato-bold.ttf') format('truetype');font-style:normal;font-weight:700;font-display:swap}
+@font-face{font-family:Lato;src:url('/fonts/lato-italic.ttf') format('truetype');font-style:italic;font-weight:400;font-display:swap}
+@font-face{font-family:Lato;src:url('/fonts/lato-bold-italic.ttf') format('truetype');font-style:italic;font-weight:700;font-display:swap}
+@font-face{font-family:Montserrat;src:url('/fonts/montserrat-regular.ttf') format('truetype');font-style:normal;font-weight:400;font-display:swap}
+@font-face{font-family:Montserrat;src:url('/fonts/montserrat-bold.ttf') format('truetype');font-style:normal;font-weight:700;font-display:swap}
+@font-face{font-family:Montserrat;src:url('/fonts/montserrat-italic.ttf') format('truetype');font-style:italic;font-weight:400;font-display:swap}
+@font-face{font-family:Montserrat;src:url('/fonts/montserrat-bold-italic.ttf') format('truetype');font-style:italic;font-weight:700;font-display:swap}
+@font-face{font-family:Nunito;src:url('/fonts/nunito-regular.ttf') format('truetype');font-style:normal;font-weight:400;font-display:swap}
+@font-face{font-family:Nunito;src:url('/fonts/nunito-bold.ttf') format('truetype');font-style:normal;font-weight:700;font-display:swap}
+@font-face{font-family:Nunito;src:url('/fonts/nunito-italic.ttf') format('truetype');font-style:italic;font-weight:400;font-display:swap}
+@font-face{font-family:Nunito;src:url('/fonts/nunito-bold-italic.ttf') format('truetype');font-style:italic;font-weight:700;font-display:swap}
+@font-face{font-family:Merriweather;src:url('/fonts/merriweather-regular.ttf') format('truetype');font-style:normal;font-weight:400;font-display:swap}
+@font-face{font-family:Merriweather;src:url('/fonts/merriweather-bold.ttf') format('truetype');font-style:normal;font-weight:700;font-display:swap}
+@font-face{font-family:Merriweather;src:url('/fonts/merriweather-italic.ttf') format('truetype');font-style:italic;font-weight:400;font-display:swap}
+@font-face{font-family:Merriweather;src:url('/fonts/merriweather-bold-italic.ttf') format('truetype');font-style:italic;font-weight:700;font-display:swap}
+@font-face{font-family:'Fira Mono';src:url('/fonts/fira-mono-regular.ttf') format('truetype');font-style:normal;font-weight:400;font-display:swap}
+@font-face{font-family:'Fira Mono';src:url('/fonts/fira-mono-bold.ttf') format('truetype');font-style:normal;font-weight:700;font-display:swap}
+@font-face{font-family:'Noto Sans Devanagari';src:url('/fonts/noto-sans-devanagari-regular.ttf') format('truetype');font-style:normal;font-weight:400;font-display:swap}
+@font-face{font-family:'Noto Sans Devanagari';src:url('/fonts/noto-sans-devanagari-bold.ttf') format('truetype');font-style:normal;font-weight:700;font-display:swap}
+@font-face{font-family:'Noto Serif Devanagari';src:url('/fonts/noto-serif-devanagari.ttf') format('truetype');font-style:normal;font-weight:400;font-display:swap}
+@font-face{font-family:'Noto Serif Devanagari';src:url('/fonts/noto-serif-devanagari.ttf') format('truetype');font-style:normal;font-weight:700;font-display:swap}

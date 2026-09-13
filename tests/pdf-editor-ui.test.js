@@ -28,6 +28,15 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /Background color for text box/);
   assert.match(shell, /onChangeTextBoxes/);
   assert.match(shell, /textBoxFontName/);
+  assert.match(shell, /textBoxFontDefinition/);
+  assert.match(shell, /contentEditable/);
+  assert.match(shell, /applyTextBoxRangeStyle/);
+  assert.match(shell, /runs: Array\.isArray\(textBox\.runs\)/);
+  assert.match(await read("lib/pdf-text-box.js"), /Roboto/);
+  assert.match(await read("lib/pdf-text-box.js"), /NotoSansDevanagari/);
+  assert.match(await read("lib/pdf-text-box.js"), /layoutPdfTextRuns/);
+  assert.match(await read("styles/globals.css"), /roboto-regular\.ttf/);
+  assert.match(await read("styles/globals.css"), /noto-sans-devanagari-regular\.ttf/);
   assert.match(shell, /images\.length \? <ImageOverlayLayer[\s\S]*?textBoxes\.length \? null : <button className="blank-page-message"/);
   assert.match(shell, /setKeepResult\(Boolean\(locations\.local\?\.connected\)\)/);
   assert.match(shell, /keepResultTouchedRef/);
@@ -50,6 +59,8 @@ test("PDF editor can export blank-page-only projects and lets users rename downl
   assert.match(filenameField, /Download file name/);
   assert.match(await read("components/tool-page.jsx"), /ResultFilenameField/);
   assert.match(await read("components/pdf-text-editor.jsx"), /ResultFilenameField/);
+  assert.match(worker, /layoutPdfTextRuns/);
+  assert.match(intake, /styled range/);
 });
 
 test("PDF result download route accepts a safe custom filename while preserving the extension", async () => {

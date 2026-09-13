@@ -22,6 +22,9 @@ files:
   - lib/token.js
   - worker/**/*
   - vendor/untrunc/**/*
+  # Bundled fonts are used for text boxes and as the PDF text editor's
+  # Devanagari fallback. Keep them in both full installers and runtime files.
+  - public/fonts/**/*
   - components/processing-client.js
   - package.json
   # Keep the desktop agent self-contained, but do not ship the Next.js website

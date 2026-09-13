@@ -199,6 +199,15 @@ test("PDF text editor uses a bundled fallback font when a Type0 font cannot enco
   await assert.rejects(() => applyPdfTextEdits(source, [{ pageIndex: 0, runId: run.runId, originalTextHash: run.originalTextHash, replacementText: "漢字" }]), /bundled fallback font/);
 });
 
+test("PDF text editor uses the bundled Devanagari fallback for Hindi replacements", async () => {
+  const source = await type0Fixture("Tj", "Arial", [["0001", "0041"]], ["0001"]);
+  const extracted = await extractPdfTextRuns(source);
+  const run = extracted.pages[0].runs[0];
+  const output = await applyPdfTextEdits(source, [{ pageIndex: 0, runId: run.runId, originalTextHash: run.originalTextHash, replacementText: "करण" }]);
+  assert.ok(output.warnings.some((warning) => warning.includes("Noto Sans Devanagari")));
+  assert.match((await searchableText(output.bytes))[0], /करण/);
+});
+
 test("native text replacement keeps the original bold font resource and point size", async () => {
   const document = await PDFDocument.create();
   const page = document.addPage([420, 220]);

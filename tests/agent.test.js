@@ -12,6 +12,7 @@ import test, { after, before } from "node:test";
 import { firstAvailable, runCommand } from "../lib/command.js";
 
 const require = createRequire(import.meta.url);
+const projectDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-agent-test-"));
 process.env.DATA_DIR = path.join(testRoot, "data");
@@ -267,7 +268,9 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(releaseWorkflow, /AGENT_RUNTIME_UPDATE_PRIVATE_KEY/);
   assert.match(releaseWorkflow, /agent-runtime-manifest-\*\.json/);
   assert.match(releaseWorkflow, /name: media-toolbox-agent-\$\{\{ matrix\.artifact \}\}/);
-  assert.deepEqual(Object.keys(agentPackage.dependencies).sort(), ["@ffmpeg-installer/ffmpeg", "@ffprobe-installer/ffprobe", "@napi-rs/canvas", "@pdf-lib/standard-fonts", "@tesseract.js-data/eng", "better-sqlite3", "busboy", "electron-updater", "pdf-lib", "pdfjs-dist", "selfsigned", "sharp", "tesseract.js"]);
+  assert.match(await fs.readFile(path.join(projectDirectory, "scripts/package-agent-runtime.mjs"), "utf8"), /public\/fonts/);
+  assert.match(await fs.readFile(path.join(projectDirectory, "electron-builder.yml"), "utf8"), /public\/fonts\/\*\*\/\*/);
+  assert.deepEqual(Object.keys(agentPackage.dependencies).sort(), ["@ffmpeg-installer/ffmpeg", "@ffprobe-installer/ffprobe", "@napi-rs/canvas", "@pdf-lib/standard-fonts", "@tesseract.js-data/eng", "@tesseract.js-data/hin", "better-sqlite3", "busboy", "electron-updater", "fontkit", "pdf-lib", "pdfjs-dist", "selfsigned", "sharp", "tesseract.js"]);
   assert.equal(agentPackage.dependencies.next, undefined);
   assert.equal(agentPackage.dependencies.react, undefined);
   assert.equal(agentPackage.dependencies["pdfjs-dist"], "^6.3.289");

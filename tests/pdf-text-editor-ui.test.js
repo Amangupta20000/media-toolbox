@@ -66,8 +66,11 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(await read("lib/pdf-text-preview.js"), /document.context.flateStream/);
   assert.match(await read("lib/pdf-text-preview.js"), /parseToUnicodeCMap/);
   assert.match(await read("lib/pdf-text-preview.js"), /embedded font code sequence/);
+  assert.match(await read("lib/pdf-text-editor.js"), /NotoSansDevanagari/);
+  assert.match(await read("lib/pdf-text-preview.js"), /embedPreviewFallbackFont/);
   assert.match(await read("lib/pdf-ocr-raster.js"), /expandedBox/);
   assert.match(await read("lib/pdf-ocr.js"), /applyRasterTextEdits/);
+  assert.match(await read("lib/pdf-ocr.js"), /graphic: Boolean\(word\.graphic\)/);
   assert.match(shell, /devicePixelRatio/);
   assert.match(shell, /renderViewport/);
   assert.match(shell, /GlobalWorkerOptions\.workerSrc = "\/api\/pdf\/worker"/);
@@ -92,6 +95,12 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /onAppearanceChange/);
   assert.match(shell, /moveOnly/);
   assert.match(shell, /moveOnly: true/);
+  assert.match(shell, /run\.graphic/);
+  assert.match(shell, /Selected graphic/);
+  assert.match(shell, /Use OCR/);
+  assert.match(shell, /Use embedded text only/);
+  assert.match(shell, /chooseOcrMode\("ocr"\)/);
+  assert.match(shell, /textReadModeLabel/);
   assert.match(shell, /pdf-text-selection-frame/);
   assert.match(shell, /pdf-text-rotation-handle/);
   assert.match(shell, /pdf-text-resize-handle/);

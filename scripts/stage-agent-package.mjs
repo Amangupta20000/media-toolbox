@@ -15,7 +15,7 @@ async function copy(relativeSource, relativeDestination = relativeSource) {
   await fs.cp(source, destination, { recursive: true, force: true });
 }
 
-for (const directory of ["agent", "lib", "worker", "license-server", "vendor/untrunc"]) {
+for (const directory of ["agent", "lib", "worker", "license-server", "vendor/untrunc", "public/fonts"]) {
   await copy(directory);
 }
 await copy("components/processing-client.js");

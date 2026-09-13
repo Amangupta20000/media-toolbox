@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import test from "node:test";
 import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
 import { PDFDocument } from "pdf-lib";
-import { applyPdfOcrEdits, recognizePdfText, sha256Hex, wordsFromBlocks } from "../lib/pdf-ocr.js";
+import { applyPdfOcrEdits, mergeCurrencyWords, recognizePdfText, sha256Hex, wordsFromBlocks } from "../lib/pdf-ocr.js";
 import { applyRasterTextEdits } from "../lib/pdf-ocr-raster.js";
 
 async function rasterPdf(pageCount = 1) {
@@ -90,8 +90,53 @@ test("OCR treats symbol-only checkmarks and decorative marks as page graphics", 
     { text: "for", confidence: 96, bbox: { x0: 154, y0: 16, x1: 185, y1: 35 } },
   ] }] }] }];
   const words = wordsFromBlocks(blocks);
-  assert.deepEqual(words.map((word) => word.text), ["Thanks for"]);
-  assert.equal(words[0].bbox.x0, 67, "the editable region should begin after the graphic icon");
+  assert.deepEqual(words.map((word) => word.text), ["ow", "(®", "Thanks for"]);
+  assert.equal(words[0].graphic, true, "the checkmark-like OCR token should remain selectable artwork");
+  assert.equal(words[1].graphic, true, "the decorative OCR token should remain selectable artwork");
+  assert.equal(words[2].graphic, undefined, "ordinary OCR words should stay editable");
+  assert.equal(words[2].bbox.x0, 67, "the editable region should begin after the graphic icon");
+});
+
+test("OCR keeps currency symbols editable and joins a separated rupee sign to its amount", () => {
+  const words = wordsFromBlocks([{ paragraphs: [{ lines: [{ words: [
+    { text: "₹", confidence: 0, bbox: { x0: 20, y0: 10, x1: 31, y1: 30 } },
+    { text: "299.00", confidence: 85, bbox: { x0: 33, y0: 10, x1: 92, y1: 30 } },
+  ] }] }] }]);
+  assert.deepEqual(words.map((word) => word.text), ["₹299.00"]);
+  assert.equal(words[0].graphic, undefined, "currency signs should stay editable text, not graphic placeholders");
+
+  const recovered = mergeCurrencyWords([
+    { text: "2299.00", confidence: 66, bbox: { x0: 22, y0: 10, x1: 92, y1: 30 } },
+  ], [
+    { text: "₹299.00", confidence: 0, bbox: { x0: 20, y0: 10, x1: 92, y1: 30 } },
+  ]);
+  assert.equal(recovered[0].text, "₹299.00", "the symbol-focused pass should correct a dropped/confused currency prefix");
+  assert.equal(recovered[0].graphic, undefined);
+});
+
+test("OCR graphic runs support transform-only edits without text replacement", async () => {
+  const source = await rasterPdf();
+  const sourceHash = sha256Hex(source);
+  const originalText = "ow";
+  const bbox = { x0: 30, y0: 20, x1: 66, y1: 52 };
+  const boxKey = [bbox.x0, bbox.y0, bbox.x1, bbox.y1].map((value) => Math.round(value * 10) / 10).join("-");
+  const runId = `p0-ocr-o0-t${sha256Hex(Buffer.from(originalText, "utf8")).slice(0, 16)}-b${sha256Hex(Buffer.from(boxKey)).slice(0, 12)}-f${sourceHash.slice(0, 16)}`;
+  const edited = await applyPdfOcrEdits(source, [{
+    pageIndex: 0,
+    runId,
+    originalText,
+    originalTextHash: sha256Hex(Buffer.from(originalText, "utf8")),
+    mode: "ocr",
+    moveOnly: true,
+    bbox,
+    offsetX: 80,
+    offsetY: 18,
+    scaleX: 1.35,
+    scaleY: 0.9,
+    rotation: 27,
+  }], { sourceHash });
+  assert.notEqual(sha256Hex(edited.bytes), sourceHash, "moving a graphic OCR run should create an edited PDF");
+  assert.equal(edited.warnings.some((warning) => /font matching|replacement text/i.test(warning)), false, "graphic transforms must not use OCR text replacement");
 });
 
 test("OCR export rejects stale source hashes and tampered text identities", async () => {

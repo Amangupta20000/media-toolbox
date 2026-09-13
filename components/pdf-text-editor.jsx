@@ -636,7 +636,7 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
     onSelectRun(run);
   };
   const startTextDrag = (event, run) => {
-    if (!run.editable || event.button !== 0 || event.pointerType !== "mouse") return;
+    if ((!run.editable && !run.graphic) || event.button !== 0 || event.pointerType !== "mouse") return;
     event.preventDefault();
     event.stopPropagation();
     const offset = textOffset(textOffsets[run.runId]);
@@ -682,13 +682,14 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
   const renderRun = (run) => {
     const appearance = textTransform(textTransforms[run.runId]);
     const displayAppearance = textTransform(transformPreview?.runId === run.runId ? { ...appearance, ...transformPreview } : appearance);
-    const selected = selectedRunId === run.runId && run.editable;
+    const transformable = run.editable || run.graphic;
+    const selected = selectedRunId === run.runId && transformable;
     const selectionFrame = selected ? <div className="pdf-text-selection-frame" style={{ left: run.left, top: run.top, width: Math.max(4, run.width || 0), height: Math.max(7, run.height || 0), transform: `rotate(${displayAppearance.rotation}deg)`, transformOrigin: "center center" }}>
       {Object.keys(resizeHandleDirections).map((handle) => <TextResizeHandle key={handle} run={run} appearance={displayAppearance} surfaceRef={surfaceRef} handle={handle} position={{ ...selectionHandlePoint(run, displayAppearance, handle), transform: "translate(-50%, -50%)" }} onPreviewChange={previewTransform} onChange={commitTransform} />)}
       <TextRotationHandle run={run} appearance={displayAppearance} surfaceRef={surfaceRef} onPreviewChange={previewTransform} onChange={commitTransform} position={{ ...selectionHandlePoint(run, displayAppearance, "top", 23), transform: "translate(-50%, -50%)" }} />
       <button
         type="button"
-        className={`pdf-text-run ${run.mode === "ocr" ? "ocr" : ""} selected ${edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]) ? "edited" : ""}`}
+        className={`pdf-text-run ${run.mode === "ocr" ? "ocr" : ""} ${run.graphic ? "graphic" : ""} selected ${edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]) ? "edited" : ""}`}
         style={{ left: 0, top: 0, width: "100%", height: "100%", transform: `scale(${displayAppearance.scaleX}, ${displayAppearance.scaleY})`, transformOrigin: "center center" }}
         onClick={() => selectTextRun(run)}
         onPointerDown={(event) => startTextDrag(event, run)}
@@ -696,12 +697,12 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
         onPointerUp={(event) => endTextDrag(event, run)}
         onPointerCancel={(event) => endTextDrag(event, run)}
         onLostPointerCapture={(event) => { if (dragRef.current?.pointerId === event.pointerId) { dragRef.current = null; suppressClickRef.current = false; } }}
-        title={`Edit “${run.text}”`}
-        aria-label={`Edit text ${run.text}`}
+        title={run.graphic ? `Select graphic “${run.text}”` : `Edit “${run.text}”`}
+        aria-label={run.graphic ? `Select graphic ${run.text}` : `Edit text ${run.text}`}
       />
     </div> : <button
       type="button"
-      className={`pdf-text-run ${run.mode === "ocr" ? "ocr" : ""} ${edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]) ? "edited" : ""} ${!run.editable ? "not-editable" : ""}`}
+      className={`pdf-text-run ${run.mode === "ocr" ? "ocr" : ""} ${run.graphic ? "graphic" : ""} ${edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]) ? "edited" : ""} ${!run.editable && !run.graphic ? "not-editable" : ""}`}
       style={{ left: run.left, top: run.top, width: run.width || undefined, height: run.height || undefined, transform: `rotate(${displayAppearance.rotation}deg) scale(${displayAppearance.scaleX}, ${displayAppearance.scaleY})`, transformOrigin: "center center" }}
       onClick={() => selectTextRun(run)}
       onPointerDown={(event) => startTextDrag(event, run)}
@@ -709,8 +710,8 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
       onPointerUp={(event) => endTextDrag(event, run)}
       onPointerCancel={(event) => endTextDrag(event, run)}
       onLostPointerCapture={(event) => { if (dragRef.current?.pointerId === event.pointerId) { dragRef.current = null; suppressClickRef.current = false; } }}
-      title={run.editable ? `Edit “${run.text}”` : run.reason}
-      aria-label={run.editable ? `Edit text ${run.text}` : `Text not editable: ${run.reason}`}
+      title={run.graphic ? `Select graphic “${run.text}”` : run.editable ? `Edit “${run.text}”` : run.reason}
+      aria-label={run.graphic ? `Select graphic ${run.text}` : run.editable ? `Edit text ${run.text}` : `Text not editable: ${run.reason}`}
     />;
     return <Fragment key={run.runId}>{selectionFrame}</Fragment>;
   };
@@ -821,6 +822,14 @@ function VirtualizedPdfTextRail({ pages, onSelect }) {
 
 function TextEditPopover({ run, value, onChange, onSave, onCancel, onRestore }) {
   if (!run) return null;
+  if (!run.editable) {
+    const graphic = Boolean(run.graphic);
+    return <div className="pdf-text-edit-popover pdf-text-graphic-popover" role="dialog" aria-label={`${graphic ? "Selected graphic" : "Selected non-editable run"} on page ${run.pageIndex + 1}`}>
+      <div className="pdf-text-edit-heading"><div><span>{graphic ? "Selected graphic" : "Selected non-editable run"} · Page {run.pageIndex + 1}</span><strong title={run.text}>{run.text}</strong></div><button className="icon-button" type="button" onClick={onCancel} aria-label="Close selection" title="Close"><X size={17} /></button></div>
+      <div className="pdf-text-graphic-note"><FileText size={18} /><span>{graphic ? "This OCR-detected symbol or icon is preserved as artwork. Drag it to move it, or use the selection handles to resize and rotate it. Text replacement is disabled." : (run.reason || "This run cannot be edited safely.")}</span></div>
+      <div className="pdf-text-edit-actions"><button className="secondary-button" type="button" onClick={onCancel}>Done</button></div>
+    </div>;
+  }
   const overflow = graphemeCount(value) > graphemeCount(run.text);
   return <div className="pdf-text-edit-popover" role="dialog" aria-label={`Edit ${run.text} on page ${run.pageIndex + 1}`}>
     <div className="pdf-text-edit-heading"><div><span>Selected text · Page {run.pageIndex + 1}</span><strong title={run.text}>{run.text}</strong></div><button className="icon-button" type="button" onClick={onCancel} aria-label="Close text editor" title="Close"><X size={17} /></button></div>
@@ -918,6 +927,8 @@ export function PdfTextEditor() {
   const [activeView, setActiveView] = useState("tool");
   const [previewUpdating, setPreviewUpdating] = useState(false);
   const [previewRevision, setPreviewRevision] = useState(0);
+  const [pendingOcrFile, setPendingOcrFile] = useState(null);
+  const [ocrMode, setOcrMode] = useState(null);
   const previewVirtualizerRef = useRef(null);
   const previewRequestRef = useRef(0);
   const historyEditLoadedRef = useRef(false);
@@ -947,13 +958,23 @@ export function PdfTextEditor() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeView, job, loading]);
 
-  const selectFile = async (file) => {
+  const selectFile = (file) => {
     setError("");
     if (!file) return;
     if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) { setError("Choose a PDF file."); return; }
     if (file.size > MAX_PDF_BYTES) { setError("The PDF must be 200 MB or smaller."); return; }
     if (!pdfLibrary) { setError("PDF preview support is still loading. Try again in a moment."); return; }
     previewRequestRef.current += 1;
+    setPendingOcrFile(file);
+    setOcrMode(null);
+    setSource(null); setSourceHash(""); setPages([]); setEdits({}); setTextOffsets({}); setTextTransforms({}); setSelectedRun(null); setEditorValue(""); setJob(null); setOcrProgress(0); setPreviewUpdating(false); sourceBytesRef.current = null; sourcePasswordRef.current = "";
+  };
+
+  const loadFile = async (file, requestedOcrMode = "auto") => {
+    setError("");
+    if (!file) return;
+    previewRequestRef.current += 1;
+    setPendingOcrFile(null);
     setLoading(true); setSource(file); setPages([]); setEdits({}); setTextOffsets({}); setTextTransforms({}); setSelectedRun(null); setOcrProgress(0); setLoadingMessage("Reading PDF text and building previews…"); sourcePasswordRef.current = "";
     let pdfPassword = "";
     try {
@@ -971,7 +992,15 @@ export function PdfTextEditor() {
       const models = [];
       for (let pageIndex = 0; pageIndex < loaded.numPages; pageIndex += 1) models.push(await inspectPage(await loaded.getPage(pageIndex + 1), pageIndex, pdfLibrary, digest));
       setSourceHash(digest);
-      const ocrPageIndexes = models.filter((model) => model.requiresOcr).map((model) => model.pageIndex);
+      if (requestedOcrMode === "embedded") {
+        setPages(models);
+        setOcrMode("embedded");
+        if (!models.some((model) => model.runs.some((run) => run.editable))) setError("OCR was skipped. This PDF does not expose embedded selectable text.");
+        return;
+      }
+      const ocrPageIndexes = requestedOcrMode === "ocr"
+        ? models.map((model) => model.pageIndex)
+        : models.filter((model) => model.requiresOcr).map((model) => model.pageIndex);
       if (ocrPageIndexes.length && !isProcessingLocationReady(locations, processingMode)) {
         setPages(models);
         setError("Some pages contain hidden or unsupported text. Connect the Local agent or Server to run OCR on those pages.");
@@ -987,9 +1016,11 @@ export function PdfTextEditor() {
           return ocrPage ? { ...ocrPage, page: model.page, textItemCount: model.textItemCount, ocr: true } : model;
         });
         setPages(mergedModels);
+        setOcrMode("ocr");
         if (!Number(ocrResult.totalRuns)) setError("OCR could not detect readable text on the affected PDF pages. Scanned pages may have low resolution or unsupported handwriting.");
       } else if (models.some((model) => model.runs.some((run) => run.editable))) {
         setPages(models);
+        setOcrMode("embedded");
       } else if (!isProcessingLocationReady(locations, processingMode)) {
         setPages(models);
         setError("This PDF has no embedded text. Connect the Local agent or Server to run OCR on scanned pages.");
@@ -1004,12 +1035,19 @@ export function PdfTextEditor() {
           ocrModels.push({ ...page, page: await loaded.getPage(page.pageIndex + 1), textItemCount: 0, ocr: true });
         }
         setPages(ocrModels);
+        setOcrMode("ocr");
         if (!Number(ocrResult.totalRuns)) setError("OCR could not detect readable text in this PDF. Scanned pages may have low resolution or unsupported handwriting.");
       }
     } catch (loadError) {
       setSource(null); setPages([]);
       setError(loadError?.name === "PasswordException" ? "The PDF password was incorrect or the encrypted PDF cannot be edited safely." : loadError instanceof Error ? loadError.message : "The PDF could not be opened for text editing.");
     } finally { setLoading(false); setOcrProgress(0); }
+  };
+
+  const chooseOcrMode = (mode) => {
+    const file = pendingOcrFile;
+    if (!file) return;
+    loadFile(file, mode).catch(() => undefined);
   };
 
   useEffect(() => {
@@ -1021,7 +1059,7 @@ export function PdfTextEditor() {
     fetch(pending.downloadUrl, { cache: "no-store" }).then(async (response) => {
       if (!response.ok) throw new Error("The saved PDF could not be reopened.");
       const blob = await response.blob();
-      if (active) await selectFile(new File([blob], pending.filename || "saved.pdf", { type: pending.mime || "application/pdf" }));
+      if (active) await loadFile(new File([blob], pending.filename || "saved.pdf", { type: pending.mime || "application/pdf" }), "auto");
     }).catch((loadError) => {
       if (active) setError(loadError instanceof Error ? loadError.message : "The saved PDF could not be reopened.");
     });
@@ -1035,8 +1073,9 @@ export function PdfTextEditor() {
   const ocrPageScope = ocrPages.length <= 3
     ? `OCR on ${ocrPages.map((page) => `page ${page.pageIndex + 1}`).join(", ")}`
     : `OCR on ${ocrPages.length} pages`;
+  const textReadModeLabel = ocrMode === "ocr" ? " · OCR selected" : ocrMode === "embedded" ? " · embedded text only" : "";
   const changedEdits = pages.flatMap((page) => page.runs
-    .filter((run) => run.editable && (edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId])))
+    .filter((run) => (run.editable && (edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]))) || (run.graphic && (hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]))))
     .map((run) => edits[run.runId] !== undefined
       ? ({ runId: run.runId, replacementText: edits[run.runId], moveOnly: false, ...textTransform(textTransforms[run.runId]) })
       : ({ runId: run.runId, moveOnly: true, ...textTransform(textTransforms[run.runId]) })));
@@ -1051,8 +1090,8 @@ export function PdfTextEditor() {
       .find((page) => page.pageIndex === run.pageIndex)
       ?.runs.find((candidate) => candidate.runId === run.runId) || run;
     setSelectedRun(currentRun);
-    setEditorValue(edits[currentRun.runId] ?? currentRun.text);
-    setError(currentRun.editable ? "" : currentRun.reason);
+    setEditorValue(currentRun.editable ? (edits[currentRun.runId] ?? currentRun.text) : "");
+    setError(currentRun.editable || currentRun.graphic ? "" : currentRun.reason);
   };
   const changePreviewZoom = (delta) => setPreviewZoom((current) => Math.min(3, Math.max(0.6, Math.round((current + delta) * 10) / 10)));
   const resetPreviewZoom = () => setPreviewZoom(1);
@@ -1147,7 +1186,7 @@ export function PdfTextEditor() {
   const reset = () => {
     previewRequestRef.current += 1;
     if (job && ["queued", "processing"].includes(job.status)) deleteProcessingJob(jobMode, job.id).catch(() => undefined);
-    setSource(null); setSourceHash(""); setPages([]); setEdits({}); setTextOffsets({}); setTextTransforms({}); setSelectedRun(null); setJob(null); setError(""); setUploadProgress(0); setPreviewUpdating(false); sourceBytesRef.current = null; sourcePasswordRef.current = "";
+    setPendingOcrFile(null); setOcrMode(null); setSource(null); setSourceHash(""); setPages([]); setEdits({}); setTextOffsets({}); setTextTransforms({}); setSelectedRun(null); setJob(null); setError(""); setUploadProgress(0); setPreviewUpdating(false); sourceBytesRef.current = null; sourcePasswordRef.current = "";
   };
   const continueEditing = () => { setJob(null); setSelectedRun(null); setError(""); setUploadProgress(0); };
   const submit = async () => {
@@ -1196,14 +1235,19 @@ export function PdfTextEditor() {
                   <div><span className="card-index">01</span><h2>Add one PDF</h2></div>
                   <span className="required-label">Required</span>
                 </div>
-                <FileDropzone file={source} onFile={selectFile} onClear={reset} variant="pdf" accept="application/pdf,.pdf" label="Drop a PDF here" hint="or click to browse · selectable text or OCR" disabled={loading || Boolean(job)} />
+                <FileDropzone file={source || pendingOcrFile} onFile={selectFile} onClear={reset} variant="pdf" accept="application/pdf,.pdf" label="Drop a PDF here" hint="or click to browse · choose embedded text or OCR after upload" disabled={loading || Boolean(job)} />
                 <div className="limit-row"><span>Maximum file size</span><strong>200 MB</strong></div>
+                {pendingOcrFile && <div className="pdf-text-ocr-choice" role="dialog" aria-labelledby="pdf-text-ocr-choice-title">
+                  <div className="pdf-text-ocr-choice-copy"><strong id="pdf-text-ocr-choice-title">How should this PDF be read?</strong><span>Choose whether to scan every page with OCR or use only text already embedded in the PDF.</span></div>
+                  <div className="pdf-text-ocr-choice-actions"><button className="primary-button" type="button" onClick={() => chooseOcrMode("ocr")}><Pencil size={16} /> Use OCR</button><button className="secondary-button" type="button" onClick={() => chooseOcrMode("embedded")}><FileText size={16} /> Use embedded text only</button></div>
+                  <small>OCR makes detected words and symbol-like graphics selectable. Symbols stay artwork and can be moved, resized, or rotated, but their text cannot be replaced.</small>
+                </div>}
               </section>
               <div className="pdf-text-editor-shell">
                 <div className="pdf-text-toolbar">
                   <div>
                     <strong>{ocrDetected && !nativePages ? "Replace OCR-detected text" : "Replace text in your PDF"}</strong>
-                    <span>{previewUpdating ? "Rebuilding the real PDF preview…" : source ? `${source.name} · ${pages.length} pages · ${editableCount} editable text runs${ocrDetected && nativePages ? ` · ${ocrPageScope}` : ""}` : "Upload one PDF to begin"}</span>
+                    <span>{previewUpdating ? "Rebuilding the real PDF preview…" : source ? `${source.name} · ${pages.length} pages · ${editableCount} editable text runs${textReadModeLabel}${ocrDetected && nativePages ? ` · ${ocrPageScope}` : ""}` : "Upload one PDF to begin"}</span>
                   </div>
                   <div className="pdf-text-toolbar-actions">
                     <div className="pdf-zoom-controls" aria-label="Preview zoom">

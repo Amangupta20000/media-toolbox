@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Bold, CheckCircle2, Copy, Download, FilePlus2, FileText, GripVertical, ImagePlus, Italic, Keyboard, LoaderCircle, Lock, MoreHorizontal, Plus, Printer, RotateCcw, RotateCw, Trash2, Type, Underline, Unlock, UploadCloud, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
@@ -13,7 +13,7 @@ import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 import { MAX_PDF_COUNT, MAX_PDF_TOTAL_BYTES } from "../lib/pdf-limits.js";
 import { normalizeImageRotation, rotatedImageDrawPlacement } from "../lib/pdf-image-placement.js";
-import { PDF_TEXT_BOX_FONTS, textBoxColor, textBoxCssFontFamily, textBoxDrawPlacement, textBoxFontName, wrapPdfTextLines } from "../lib/pdf-text-box.js";
+import { PDF_TEXT_BOX_FONTS, layoutPdfTextRuns, textBoxColor, textBoxCssFontFamily, textBoxDrawPlacement, textBoxFontDefinition, textBoxFontName, textBoxTextRuns, wrapPdfTextLines } from "../lib/pdf-text-box.js";
 
 const MAX_IMAGE_COORDINATE = 100000;
 const ACCEPTED_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".heic", ".heif", ".tif", ".tiff", ".gif", ".bmp"]);
@@ -30,6 +30,131 @@ function getPageTextBoxes(page) {
 
 function validHexColor(value) {
   return /^#[0-9a-f]{6}$/i.test(String(value || ""));
+}
+
+const TEXT_BOX_STYLE_KEYS = ["fontFamily", "fontSize", "bold", "italic", "underline", "color", "backgroundColor"];
+
+function textBoxRunPayload(run) {
+  return { start: run.start, end: run.end, ...Object.fromEntries(TEXT_BOX_STYLE_KEYS.map((key) => [key, run[key]])) };
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]));
+}
+
+function textBoxEditorHtml(textBox, scale) {
+  return textBoxTextRuns(textBox).map((run) => {
+    const color = validHexColor(run.color) ? run.color : "#173b53";
+    const backgroundColor = run.backgroundColor === "transparent" || !validHexColor(run.backgroundColor) ? "transparent" : run.backgroundColor;
+    const style = `font-family:${escapeHtml(textBoxCssFontFamily(run.fontFamily))};font-size:${Math.max(1, Number(run.fontSize) || 18) * scale}px;font-weight:${run.bold ? 700 : 400};font-style:${run.italic ? "italic" : "normal"};text-decoration:${run.underline ? "underline" : "none"};color:${color};background-color:${backgroundColor};white-space:pre-wrap`;
+    return `<span style="${style}">${escapeHtml(run.text)}</span>`;
+  }).join("");
+}
+
+function sameTextBoxRunStyle(left, right) {
+  return TEXT_BOX_STYLE_KEYS.every((key) => left?.[key] === right?.[key]);
+}
+
+function compactTextBoxRuns(runs) {
+  const compacted = [];
+  for (const run of runs) {
+    if (!run || run.end <= run.start) continue;
+    const previous = compacted.at(-1);
+    if (previous && previous.end === run.start && sameTextBoxRunStyle(previous, run)) previous.end = run.end;
+    else compacted.push({ ...run });
+  }
+  return compacted.map(textBoxRunPayload);
+}
+
+function applyTextBoxRangeStyle(textBox, start, end, changes) {
+  const runs = [];
+  for (const run of textBoxTextRuns(textBox)) {
+    if (run.end <= start || run.start >= end) {
+      runs.push(run);
+      continue;
+    }
+    if (run.start < start) runs.push({ ...run, end: start, text: textBox.text.slice(run.start, start) });
+    const selectedStart = Math.max(run.start, start);
+    const selectedEnd = Math.min(run.end, end);
+    runs.push({ ...run, start: selectedStart, end: selectedEnd, text: textBox.text.slice(selectedStart, selectedEnd), ...changes });
+    if (run.end > end) runs.push({ ...run, start: end, text: textBox.text.slice(end, run.end) });
+  }
+  return { ...textBox, runs: compactTextBoxRuns(runs) };
+}
+
+function applyTextBoxWholeStyle(textBox, changes) {
+  const runs = textBoxTextRuns(textBox).map((run) => ({ ...run, ...changes }));
+  return { ...textBox, ...changes, runs: compactTextBoxRuns(runs) };
+}
+
+function rebaseTextBoxRuns(textBox, nextText) {
+  const previousText = String(textBox.text ?? "");
+  const value = String(nextText ?? "");
+  if (previousText === value) return Array.isArray(textBox.runs) ? textBox.runs : [];
+  let prefix = 0;
+  while (prefix < previousText.length && prefix < value.length && previousText[prefix] === value[prefix]) prefix += 1;
+  let suffix = 0;
+  while (suffix < previousText.length - prefix && suffix < value.length - prefix && previousText[previousText.length - 1 - suffix] === value[value.length - 1 - suffix]) suffix += 1;
+  const oldChangeEnd = previousText.length - suffix;
+  const newChangeEnd = value.length - suffix;
+  const sourceRuns = textBoxTextRuns(textBox);
+  const result = [];
+  for (const run of sourceRuns) {
+    if (run.start < prefix) {
+      const end = Math.min(run.end, prefix);
+      if (end > run.start) result.push({ ...run, end, text: value.slice(run.start, end) });
+    }
+    const start = Math.max(run.start, oldChangeEnd);
+    if (run.end > start) {
+      const delta = value.length - previousText.length;
+      result.push({ ...run, start: start + delta, end: run.end + delta, text: value.slice(start + delta, run.end + delta) });
+    }
+  }
+  if (newChangeEnd > prefix) {
+    const styleSource = sourceRuns.find((run) => run.start <= prefix && run.end > prefix) || sourceRuns.at(-1) || textBox;
+    result.push({ ...styleSource, start: prefix, end: newChangeEnd, text: value.slice(prefix, newChangeEnd) });
+  }
+  return compactTextBoxRuns(result);
+}
+
+function textSelectionOffsets(root) {
+  if (!root || typeof window === "undefined") return null;
+  const selection = window.getSelection?.();
+  if (!selection?.rangeCount || !selection.anchorNode || !selection.focusNode || !root.contains(selection.anchorNode) || !root.contains(selection.focusNode)) return null;
+  const range = selection.getRangeAt(0);
+  const beforeStart = document.createRange();
+  beforeStart.selectNodeContents(root);
+  beforeStart.setEnd(range.startContainer, range.startOffset);
+  const beforeEnd = document.createRange();
+  beforeEnd.selectNodeContents(root);
+  beforeEnd.setEnd(range.endContainer, range.endOffset);
+  const start = beforeStart.toString().length;
+  const end = beforeEnd.toString().length;
+  return { start: Math.min(start, end), end: Math.max(start, end) };
+}
+
+function restoreTextSelection(root, selection) {
+  if (!root || !selection || typeof document === "undefined") return;
+  const walker = document.createTreeWalker(root, document.defaultView?.NodeFilter?.SHOW_TEXT || 4);
+  const nodes = [];
+  let node;
+  while ((node = walker.nextNode())) nodes.push(node);
+  const locate = (offset) => {
+    let remaining = Math.max(0, offset);
+    for (const textNode of nodes) {
+      if (remaining <= textNode.nodeValue.length) return { node: textNode, offset: remaining };
+      remaining -= textNode.nodeValue.length;
+    }
+    return nodes.length ? { node: nodes.at(-1), offset: nodes.at(-1).nodeValue.length } : { node: root, offset: 0 };
+  };
+  const start = locate(selection.start);
+  const end = locate(selection.end);
+  const range = document.createRange();
+  range.setStart(start.node, start.offset);
+  range.setEnd(end.node, end.offset);
+  const current = window.getSelection?.();
+  current?.removeAllRanges();
+  current?.addRange(range);
 }
 
 function textBoxPreviewStyle(page, textBox, scale = 1) {
@@ -348,38 +473,68 @@ async function rasterizeBrowserPages(pages, sourceDocuments, preparedPages, onPr
   return rasterPages;
 }
 
-async function drawBrowserPdfTextBoxes(pdf, outputPage, operation) {
+let browserFontkitPromise;
+
+async function loadBrowserFontkit() {
+  if (!browserFontkitPromise) browserFontkitPromise = import("fontkit").then((module) => module.default || module);
+  return browserFontkitPromise;
+}
+
+async function embedBrowserTextBoxFont(pdf, textBox, fontCache) {
+  const definition = textBoxFontDefinition(textBox.fontFamily);
+  const fontName = textBoxFontName(textBox);
+  if (definition.kind === "standard") return pdf.embedFont(fontName);
+  let font = fontCache.get(fontName);
+  if (font) return font;
+  if (!fontCache.has("__fontkit__")) {
+    pdf.registerFontkit(await loadBrowserFontkit());
+    fontCache.set("__fontkit__", true);
+  }
+  let bytes = fontCache.get(`__bytes:${fontName}`);
+  if (!bytes) {
+    const response = await fetch(`/fonts/${fontName}`, { cache: "force-cache" });
+    if (!response.ok) throw new Error(`The bundled ${definition.family} font could not be loaded.`);
+    bytes = new Uint8Array(await response.arrayBuffer());
+    fontCache.set(`__bytes:${fontName}`, bytes);
+  }
+  font = await pdf.embedFont(bytes);
+  fontCache.set(fontName, font);
+  return font;
+}
+
+async function drawBrowserPdfTextBoxes(pdf, outputPage, operation, fontCache) {
   const textBoxes = Array.isArray(operation.textBoxes) ? operation.textBoxes : [];
   if (!textBoxes.length) return;
-  const fontCache = new Map();
   const pageHeight = Number(operation.height) || outputPage.getHeight();
   for (const [index, textBox] of textBoxes.entries()) {
     try {
-      const fontName = textBoxFontName(textBox);
-      let font = fontCache.get(fontName);
-      if (!font) {
-        font = await pdf.embedFont(fontName);
-        fontCache.set(fontName, font);
-      }
-      const size = Math.max(1, Number(textBox.fontSize) || 18);
       const placement = textBoxDrawPlacement(textBox, pageHeight);
       if (textBox.backgroundColor !== "transparent") {
         const background = textBoxColor(textBox.backgroundColor, "#ffffff");
         outputPage.drawRectangle({ x: placement.x, y: placement.y, width: placement.width, height: placement.height, color: pdf.rgb(background.r, background.g, background.b), borderWidth: 0 });
       }
       if (!String(textBox.text ?? "")) continue;
-      const lines = wrapPdfTextLines(textBox.text, font, size, Math.max(1, placement.width - 8));
-      const lineHeight = size * 1.2;
-      const textX = placement.x + 4;
-      const firstBaseline = placement.y + placement.height - size - 4;
-      const color = textBoxColor(textBox.color);
-      outputPage.drawText(lines.join("\n"), { x: textX, y: firstBaseline, size, font, lineHeight, color: pdf.rgb(color.r, color.g, color.b) });
-      if (textBox.underline) {
-        const thickness = Math.max(0.5, size * 0.06);
-        lines.forEach((line, lineIndex) => {
-          const baseline = firstBaseline - lineIndex * lineHeight;
-          outputPage.drawLine({ start: { x: textX, y: baseline - size * 0.08 }, end: { x: textX + font.widthOfTextAtSize(line, size), y: baseline - size * 0.08 }, thickness, color: pdf.rgb(color.r, color.g, color.b) });
-        });
+      const fontCacheForBox = new Map();
+      const fontForRun = (run) => fontCacheForBox.get(textBoxFontName(run));
+      for (const run of textBoxTextRuns(textBox)) {
+        const fontName = textBoxFontName(run);
+        if (!fontCacheForBox.has(fontName)) fontCacheForBox.set(fontName, await embedBrowserTextBoxFont(pdf, run, fontCache));
+      }
+      const lines = layoutPdfTextRuns(textBoxTextRuns(textBox), fontForRun, Math.max(1, placement.width - 8));
+      let baseline = placement.y + placement.height - (lines[0]?.height || 21.6) - 4;
+      for (const line of lines) {
+        let textX = placement.x + 4;
+        for (const run of line.items) {
+          const color = textBoxColor(run.color);
+          if (run.backgroundColor !== "transparent") {
+            const background = textBoxColor(run.backgroundColor, "#ffffff");
+            outputPage.drawRectangle({ x: textX, y: baseline - run.fontSize * 0.22, width: run.width, height: run.fontSize * 1.2, color: pdf.rgb(background.r, background.g, background.b), borderWidth: 0 });
+          }
+          outputPage.drawText(run.text, { x: textX, y: baseline, size: run.fontSize, font: run.font, color: pdf.rgb(color.r, color.g, color.b) });
+          if (run.underline) outputPage.drawLine({ start: { x: textX, y: baseline - run.fontSize * 0.08 }, end: { x: textX + run.width, y: baseline - run.fontSize * 0.08 }, thickness: Math.max(0.5, run.fontSize * 0.06), color: pdf.rgb(color.r, color.g, color.b) });
+          textX += run.width;
+        }
+        baseline -= line.height;
       }
     } catch (error) {
       throw new Error(`Text box ${index + 1} could not be exported with the selected font. Use a supported PDF font and text.`);
@@ -411,11 +566,11 @@ async function exportPdfInBrowser(pdfFiles, pages, sourceDocuments, pdfLibrary, 
   onProgress?.(16);
   const rasterPages = await rasterizeBrowserPages(pages, sourceDocuments, preparedPages, onProgress);
   onProgress?.(64);
-  const { PDFDocument, degrees, rgb } = await import("pdf-lib");
+  const { PDFDocument, degrees } = await import("pdf-lib");
   const output = await PDFDocument.create();
   // Keep the helper's output API small while allowing browser-mode exports to
   // use pdf-lib's colour factory without changing the worker implementation.
-  const browserPdf = { embedFont: (...args) => output.embedFont(...args), rgb };
+  const browserFontCache = new Map();
   for (const [index, page] of rasterPages.entries()) {
     const target = output.addPage([page.width, page.height]);
     if (page.rotation) target.setRotation(degrees(page.rotation));
@@ -436,7 +591,7 @@ async function exportPdfInBrowser(pdfFiles, pages, sourceDocuments, pdfLibrary, 
         rotate: degrees(placement.rotation),
       });
     }
-    await drawBrowserPdfTextBoxes(browserPdf, target, page);
+    await drawBrowserPdfTextBoxes(output, target, page, browserFontCache);
     onProgress?.(64 + Math.round(((index + 1) / Math.max(1, rasterPages.length)) * 8));
   }
   const bytes = new Uint8Array(await withTimeout(output.save(), 120000, "Browser PDF export took too long while saving the file. Try Local agent or Server for this file."));
@@ -1197,7 +1352,7 @@ export function PdfEditor() {
         }
         const textBoxes = getPageTextBoxes(page);
         if (textBoxes.length) {
-          operation.textBoxes = textBoxes.map((textBox) => ({ id: textBox.id, text: String(textBox.text ?? ""), x: Number(textBox.x), y: Number(textBox.y), width: Number(textBox.width), height: Number(textBox.height), fontSize: Number(textBox.fontSize), fontFamily: textBox.fontFamily, bold: Boolean(textBox.bold), italic: Boolean(textBox.italic), underline: Boolean(textBox.underline), color: textBox.color, backgroundColor: textBox.backgroundColor }));
+          operation.textBoxes = textBoxes.map((textBox) => ({ id: textBox.id, text: String(textBox.text ?? ""), x: Number(textBox.x), y: Number(textBox.y), width: Number(textBox.width), height: Number(textBox.height), fontSize: Number(textBox.fontSize), fontFamily: textBox.fontFamily, bold: Boolean(textBox.bold), italic: Boolean(textBox.italic), underline: Boolean(textBox.underline), color: textBox.color, backgroundColor: textBox.backgroundColor, runs: Array.isArray(textBox.runs) ? textBox.runs.map(textBoxRunPayload) : [] }));
         }
         return operation;
       }));
@@ -1415,7 +1570,7 @@ function ThumbnailImageOverlayLayer({ page }) {
 }
 
 function ThumbnailTextBoxOverlayLayer({ page }) {
-  return <div className="thumbnail-text-box-overlay-layer">{getPageTextBoxes(page).map((textBox, index) => { const placement = imageDisplayPlacement(page, textBox); return <div className="thumbnail-text-box-overlay" key={textBox.id || index} style={imageOverlayFrameStyle(placement)}><span style={{ fontFamily: textBoxCssFontFamily(textBox.fontFamily), fontSize: `${Math.max(3, Number(textBox.fontSize) || 18) * Math.min(0.25, 180 / Math.max(1, page.width))}px`, fontWeight: textBox.bold ? 700 : 400, fontStyle: textBox.italic ? "italic" : "normal", textDecoration: textBox.underline ? "underline" : "none", color: validHexColor(textBox.color) ? textBox.color : "#173b53", backgroundColor: textBox.backgroundColor === "transparent" ? "transparent" : validHexColor(textBox.backgroundColor) ? textBox.backgroundColor : "transparent" }}>{textBox.text}</span></div>; })}</div>;
+  return <div className="thumbnail-text-box-overlay-layer">{getPageTextBoxes(page).map((textBox, index) => { const placement = imageDisplayPlacement(page, textBox); const thumbnailScale = Math.min(0.25, 180 / Math.max(1, page.width)); return <div className="thumbnail-text-box-overlay" key={textBox.id || index} style={imageOverlayFrameStyle(placement)}>{textBoxTextRuns(textBox).map((run, runIndex) => <span key={`${textBox.id || index}-${runIndex}`} style={{ fontFamily: textBoxCssFontFamily(run.fontFamily), fontSize: `${Math.max(3, Number(run.fontSize) || 18) * thumbnailScale}px`, fontWeight: run.bold ? 700 : 400, fontStyle: run.italic ? "italic" : "normal", textDecoration: run.underline ? "underline" : "none", color: validHexColor(run.color) ? run.color : "#173b53", backgroundColor: run.backgroundColor === "transparent" ? "transparent" : validHexColor(run.backgroundColor) ? run.backgroundColor : "transparent", whiteSpace: "pre-wrap" }}>{run.text}</span>)}</div>; })}</div>;
 }
 
 function BlankPageMiniature({ page }) {
@@ -1575,6 +1730,9 @@ function ImageOverlayLayer({ page, onChange, onRemove }) {
 function TextBoxOverlayLayer({ page, onChange, onRemove }) {
   const layerRef = useRef(null);
   const interactionRef = useRef(null);
+  const editorRefs = useRef(new Map());
+  const selectionRef = useRef(null);
+  const restoreSelectionRef = useRef(false);
   const [scale, setScale] = useState(1);
   const textBoxes = getPageTextBoxes(page);
   useEffect(() => {
@@ -1587,7 +1745,67 @@ function TextBoxOverlayLayer({ page, onChange, onRemove }) {
     observer.observe(layer);
     return () => observer.disconnect();
   }, [page.width, page.height, page.rotation]);
+  useLayoutEffect(() => {
+    const selection = selectionRef.current;
+    if (!restoreSelectionRef.current || !selection || selection.end <= selection.start) return;
+    const editor = editorRefs.current.get(selection.textBoxId);
+    if (!editor) return;
+    restoreTextSelection(editor, selection);
+    restoreSelectionRef.current = false;
+  }, [page]);
   const updateTextBox = (textBoxId, changes) => onChange?.(textBoxes.map((textBox) => textBox.id === textBoxId ? { ...textBox, ...changes } : textBox));
+  const captureSelection = (textBoxId) => {
+    const editor = editorRefs.current.get(textBoxId);
+    const offsets = textSelectionOffsets(editor);
+    if (offsets) selectionRef.current = { textBoxId, ...offsets };
+    return offsets || (selectionRef.current?.textBoxId === textBoxId ? selectionRef.current : null);
+  };
+  const selectedRunsFor = (textBox) => {
+    const selection = selectionRef.current;
+    if (!selection || selection.textBoxId !== textBox.id || selection.end <= selection.start) return [];
+    return textBoxTextRuns(textBox).filter((run) => run.end > selection.start && run.start < selection.end);
+  };
+  const styleValueFor = (textBox, key) => {
+    const selectedRuns = selectedRunsFor(textBox);
+    if (selectedRuns.length && selectedRuns.every((run) => run[key] === selectedRuns[0][key])) return selectedRuns[0][key];
+    return textBox[key];
+  };
+  const stylePressedFor = (textBox, key) => {
+    const selectedRuns = selectedRunsFor(textBox);
+    return selectedRuns.length ? selectedRuns.every((run) => Boolean(run[key])) : Boolean(textBox[key]);
+  };
+  const applyTextBoxStyle = (textBoxId, key, value) => {
+    const textBox = textBoxes.find((item) => item.id === textBoxId);
+    if (!textBox) return;
+    const selection = selectionRef.current?.textBoxId === textBoxId ? selectionRef.current : null;
+    const next = selection && selection.end > selection.start
+      ? applyTextBoxRangeStyle(textBox, selection.start, selection.end, { [key]: value })
+      : applyTextBoxWholeStyle(textBox, { [key]: value });
+    restoreSelectionRef.current = Boolean(selection && selection.end > selection.start);
+    updateTextBox(textBoxId, { [key]: value, runs: next.runs });
+  };
+  const toggleTextBoxStyle = (textBox, key) => applyTextBoxStyle(textBox.id, key, !stylePressedFor(textBox, key));
+  const updateTextBoxText = (textBox, event) => {
+    const editor = event.currentTarget;
+    const nextText = String(editor.innerText || "").replace(/\r\n/g, "\n");
+    const offsets = textSelectionOffsets(editor);
+    const runs = rebaseTextBoxRuns(textBox, nextText);
+    if (offsets) {
+      selectionRef.current = { textBoxId: textBox.id, ...offsets };
+      restoreSelectionRef.current = true;
+    }
+    updateTextBox(textBox.id, { text: nextText, runs });
+  };
+  const handleTextBoxKeyDown = (textBox, event) => {
+    const command = event.metaKey || event.ctrlKey;
+    if (!command) return;
+    const key = event.key.toLowerCase();
+    const styleKey = key === "b" ? "bold" : key === "i" ? "italic" : key === "u" ? "underline" : "";
+    if (!styleKey) return;
+    event.preventDefault();
+    captureSelection(textBox.id);
+    toggleTextBoxStyle(textBox, styleKey);
+  };
   const onPointerDown = (event, mode, textBox) => {
     if (!textBox || !layerRef.current) return;
     const bounds = layerRef.current.getBoundingClientRect();
@@ -1617,7 +1835,30 @@ function TextBoxOverlayLayer({ page, onChange, onRemove }) {
     onChange?.(textBoxes.map((item) => item.id === interaction.textBoxId ? { ...item, width, height } : item));
   };
   const onPointerUp = () => { interactionRef.current = null; };
-  return <div ref={layerRef} className="pdf-text-box-overlay-layer" onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>{textBoxes.map((textBox, index) => { const placement = imageDisplayPlacement(page, textBox); const color = validHexColor(textBox.color) ? textBox.color : "#173b53"; const backgroundColor = textBox.backgroundColor === "transparent" || !validHexColor(textBox.backgroundColor) ? "transparent" : textBox.backgroundColor; return <div className="pdf-text-box-overlay" key={textBox.id || index} style={{ ...imageOverlayFrameStyle(placement), zIndex: index + 3 }} onPointerDown={(event) => onPointerDown(event, "move", textBox)}><div className="pdf-text-box-content" style={textBoxPreviewStyle(page, textBox, scale)}><textarea value={textBox.text} placeholder="Type text here" aria-label={`Text box ${index + 1} text`} onPointerDown={(event) => event.stopPropagation()} onChange={(event) => updateTextBox(textBox.id, { text: event.target.value })} style={{ color, backgroundColor }} /></div><div className="pdf-text-box-controls" onPointerDown={(event) => event.stopPropagation()}><select value={textBox.fontFamily} aria-label={`Font for text box ${index + 1}`} title="Font" onChange={(event) => updateTextBox(textBox.id, { fontFamily: event.target.value })}>{PDF_TEXT_BOX_FONTS.map((font) => <option key={font.value} value={font.value}>{font.label}</option>)}</select><input type="number" min="1" max="500" step="1" value={textBox.fontSize} aria-label={`Text size for text box ${index + 1}`} title="Text size" onChange={(event) => updateTextBox(textBox.id, { fontSize: Math.max(1, Math.min(500, Number(event.target.value) || 1)) })} /><button type="button" className="pdf-text-box-style-button" aria-label={`Bold text box ${index + 1}`} aria-pressed={Boolean(textBox.bold)} title="Bold" onClick={() => updateTextBox(textBox.id, { bold: !textBox.bold })}><Bold size={11} /></button><button type="button" className="pdf-text-box-style-button" aria-label={`Italic text box ${index + 1}`} aria-pressed={Boolean(textBox.italic)} title="Italic" onClick={() => updateTextBox(textBox.id, { italic: !textBox.italic })}><Italic size={11} /></button><button type="button" className="pdf-text-box-style-button" aria-label={`Underline text box ${index + 1}`} aria-pressed={Boolean(textBox.underline)} title="Underline" onClick={() => updateTextBox(textBox.id, { underline: !textBox.underline })}><Underline size={11} /></button><label className="pdf-text-box-color" title="Text color"><span className="sr-only">Text color</span><input type="color" value={color} aria-label={`Text color for text box ${index + 1}`} onChange={(event) => updateTextBox(textBox.id, { color: event.target.value })} /></label><label className="pdf-text-box-color" title="Background color"><span className="sr-only">Background color</span><input type="color" value={backgroundColor === "transparent" ? "#ffffff" : backgroundColor} aria-label={`Background color for text box ${index + 1}`} onChange={(event) => updateTextBox(textBox.id, { backgroundColor: event.target.value })} /></label><button type="button" className="pdf-text-box-clear-background" onClick={() => updateTextBox(textBox.id, { backgroundColor: "transparent" })}>Clear</button></div><button type="button" className="text-box-remove-handle" aria-label={`Remove text box ${index + 1}`} title="Remove text box" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove?.(textBox.id); }}><X size={11} /></button><button type="button" className="text-box-resize-handle" aria-label={`Resize text box ${index + 1}`} onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, "resize", textBox); }} /></div>; })}</div>;
+  return <div ref={layerRef} className="pdf-text-box-overlay-layer" onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>{textBoxes.map((textBox, index) => {
+    const placement = imageDisplayPlacement(page, textBox);
+    const selectedRuns = selectedRunsFor(textBox);
+    const color = String(styleValueFor(textBox, "color") || "#173b53");
+    const backgroundColor = String(styleValueFor(textBox, "backgroundColor") || "transparent");
+    const fontFamily = String(styleValueFor(textBox, "fontFamily") || "Helvetica");
+    const fontSize = Number(styleValueFor(textBox, "fontSize")) || 18;
+    const formatButton = (key, Icon, label) => <button type="button" className="pdf-text-box-style-button" aria-label={`${label} text ${selectedRuns.length ? "selection" : `box ${index + 1}`}`} aria-pressed={stylePressedFor(textBox, key)} title={label} onMouseDown={(event) => { event.preventDefault(); captureSelection(textBox.id); toggleTextBoxStyle(textBox, key); }}><Icon size={11} /></button>;
+    return <div className="pdf-text-box-overlay" key={textBox.id || index} style={{ ...imageOverlayFrameStyle(placement), zIndex: index + 3 }} onPointerDown={(event) => onPointerDown(event, "move", textBox)}>
+      <div className="pdf-text-box-content" style={textBoxPreviewStyle(page, textBox, scale)}>
+        <div ref={(element) => { if (element) editorRefs.current.set(textBox.id, element); else editorRefs.current.delete(textBox.id); }} className="pdf-text-box-editor" contentEditable suppressContentEditableWarning spellCheck="false" role="textbox" aria-label={`Text box ${index + 1} text`} data-placeholder="Type text here" onPointerDown={(event) => event.stopPropagation()} onMouseUp={() => captureSelection(textBox.id)} onKeyUp={() => captureSelection(textBox.id)} onKeyDown={(event) => handleTextBoxKeyDown(textBox, event)} onBlur={() => captureSelection(textBox.id)} onInput={(event) => updateTextBoxText(textBox, event)} dangerouslySetInnerHTML={{ __html: textBoxEditorHtml(textBox, scale) }} />
+      </div>
+      <div className="pdf-text-box-controls" onPointerDown={(event) => event.stopPropagation()}>
+        <select value={fontFamily} aria-label={`Font for text ${selectedRuns.length ? "selection" : `box ${index + 1}`}`} title="Font for text box or selection" onPointerDown={() => captureSelection(textBox.id)} onChange={(event) => applyTextBoxStyle(textBox.id, "fontFamily", event.target.value)}>{PDF_TEXT_BOX_FONTS.map((font) => <option key={font.value} value={font.value}>{font.label}</option>)}</select>
+        <input type="number" min="1" max="500" step="1" value={fontSize} aria-label={`Text size for text ${selectedRuns.length ? "selection" : `box ${index + 1}`}`} title="Text size for text box or selection" onPointerDown={() => captureSelection(textBox.id)} onChange={(event) => applyTextBoxStyle(textBox.id, "fontSize", Math.max(1, Math.min(500, Number(event.target.value) || 1)))} />
+        {formatButton("bold", Bold, "Bold")}{formatButton("italic", Italic, "Italic")}{formatButton("underline", Underline, "Underline")}
+        <label className="pdf-text-box-color" title="Text color for text box or selection"><span className="sr-only">Text color</span><input type="color" value={validHexColor(color) ? color : "#173b53"} aria-label={`Text color for text ${selectedRuns.length ? "selection" : `box ${index + 1}`}`} onPointerDown={() => captureSelection(textBox.id)} onChange={(event) => applyTextBoxStyle(textBox.id, "color", event.target.value)} /></label>
+        <label className="pdf-text-box-color" title="Background color for text box or selection"><span className="sr-only">Background color</span><input type="color" value={validHexColor(backgroundColor) ? backgroundColor : "#ffffff"} aria-label={`Background color for text ${selectedRuns.length ? "selection" : `box ${index + 1}`}`} onPointerDown={() => captureSelection(textBox.id)} onChange={(event) => applyTextBoxStyle(textBox.id, "backgroundColor", event.target.value)} /></label>
+        <button type="button" className="pdf-text-box-clear-background" onMouseDown={(event) => { event.preventDefault(); captureSelection(textBox.id); applyTextBoxStyle(textBox.id, "backgroundColor", "transparent"); }}>Clear</button>
+      </div>
+      <button type="button" className="text-box-remove-handle" aria-label={`Remove text box ${index + 1}`} title="Remove text box" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove?.(textBox.id); }}><X size={11} /></button>
+      <button type="button" className="text-box-resize-handle" aria-label={`Resize text box ${index + 1}`} onPointerDown={(event) => { event.stopPropagation(); onPointerDown(event, "resize", textBox); }} />
+    </div>;
+  })}</div>;
 }
 
 function pdfPreviewUrl(downloadUrl) {

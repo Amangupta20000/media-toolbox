@@ -1,0 +1,17 @@
+These bundled font files are redistributed from the Google Fonts project.
+
+Roboto and Open Sans are licensed under the Apache License, Version 2.0.
+Lato, Montserrat, Nunito, Merriweather, Fira Mono, Noto Sans Devanagari,
+and Noto Serif Devanagari are licensed under the SIL Open Font License,
+Version 1.1.
+
+Upstream sources:
+https://github.com/google/fonts/tree/main/apache/roboto
+https://github.com/google/fonts/tree/main/apache/opensans
+https://github.com/google/fonts/tree/main/ofl/lato
+https://github.com/google/fonts/tree/main/ofl/montserrat
+https://github.com/google/fonts/tree/main/ofl/nunito
+https://github.com/google/fonts/tree/main/ofl/merriweather
+https://github.com/google/fonts/tree/main/ofl/firamono
+https://github.com/google/fonts/tree/main/ofl/notosansdevanagari
+https://github.com/google/fonts/tree/main/ofl/notoserifdevanagari

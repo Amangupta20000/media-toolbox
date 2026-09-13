@@ -8,6 +8,7 @@ import { once } from "node:events";
 import { PassThrough } from "node:stream";
 import test, { after, before } from "node:test";
 import { PDFDocument, StandardFonts } from "pdf-lib";
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { commandExists, firstAvailable, runCommand } from "../lib/command.js";
 
 const projectDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
@@ -398,10 +399,36 @@ test("PDF editor exports styled text boxes on blank pages", async () => {
   const contents = output.context.lookup(output.context.lookup(output.getPage(0).node.Contents()).array[0]);
   const content = zlib.inflateSync(Buffer.from(contents.contents)).toString("latin1");
   assert.equal(completed.status, "completed");
-  assert.match(content, /<48656C6C6F20504446>/);
+  assert.match(content, /<48656C6C6F>/);
+  assert.match(content, /<20>/);
+  assert.match(content, /<504446>/);
   assert.match(content, /1 0 0 rg/);
   assert.match(content, /0 1 0 rg/);
   assert.match(content, /m\n/);
+});
+
+test("PDF editor embeds bundled text-box fonts as searchable PDF text", async () => {
+  const jobDir = path.join(testRoot, "pdf-bundled-font-job");
+  await fs.mkdir(jobDir, { recursive: true });
+  const intakeResult = await createJobFromMultipart({
+    id: crypto.randomUUID(),
+    jobDir,
+    fields: {
+      tool: "pdf-editor",
+      operations: JSON.stringify([{ kind: "blank", width: 420, height: 560, rotation: 0, images: [], textBoxes: [{ id: "title", text: "Roboto export", x: 40, y: 80, width: 220, height: 48, fontSize: 18, fontFamily: "Helvetica", bold: false, italic: false, underline: false, color: "#173b53", backgroundColor: "transparent", runs: [{ start: 0, end: 6, fontFamily: "Roboto", fontSize: 18, bold: true, italic: false, underline: false, color: "#173b53", backgroundColor: "transparent" }] }] }]),
+    },
+    files: [],
+  });
+  const job = db.getJob(intakeResult.ids[0]);
+  await worker.processJob(job);
+
+  const completed = db.getJob(job.id);
+  const result = JSON.parse(completed.result_json);
+  const document = await getDocument({ data: new Uint8Array(await fs.readFile(result.path)), disableWorker: true }).promise;
+  const content = await document.getPage(1).then((page) => page.getTextContent({ disableCombineTextItems: true }));
+  const extractedText = content.items.map((item) => item.str).join("");
+  assert.equal(completed.status, "completed");
+  assert.match(extractedText, /Roboto\s+export/);
 });
 
 test("PDF editor embeds multiple images on one blank page", async (t) => {
