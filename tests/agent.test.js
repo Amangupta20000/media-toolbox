@@ -906,6 +906,9 @@ test("Admin dashboard shows licensing-server status on non-owner installations w
   assert.match(source, /Not applicable/);
   assert.match(source, /!ownerMachine \|\| !mounted/);
   assert.match(source, /stopButton\.disabled = !managedByAgent && !starting/);
+  assert.match(source, /isClientLicensingReachable/);
+  assert.match(source, /clientInstallation \? isClientLicensingReachable\(value\) : value\.healthy === true/);
+  assert.doesNotMatch(source, /setLicenseServerNotice\(value\.healthy \?/);
 });
 
 test("website local-agent setup does not expose license-request controls", async () => {

@@ -168,6 +168,12 @@
     notice.className = `license-server-notice ${licenseServerNoticeKind} ${licenseServerNotice ? "" : "hidden"}`.trim();
   }
 
+  function isClientLicensingReachable(value = {}) {
+    if (value.ownerConfigured === true) return false;
+    const publicDatabase = value.publicDatabase || {};
+    return value.publicHealthy === true && publicDatabase.healthy !== false;
+  }
+
   function renderLicenseServer(value = {}, visible = false) {
     licenseServerState = value || {};
     const panel = el("license-server-panel");
@@ -184,7 +190,6 @@
     const stopButton = el("stop-license-server");
     const recoverButton = el("recover-license-database");
     if (!badge || !message || !startButton || !stopButton) return;
-    setLicenseServerNotice(licenseServerNotice, licenseServerNoticeKind);
     const healthy = Boolean(value.healthy);
     const publicConfigured = Boolean(value.publicUrl);
     const publicHealthy = value.publicHealthy === null || value.publicHealthy === undefined ? null : Boolean(value.publicHealthy);
@@ -195,8 +200,16 @@
     const localDatabaseBroken = ownerMachine && database.healthy === false;
     const publicDatabaseBroken = publicConfigured && publicDatabase.healthy === false;
     const fullyReachable = clientInstallation
-      ? publicHealthy === true && !publicDatabaseBroken
+      ? isClientLicensingReachable(value)
       : healthy && !localDatabaseBroken && (!publicConfigured || (publicHealthy !== false && !publicDatabaseBroken));
+    // A client has no local licensing server by design. Clear an old local
+    // error as soon as its public HTTPS/proxy health is confirmed instead of
+    // leaving the misleading "server is not running" notice visible.
+    if (clientInstallation && fullyReachable && licenseServerNoticeKind === "error") {
+      licenseServerNotice = "";
+      licenseServerNoticeKind = "";
+    }
+    setLicenseServerNotice(licenseServerNotice, licenseServerNoticeKind);
     const autoStartStatus = value.autoStartStatus || "";
     const waitingForSsd = ownerMachine && autoStartStatus === "waiting-for-ssd";
     const starting = ownerMachine && autoStartStatus === "starting";
@@ -615,7 +628,16 @@
     try {
       const value = await api.getLicenseServerState();
       renderLicenseServer(value, true);
-      setLicenseServerNotice(value.healthy ? "The licensing server is reachable." : (value.error || "The licensing server is not running."), value.healthy ? "success" : "error");
+      const clientInstallation = value.ownerConfigured !== true;
+      const reachable = clientInstallation ? isClientLicensingReachable(value) : value.healthy === true;
+      setLicenseServerNotice(
+        reachable
+          ? clientInstallation ? "The owner's licensing service is reachable." : "The licensing server is reachable."
+          : clientInstallation
+            ? value.publicDatabase?.error || value.publicProxyError || "The owner's licensing service could not be reached."
+            : value.error || "The licensing server is not running.",
+        reachable ? "success" : "error",
+      );
     } catch (error) {
       renderLicenseServer({ healthy: false, ssdMounted: false, error: error.message || "The licensing server status could not be checked." }, true);
       setLicenseServerNotice(error.message || "The licensing server status could not be checked.", "error");
