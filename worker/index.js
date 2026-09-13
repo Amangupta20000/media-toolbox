@@ -11,6 +11,7 @@ import { applyPdfTextEdits } from "../lib/pdf-text-editor.js";
 import { applyPdfOcrEdits } from "../lib/pdf-ocr.js";
 import { rotatedImageDrawPlacement } from "../lib/pdf-image-placement.js";
 import { layoutPdfTextRuns, textBoxColor, textBoxDrawPlacement, textBoxFontDefinition, textBoxFontName, textBoxTextRuns } from "../lib/pdf-text-box.js";
+import { safePdfOutputFilename } from "../lib/job-intake.js";
 
 let sharpPromise;
 const bundledFontBytes = new Map();
@@ -666,7 +667,7 @@ async function processPdfEditor(job) {
 
   update(job.id, 90, "Writing PDF", "Saving the new merged PDF.");
   const outputStem = manifest.pdfs.length === 1 ? stem(manifest.pdfs[0].name) : manifest.pdfs.length > 1 ? "merged" : "blank_pages";
-  const outputName = `${outputStem}_edited.pdf`;
+  const outputName = safePdfOutputFilename(manifest.outputFilename, `${outputStem}_edited.pdf`);
   const outputPath = path.join(path.dirname(job.source_path), outputName);
   await fsp.writeFile(outputPath, await outputDocument.save());
   try {

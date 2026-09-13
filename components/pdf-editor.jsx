@@ -642,6 +642,7 @@ export function PdfEditor() {
   const [processingMode, setProcessingMode] = useState("local");
   const [jobMode, setJobMode] = useState("local");
   const [keepResult, setKeepResult] = useState(false);
+  const [resultFilenameStem, setResultFilenameStem] = useState("");
   const [previewZoom, setPreviewZoom] = useState(1);
   const [activeView, setActiveView] = useState("tool");
   const [moreToolsOpen, setMoreToolsOpen] = useState(false);
@@ -665,6 +666,7 @@ export function PdfEditor() {
   const historyEditLoadedRef = useRef(false);
   const moreToolsRef = useRef(null);
   const keepResultTouchedRef = useRef(false);
+  const resultFilenameTouchedRef = useRef(false);
   const pagesRef = useRef([]);
   const pdfFilesRef = useRef([]);
   const historyRef = useRef({ past: [], future: [] });
@@ -693,6 +695,15 @@ export function PdfEditor() {
     if (!locations || keepResultTouchedRef.current) return;
     setKeepResult(Boolean(locations.local?.connected));
   }, [locations]);
+
+  const defaultResultFilename = useMemo(() => {
+    if (pdfFiles.length === 1) return `${filenameStem(pdfFiles[0]?.name)}_edited.pdf`;
+    return pdfFiles.length > 1 ? "merged_edited.pdf" : "blank_pages_edited.pdf";
+  }, [pdfFiles]);
+
+  useEffect(() => {
+    if (!resultFilenameTouchedRef.current) setResultFilenameStem(filenameStem(defaultResultFilename));
+  }, [defaultResultFilename]);
 
   useEffect(() => {
     if (!moreToolsOpen) return undefined;
@@ -1361,7 +1372,8 @@ export function PdfEditor() {
     clearDocumentHistory();
     pdfFilesRef.current = [];
     pagesRef.current = [];
-    setPdfFiles([]); setPages([]); setSelectedId(null); setJob(null); setContinuingFile(null); setError(""); setPreviewError(""); setUploadProgress(0);
+    resultFilenameTouchedRef.current = false;
+    setPdfFiles([]); setPages([]); setSelectedId(null); setJob(null); setContinuingFile(null); setError(""); setPreviewError(""); setUploadProgress(0); setResultFilenameStem("");
   };
 
   const continueEditing = async (result) => {
@@ -1378,6 +1390,8 @@ export function PdfEditor() {
       pdfFilesRef.current = [];
       pagesRef.current = [];
       setPdfFiles([]); setPages([]); setSelectedId(null); setJob(null); setError(""); setPreviewError(""); setUploadProgress(0);
+      resultFilenameTouchedRef.current = false;
+      setResultFilenameStem("");
       setContinuingFile(file);
     } catch (continueError) {
       setError(continueError instanceof Error ? continueError.message : "The generated PDF could not be reopened.");
@@ -1444,6 +1458,7 @@ export function PdfEditor() {
       return;
     }
     form.append("operations", JSON.stringify(operations));
+    form.append("filename", downloadFilename(resultFilenameStem || filenameStem(defaultResultFilename), defaultResultFilename));
     if (processingMode === "local") form.append("retention", keepResult ? "keep" : "delete");
     try {
       setUploadProgress(1);
@@ -1552,7 +1567,7 @@ export function PdfEditor() {
       </div>
       <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { addPdfFiles(event.target.files); event.target.value = ""; }} />
       <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/heic,image/heif,image/tiff,image/gif,image/bmp,.png,.jpg,.jpeg,.heic,.heif,.tif,.tiff,.gif,.bmp" multiple hidden onChange={(event) => { const targetPageId = imageTargetPageIdRef.current; imageTargetPageIdRef.current = null; addImages(event.target.files, targetPageId || undefined); event.target.value = ""; }} />
-      {processingMode === "local" && <label className="keep-result-check pdf-retention-check"><input type="checkbox" checked={keepResult} onChange={(event) => { keepResultTouchedRef.current = true; setKeepResult(event.target.checked); }} /><span>Keep final result on this device</span></label>}
+      {processingMode === "local" && <div className="pdf-retention-row"><label className="keep-result-check pdf-retention-check"><input type="checkbox" checked={keepResult} onChange={(event) => { keepResultTouchedRef.current = true; setKeepResult(event.target.checked); }} /><span>Keep final result on this device</span></label><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem || filenameStem(defaultResultFilename)} label="Saved PDF name" description="This name is used for the export and, when retained, for PDF editor History in the Results folder." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(filenameStem(value)); }} /></div>}
       {!pdfFiles.length && !pages.length ? <PdfEmptyState onBrowse={() => pdfInputRef.current?.click()} onBlank={addBlankPage} loading={loadingFiles} dragActive={pdfDragActive} /> : !pages.length ? <PdfNoPagesState onBrowse={() => pdfInputRef.current?.click()} onBlank={addBlankPage} /> : <div className="pdf-editor-layout">
         <aside className="pdf-page-rail"><div className="pdf-rail-heading"><span>Pages</span><small>Pages load as you scroll</small></div><div ref={pageListRef} className="pdf-page-list" onDragOver={handlePageListDragOver} onDrop={handlePageListDrop}>{renderPageList()}</div></aside>
         <section className="pdf-selected-panel"><div className="pdf-selected-heading"><div><span>Selected page {selectedPage ? pages.findIndex((page) => page.id === selectedPage.id) + 1 : "—"}</span><small>{selectedPage?.kind === "blank" ? "Blank page" : selectedPage?.sourceName || "Choose a page"}{selectedPage?.kind === "source" ? ` · Original page ${selectedPage.pageNumber}` : ""}</small></div></div><div ref={previewScrollRef} className="pdf-document-preview" onScroll={handlePreviewScroll}>{pages.map((page, index) => <Fragment key={page.id}><PdfPreviewPage page={page} index={index} selected={page.id === selectedPage?.id} previewZoom={previewZoom} pdfDocument={documentsRef.current[page.pdfIndex]} previewRootRef={previewScrollRef} elementRef={(element) => { if (element) previewElementRefs.current.set(page.id, element); else previewElementRefs.current.delete(page.id); }} onChange={(images, history) => updatePage(page.id, { images }, history)} onRemove={(imageId) => removeImage(page.id, imageId)} onChangeTextBoxes={(textBoxes, history) => updatePage(page.id, { textBoxes }, history)} onRemoveTextBox={(textBoxId) => removeTextBox(page.id, textBoxId)} onAddImages={() => openImagePickerForPage(page.id)} onError={setPreviewError} /><PdfInsertPageButton pageNumber={index + 1} onClick={() => addBlankPageAfter(page.id)} /></Fragment>)}</div>{previewError && <DismissibleMessage className="pdf-preview-error" resetKey={previewError}><AlertTriangle size={16} /><span>{previewError}</span></DismissibleMessage>}<p className="pdf-editor-tip"><GripVertical size={15} /> Scroll the preview to select a page. Click + Add page between previews to insert a blank page. Use Text box to add editable text to the selected page.</p></section>

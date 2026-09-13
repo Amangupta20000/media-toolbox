@@ -1261,6 +1261,48 @@ test("agent accepts an authenticated image job and returns a local result", asyn
   assert.equal(missing.status, 404);
 });
 
+test("agent saves a custom PDF-editor name in Results history", async () => {
+  const form = new FormData();
+  form.append("tool", "pdf-editor");
+  form.append("filename", "Client presentation.pdf");
+  form.append("retention", "keep");
+  form.append("operations", JSON.stringify([{ kind: "blank", width: 300, height: 400, rotation: 0, images: [] }]));
+  const response = await fetch(url("/v1/jobs"), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" },
+    body: form,
+  });
+  assert.equal(response.status, 202);
+  const createdJob = await response.json();
+  assert.ok(createdJob.jobId);
+
+  let completed;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const statusResponse = await fetch(url(`/v1/jobs/${createdJob.jobId}`), { headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" } });
+    completed = await statusResponse.json();
+    if (["completed", "failed"].includes(completed.status)) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.equal(completed.status, "completed", completed.error || completed.message);
+  assert.equal(completed.result.filename, "Client_presentation.pdf");
+
+  const resultsDirectory = path.join(process.env.DATA_DIR, "Results");
+  const resultFiles = await fs.readdir(resultsDirectory);
+  assert.ok(resultFiles.some((filename) => filename.endsWith("-Client_presentation.pdf")));
+
+  const historyResponse = await fetch(url("/v1/history?tool=pdf-editor"), { headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" } });
+  assert.equal(historyResponse.status, 200);
+  const history = await historyResponse.json();
+  const retained = history.items.find((item) => item.id === createdJob.jobId);
+  assert.ok(retained);
+  assert.equal(retained.result.filename, "Client_presentation.pdf");
+  assert.match(retained.location, /Results folder/);
+
+  const deleted = await fetch(url(`/v1/history/${createdJob.jobId}`), { method: "DELETE", headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" } });
+  assert.equal(deleted.status, 200);
+  assert.equal((await fs.readdir(resultsDirectory)).some((filename) => filename.endsWith("-Client_presentation.pdf")), false);
+});
+
 test("agent supports automatic browser sessions and ending one or all sessions", async () => {
   const automatic = await fetch(url("/v1/session"), {
     method: "POST",

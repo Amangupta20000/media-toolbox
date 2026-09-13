@@ -51,9 +51,15 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /images\.length \? <ImageOverlayLayer[\s\S]*?textBoxes\.length \? null : <button className="blank-page-message"/);
   assert.match(shell, /setKeepResult\(Boolean\(locations\.local\?\.connected\)\)/);
   assert.match(shell, /keepResultTouchedRef/);
+  assert.match(shell, /resultFilenameStem/);
+  assert.match(shell, /form\.append\("filename"/);
+  assert.match(shell, /Saved PDF name/);
+  assert.match(await read("lib/job-intake.js"), /safePdfOutputFilename/);
+  assert.match(await read("worker/index.js"), /manifest\.outputFilename/);
   const styles = await read("styles/globals.css");
   assert.match(styles, /\.pdf-editor-shell \{[^}]*overflow: hidden/);
   assert.match(styles, /\.pdf-retention-check \{[^}]*font-size: 13px/);
+  assert.match(styles, /\.pdf-retention-row \{/);
   assert.match(workerRoute, /path\.join\(process\.cwd\(\), "node_modules", "pdfjs-dist"/);
   assert.match(licenseClient, /LICENSE_PROXY_URL = "\/api\/license"/);
   assert.match(licenseClient, /direct Funnel URL/);

@@ -856,6 +856,9 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .keep-result-check input { accent-color: var(--teal); }
 .pdf-retention-check { box-sizing: border-box; min-height: 56px; margin: 0; padding: 15px 20px; gap: 10px; border-bottom: 1px solid var(--line); color: #5f7585; font-size: 13px; font-weight: 700; line-height: 1.4; }
 .pdf-retention-check input { width: 18px; height: 18px; margin: 0; flex: 0 0 auto; }
+.pdf-retention-row { display: flex; align-items: center; gap: 24px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+.pdf-retention-row .pdf-retention-check { flex: 0 0 auto; border-bottom: 0; padding-left: 0; padding-right: 0; }
+.pdf-retention-row .result-filename-field { flex: 1 1 320px; margin: 12px 0; }
 .agent-status-card, .agent-pair-card, .agent-capabilities-card, .agent-install-card, .agent-sessions-card { display: flex; gap: 18px; margin-bottom: 16px; padding: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 10px 24px rgba(26, 52, 77, .04); }
 .agent-status-card { align-items: center; }
 .agent-status-card.connected { border-color: #55bfc0; background: #f2fbfa; }
@@ -927,6 +930,9 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .agent-macos-note strong, [data-theme="dark"] .agent-macos-note code { color: #ffe7a6; }
 [data-theme="dark"] .agent-macos-note code { background: #55441f; }
 @media (max-width: 760px) {
+  .pdf-retention-row { align-items: stretch; flex-direction: column; gap: 0; padding: 0 20px 12px; }
+  .pdf-retention-row .pdf-retention-check { min-height: 48px; }
+  .pdf-retention-row .result-filename-field { margin: 0; }
   .processing-mode-options, .agent-download-grid { grid-template-columns: 1fr; }
   .history-panel-heading { flex-direction: column; }
   .history-heading-actions { width: 100%; justify-content: stretch; }

@@ -378,6 +378,31 @@ test("PDF editor exports a project made only from blank pages", async () => {
   assert.deepEqual(output.getPages().map((page) => [Math.round(page.getWidth()), Math.round(page.getHeight())]), [[300, 400], [400, 300]]);
 });
 
+test("PDF editor uses the requested PDF name for a retained result", async () => {
+  const jobDir = path.join(testRoot, "pdf-custom-name-job");
+  await fs.mkdir(jobDir, { recursive: true });
+  const intakeResult = await createJobFromMultipart({
+    id: crypto.randomUUID(),
+    jobDir,
+    fields: {
+      tool: "pdf-editor",
+      filename: "Quarterly design review.pdf",
+      retention: "keep",
+      operations: JSON.stringify([{ kind: "blank", width: 300, height: 400, rotation: 0, images: [] }]),
+    },
+    files: [],
+  });
+  const job = db.getJob(intakeResult.ids[0]);
+  await worker.processJob(job);
+
+  const completed = db.getJob(job.id);
+  const result = JSON.parse(completed.result_json);
+  assert.equal(completed.status, "completed");
+  assert.equal(result.filename, "Quarterly_design_review.pdf");
+  assert.equal(await fs.stat(result.path).then((stat) => stat.isFile()), true);
+  assert.equal(JSON.parse(completed.options_json).outputFilename, "Quarterly_design_review.pdf");
+});
+
 test("PDF editor exports styled text boxes on blank pages", async () => {
   const jobDir = path.join(testRoot, "pdf-text-box-job");
   await fs.mkdir(jobDir, { recursive: true });

@@ -30,14 +30,14 @@ export function downloadUrlWithFilename(url, filename) {
   return `${url}${url.includes("?") ? "&" : "?"}filename=${encodeURIComponent(filename)}`;
 }
 
-export function ResultFilenameField({ originalFilename, value, onChange }) {
+export function ResultFilenameField({ originalFilename, value, onChange, label = "Download file name", description = "Choose the name to use when downloading this result." }) {
   const extension = filenameExtension(originalFilename);
   return <label className="result-filename-field">
-    <span>Download file name</span>
+    <span>{label}</span>
     <div className="result-filename-input-wrap">
-      <input value={value} onChange={(event) => onChange(event.target.value)} aria-label="Download file name" />
+      <input value={value} onChange={(event) => onChange(event.target.value)} aria-label={label} />
       {extension && <strong>{extension}</strong>}
     </div>
-    <small>Choose the name to use when downloading this result.</small>
+    <small>{description}</small>
   </label>;
 }
