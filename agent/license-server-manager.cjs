@@ -261,16 +261,21 @@ function createLicenseServerManager({
 
   async function ensureTailscaleFunnel() {
     if (platform !== "darwin" || typeof tailscaleFunnelConfigure !== "function") return { configured: false, skipped: true };
-    try {
-      await tailscaleFunnelConfigure({ host, port });
-      return { configured: true, error: "", message: "Tailscale Funnel is configured for the local licensing server." };
-    } catch (error) {
-      return {
-        configured: false,
-        error: error instanceof Error ? error.message : String(error || "The Tailscale Funnel route could not be configured."),
-        message: "The licensing server is running locally, but Tailscale Funnel could not be configured.",
-      };
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await tailscaleFunnelConfigure({ host, port });
+        return { configured: true, error: "", message: "Tailscale Funnel is configured for the local licensing server." };
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) await wait(750);
+      }
     }
+    return {
+      configured: false,
+      error: lastError instanceof Error ? lastError.message : String(lastError || "The Tailscale Funnel route could not be configured."),
+      message: "The licensing server is running locally, but Tailscale Funnel could not be configured.",
+    };
   }
 
   async function getState() {

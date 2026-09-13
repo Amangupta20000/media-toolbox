@@ -469,6 +469,7 @@ test("owner startup reapplies the Tailscale Funnel route after the local service
       assert.equal(host, "127.0.0.1");
       assert.equal(port, 4900);
       configured += 1;
+      if (configured === 1) throw new Error("Tailscale is still reconnecting");
     },
     existsSync: (value) => value === mountPath || value === dataDirectory || value === "/Applications/Tailscale.app" || value.endsWith(path.join("license-server", "index.js")),
     healthCheck: async () => healthy,
@@ -478,7 +479,7 @@ test("owner startup reapplies the Tailscale Funnel route after the local service
   try {
     const started = await manager.start();
     assert.equal(started.started, true);
-    assert.equal(configured, 1);
+    assert.equal(configured, 2);
     assert.equal(started.tailscale.funnel.configured, true);
   } finally {
     await manager.stop();
