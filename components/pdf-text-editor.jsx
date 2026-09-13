@@ -339,7 +339,23 @@ function useEstimatedPreviewPageHeight(previewZoom = 1) {
   return height;
 }
 
-function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms, pdfLibrary, previewZoom, onSelectRun, onMoveRun, onMoveRunEnd, pageRef }) {
+function TextSelectionControls({ run, appearance, onChange, position }) {
+  const transform = textTransform(appearance);
+  const update = (patch) => onChange?.(run.runId, textTransform({ ...transform, ...patch }));
+  const stopPointer = (event) => event.stopPropagation();
+  return <div className="pdf-text-selection-controls" style={position} role="toolbar" aria-label={`Controls for selected text ${run.text}`} onPointerDown={stopPointer} onClick={stopPointer}>
+    <button type="button" className="pdf-text-selection-button" onClick={() => update({ scale: transform.scale - 0.1 })} aria-label="Decrease selected text size" title="Decrease size"><ZoomOut size={13} /></button>
+    <output aria-label="Selected text size">{Math.round(transform.scale * 100)}%</output>
+    <button type="button" className="pdf-text-selection-button" onClick={() => update({ scale: transform.scale + 0.1 })} aria-label="Increase selected text size" title="Increase size"><ZoomIn size={13} /></button>
+    <span className="pdf-text-selection-divider" aria-hidden="true" />
+    <button type="button" className="pdf-text-selection-button" onClick={() => update({ rotation: transform.rotation - 15 })} aria-label="Rotate selected text counterclockwise" title="Rotate left 15 degrees"><RotateCcw size={13} /></button>
+    <output aria-label="Selected text rotation">{Math.round(transform.rotation)}°</output>
+    <button type="button" className="pdf-text-selection-button" onClick={() => update({ rotation: transform.rotation + 15 })} aria-label="Rotate selected text clockwise" title="Rotate right 15 degrees"><RotateCw size={13} /></button>
+    <button type="button" className="pdf-text-selection-reset" onClick={() => update({ scale: 1, rotation: 0 })} aria-label="Reset selected text size and rotation" title="Reset size and rotation">Reset</button>
+  </div>;
+}
+
+function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms, pdfLibrary, previewZoom, onSelectRun, onMoveRun, onMoveRunEnd, onAppearanceChange, pageRef }) {
   const frameRef = useRef(null);
   const surfaceRef = useRef(null);
   const canvasRef = useRef(null);
@@ -392,10 +408,11 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
           const pageEdits = model.runs
             .filter((run) => edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]))
             .map((run) => {
+              const textChanged = edits[run.runId] !== undefined;
               const transform = textTransform(textTransforms[run.runId]);
               return {
                 originalText: run.originalText,
-                replacementText: edits[run.runId] !== undefined ? edits[run.runId] : run.text,
+                ...(textChanged ? { replacementText: edits[run.runId] } : { moveOnly: true }),
                 bbox: {
                   x0: run.bbox.x0 * canvas.width / Math.max(1, Number(model.imageWidth) || canvas.width),
                   y0: run.bbox.y0 * canvas.height / Math.max(1, Number(model.imageHeight) || canvas.height),
@@ -508,6 +525,7 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
         title={run.editable ? `Edit “${run.text}”` : run.reason}
         aria-label={run.editable ? `Edit text ${run.text}` : `Text not editable: ${run.reason}`}
       />
+      {selectedRunId === run.runId && run.editable && <TextSelectionControls run={run} appearance={textTransforms[run.runId]} onChange={onAppearanceChange} position={{ left: run.left + Math.max(4, run.width || 0) / 2, top: run.top >= 48 ? run.top - 42 : run.top + Math.max(12, run.height || 0) + 8, transform: "translateX(-50%)" }} />}
     </Fragment>
   );
   return <article ref={pageRef} className="pdf-text-page" aria-label={model.pageLabel}>
@@ -522,7 +540,7 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
   </article>;
 }
 
-const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview({ pages, selectedRunId, edits, textOffsets, textTransforms, pdfLibrary, previewZoom, previewRevision, onSelectRun, onMoveRun, onMoveRunEnd, onPinchZoom }, ref) {
+const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview({ pages, selectedRunId, edits, textOffsets, textTransforms, pdfLibrary, previewZoom, previewRevision, onSelectRun, onMoveRun, onMoveRunEnd, onAppearanceChange, onPinchZoom }, ref) {
   const scrollRef = useRef(null);
   const previewZoomRef = useRef(previewZoom);
   const pageHeight = useEstimatedPreviewPageHeight(previewZoom);
@@ -584,7 +602,7 @@ const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview(
       {pages.slice(windowed.start, windowed.end).map((model, offset) => {
         const index = windowed.start + offset;
         return <div key={`${model.pageIndex}-${previewRevision}`} className="pdf-text-virtual-item" style={{ top: `${index * stride}px`, left: 0, width: "100%", height: `${pageHeight}px` }}>
-          <PdfTextPage model={model} selectedRunId={selectedRunId} edits={edits} textOffsets={textOffsets} textTransforms={textTransforms} pdfLibrary={pdfLibrary} previewZoom={previewZoom} onSelectRun={onSelectRun} onMoveRun={onMoveRun} onMoveRunEnd={onMoveRunEnd} />
+          <PdfTextPage model={model} selectedRunId={selectedRunId} edits={edits} textOffsets={textOffsets} textTransforms={textTransforms} pdfLibrary={pdfLibrary} previewZoom={previewZoom} onSelectRun={onSelectRun} onMoveRun={onMoveRun} onMoveRunEnd={onMoveRunEnd} onAppearanceChange={onAppearanceChange} />
         </div>;
       })}
     </div>
@@ -615,18 +633,12 @@ function VirtualizedPdfTextRail({ pages, onSelect }) {
   </aside>;
 }
 
-function TextEditPopover({ run, value, onChange, onSave, onCancel, onRestore, appearance, onAppearanceChange }) {
+function TextEditPopover({ run, value, onChange, onSave, onCancel, onRestore }) {
   if (!run) return null;
   const overflow = graphemeCount(value) > graphemeCount(run.text);
-  const transform = textTransform(appearance);
-  const updateTransform = (patch) => onAppearanceChange?.(textTransform({ ...transform, ...patch }));
   return <div className="pdf-text-edit-popover" role="dialog" aria-label={`Edit ${run.text} on page ${run.pageIndex + 1}`}>
     <div className="pdf-text-edit-heading"><div><span>Selected text · Page {run.pageIndex + 1}</span><strong title={run.text}>{run.text}</strong></div><button className="icon-button" type="button" onClick={onCancel} aria-label="Close text editor" title="Close"><X size={17} /></button></div>
     <input autoFocus value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onSave(); if (event.key === "Escape") onCancel(); }} aria-label="Replacement text" />
-    <div className="pdf-text-appearance-controls" aria-label="Text appearance controls">
-      <div className="pdf-text-appearance-group"><span>Size</span><button className="secondary-button" type="button" onClick={() => updateTransform({ scale: transform.scale - 0.1 })} aria-label="Decrease selected text size" title="Decrease size"><ZoomOut size={15} /></button><strong>{Math.round(transform.scale * 100)}%</strong><button className="secondary-button" type="button" onClick={() => updateTransform({ scale: transform.scale + 0.1 })} aria-label="Increase selected text size" title="Increase size"><ZoomIn size={15} /></button></div>
-      <div className="pdf-text-appearance-group"><span>Rotate</span><button className="secondary-button" type="button" onClick={() => updateTransform({ rotation: transform.rotation - 15 })} aria-label="Rotate selected text counterclockwise" title="Rotate left 15 degrees"><RotateCcw size={15} /></button><strong>{Math.round(transform.rotation)}°</strong><button className="secondary-button" type="button" onClick={() => updateTransform({ rotation: transform.rotation + 15 })} aria-label="Rotate selected text clockwise" title="Rotate right 15 degrees"><RotateCw size={15} /></button><button className="secondary-button" type="button" onClick={() => updateTransform({ scale: 1, rotation: 0 })}>Reset</button></div>
-    </div>
     <div className="pdf-text-edit-actions"><button className="primary-button" type="button" onClick={onSave}><Save size={15} /> Save text</button><button className="secondary-button" type="button" onClick={onRestore}><RotateCcw size={15} /> Restore original</button><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button></div>{overflow && <DismissibleMessage className="pdf-text-overflow-warning" resetKey={run.runId}><AlertTriangle size={15} /><span>This replacement is longer. It will overflow if necessary; surrounding content will not reflow.</span></DismissibleMessage>}
   </div>;
 }
@@ -839,7 +851,9 @@ export function PdfTextEditor() {
     : `OCR on ${ocrPages.length} pages`;
   const changedEdits = pages.flatMap((page) => page.runs
     .filter((run) => run.editable && (edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId])))
-    .map((run) => ({ runId: run.runId, replacementText: edits[run.runId] !== undefined ? edits[run.runId] : run.text, moveOnly: (run.mode || "native") !== "ocr" && edits[run.runId] === undefined, ...textTransform(textTransforms[run.runId]) })));
+    .map((run) => edits[run.runId] !== undefined
+      ? ({ runId: run.runId, replacementText: edits[run.runId], moveOnly: false, ...textTransform(textTransforms[run.runId]) })
+      : ({ runId: run.runId, moveOnly: true, ...textTransform(textTransforms[run.runId]) })));
   const canSubmit = Boolean(source && sourceHash && changedEdits.length && !loading && !uploadProgress && isProcessingLocationReady(locations, processingMode));
 
   const chooseRun = (run) => {
@@ -865,11 +879,11 @@ export function PdfTextEditor() {
       .map((run) => {
         const offset = textOffset(nextOffsets[run.runId]);
         const textChanged = nextEdits[run.runId] !== undefined;
-        const nativeMoveOnly = (run.mode || "native") !== "ocr" && !textChanged;
+        const moveOnly = !textChanged;
         const transform = textTransform(nextTransforms[run.runId]);
         const model = pages.find((candidate) => candidate.pageIndex === run.pageIndex);
         const origin = textOrigin(model, run, pdfLibrary);
-        return { pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), originalText: run.text || run.originalText, ...(nativeMoveOnly ? { moveOnly: true } : { replacementText: textChanged ? nextEdits[run.runId] : run.text || run.originalText }), mode: run.mode || "native", offsetX: offset.x, offsetY: offset.y, scale: transform.scale, rotation: transform.rotation, ...(origin ? { originX: origin.x, originY: origin.y } : {}), ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) };
+        return { pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), originalText: run.text || run.originalText, ...(moveOnly ? { moveOnly: true } : { replacementText: nextEdits[run.runId] }), mode: run.mode || "native", offsetX: offset.x, offsetY: offset.y, scale: transform.scale, rotation: transform.rotation, ...(origin ? { originX: origin.x, originY: origin.y } : {}), ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) };
       }));
     setPreviewUpdating(true);
     try {
@@ -1023,7 +1037,7 @@ export function PdfTextEditor() {
                     {source && !loading && <TextEditPopover run={selectedRun} value={editorValue} onChange={setEditorValue} onSave={saveEdit} onCancel={() => setSelectedRun(null)} onRestore={restoreEdit} appearance={selectedRun ? textTransforms[selectedRun.runId] : undefined} onAppearanceChange={(value) => selectedRun && updateTextTransform(selectedRun.runId, value)} />}
                     {loading && <div className="pdf-text-loading"><LoaderCircle className="spin" size={23} /><strong>{loadingMessage}</strong>{ocrProgress > 0 && <span>OCR progress: {ocrProgress}%</span>}</div>}
                     {!loading && !pages.length && <div className="pdf-text-empty"><UploadCloud size={27} /><strong>Upload a PDF to start editing</strong><span>Click a detected text run in the page preview to replace it.</span></div>}
-                    {pages.length > 0 && <VirtualizedPdfTextPreview ref={previewVirtualizerRef} pages={pages} selectedRunId={selectedRun?.runId} edits={edits} textOffsets={textOffsets} textTransforms={textTransforms} pdfLibrary={pdfLibrary} previewZoom={previewZoom} previewRevision={previewRevision} onSelectRun={chooseRun} onMoveRun={moveRun} onMoveRunEnd={finishMovingRun} onPinchZoom={setPreviewZoom} />}
+                    {pages.length > 0 && <VirtualizedPdfTextPreview ref={previewVirtualizerRef} pages={pages} selectedRunId={selectedRun?.runId} edits={edits} textOffsets={textOffsets} textTransforms={textTransforms} pdfLibrary={pdfLibrary} previewZoom={previewZoom} previewRevision={previewRevision} onSelectRun={chooseRun} onMoveRun={moveRun} onMoveRunEnd={finishMovingRun} onAppearanceChange={updateTextTransform} onPinchZoom={setPreviewZoom} />}
                   </section>
                 </div>
               </div>

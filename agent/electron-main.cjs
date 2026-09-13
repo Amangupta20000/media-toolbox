@@ -220,6 +220,23 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   function registerDashboardIpc() {
+    async function ensureOwnerLicenseServer() {
+      if (!licenseServerManager?.getState || !licenseServerManager?.start) return;
+      try {
+        const state = await licenseServerManager.getState();
+        // Runtime updates restart the Electron process before the owner
+        // licensing child has necessarily finished auto-starting. Ensure the
+        // owner service is ready before any dashboard request uses its local
+        // or Funnel endpoint. Client installations have ownerConfigured=false
+        // and are left untouched.
+        if (state.ownerConfigured && !state.healthy) await licenseServerManager.start();
+      } catch (error) {
+        // The online request below still provides the useful endpoint error
+        // when the SSD is disconnected or the owner service cannot start.
+        console.warn("Owner licensing server is not ready:", error?.message || error);
+      }
+    }
+
     ipcMain.handle("agent:get-state", async () => {
       const state = await agent?.getManagementState?.() || {};
       // Local Admin authorization is persistent. Include the separately
@@ -258,6 +275,7 @@ if (!app.requestSingleInstanceLock()) {
       let licenseAdminError = "";
       if (agent.hasOnlineLicenseServerConfigured()) {
         try {
+          await ensureOwnerLicenseServer();
           licenseAdmin = await agent.loginLicenseAdmin(String(username || ""), String(password || ""));
           licenseRequests = (await agent.getLicenseAdminRequests()).items || [];
           const audit = await agent.getLicenseAdminAudit();
@@ -310,10 +328,10 @@ if (!app.requestSingleInstanceLock()) {
       const value = agent.revokeAllSessions();
       return agent.getManagementState().then((state) => ({ ...state, revokedCount: value }));
     });
-    ipcMain.handle("agent:get-license-requests", async () => agent.getLicenseAdminRequests());
-    ipcMain.handle("agent:get-license-audit", async () => agent.getLicenseAdminAudit());
-    ipcMain.handle("agent:approve-license-request", async (_event, requestId) => agent.approveLicenseRequest(String(requestId || "")));
-    ipcMain.handle("agent:decline-license-request", async (_event, requestId, reason) => agent.declineLicenseRequest(String(requestId || ""), String(reason || "Declined by owner")));
+    ipcMain.handle("agent:get-license-requests", async () => { await ensureOwnerLicenseServer(); return agent.getLicenseAdminRequests(); });
+    ipcMain.handle("agent:get-license-audit", async () => { await ensureOwnerLicenseServer(); return agent.getLicenseAdminAudit(); });
+    ipcMain.handle("agent:approve-license-request", async (_event, requestId) => { await ensureOwnerLicenseServer(); return agent.approveLicenseRequest(String(requestId || "")); });
+    ipcMain.handle("agent:decline-license-request", async (_event, requestId, reason) => { await ensureOwnerLicenseServer(); return agent.declineLicenseRequest(String(requestId || ""), String(reason || "Declined by owner")); });
   }
 
   function trustLocalCertificate(certPath) {

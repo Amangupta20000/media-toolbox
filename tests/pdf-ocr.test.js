@@ -179,6 +179,7 @@ test("OCR raster edits move the replacement while clearing the original region",
   applyRasterTextEdits(canvas, [{
     originalText: text,
     replacementText: text,
+    moveOnly: true,
     bbox: { x0: 30, y0: baseline - metrics.actualBoundingBoxAscent, x1: 30 + metrics.width, y1: baseline + metrics.actualBoundingBoxDescent },
     offsetX: 150,
     offsetY: 25,
@@ -210,6 +211,7 @@ test("OCR raster edits apply size and rotation around the moved text region", ()
   const warnings = applyRasterTextEdits(canvas, [{
     originalText: text,
     replacementText: text,
+    moveOnly: true,
     bbox: { x0: 90, y0: baseline - metrics.actualBoundingBoxAscent, x1: 90 + metrics.width, y1: baseline + metrics.actualBoundingBoxDescent },
     scale: 1.5,
     rotation: 90,
@@ -221,7 +223,42 @@ test("OCR raster edits apply size and rotation around the moved text region", ()
     if (pixels[offset] > 180 && pixels[offset + 1] > 180 && pixels[offset + 2] > 180) lightPixels += 1;
   }
   assert.ok(lightPixels > 100, "the transformed OCR replacement should remain visible");
-  assert.ok(warnings.some((warning) => /wider than the original/i.test(warning)), "scaled text should report its possible overflow");
+  assert.ok(!warnings.some((warning) => /wider than the original/i.test(warning)), "moving existing pixels should not report replacement-text overflow");
+});
+
+test("OCR move-only edits preserve the original glyph pixels without font matching", () => {
+  const canvas = createCanvas(520, 180);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#111111";
+  context.font = "700 52px Arial";
+  context.fillText("CASE", 30, 100);
+  // A high-contrast mark inside the OCR region stands in for a logo icon that
+  // OCR text reconstruction must not replace with a guessed character.
+  context.fillStyle = "#ef3f7a";
+  context.fillRect(155, 62, 18, 18);
+  let matched = false;
+  applyRasterTextEdits(canvas, [{
+    originalText: "CASE",
+    replacementText: "CASE",
+    moveOnly: true,
+    bbox: { x0: 30, y0: 52, x1: 190, y1: 108 },
+    offsetX: 220,
+    offsetY: 20,
+  }], { onFontMatch: () => { matched = true; } });
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  const pinkPixels = (x0, y0, x1, y1) => {
+    let count = 0;
+    for (let y = y0; y < y1; y += 1) for (let x = x0; x < x1; x += 1) {
+      const offset = (y * canvas.width + x) * 4;
+      if (pixels[offset] > 180 && pixels[offset + 2] > 80 && pixels[offset + 1] < 150) count += 1;
+    }
+    return count;
+  };
+  assert.equal(matched, false, "move-only OCR edits must not invoke font matching");
+  assert.ok(pinkPixels(245, 72, 430, 150) > 100, "the original logo pixels should move with the OCR region");
+  assert.ok(pinkPixels(15, 40, 215, 125) < 20, "the original logo pixels should be cleared from their old position");
 });
 
 test("OCR font matching chooses a close installed family for image-only text", () => {

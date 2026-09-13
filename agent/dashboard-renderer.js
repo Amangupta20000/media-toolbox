@@ -119,6 +119,9 @@
     if (showActivationTimer) el("original-countdown").textContent = `Original time remaining: ${formatRemaining(authorization.activationOriginalRemainingMs)}`;
     const badge = el("mode-badge"); badge.textContent = labels[mode] || "Locked"; badge.className = `badge ${mode}`;
     const legalAccepted = Boolean(authorization.legalAccepted);
+    // Admin sessions do not need the activation/request controls. Keep the
+    // panel in the DOM so it can return immediately when Admin logs out.
+    el("authorization-panel").classList.toggle("hidden", mode === "admin");
     el("legal-consent").classList.toggle("hidden", legalAccepted);
     if (legalAccepted) el("legal-consent-checkbox").checked = false;
     el("accept-legal-button").disabled = legalAccepted || !el("legal-consent-checkbox").checked;

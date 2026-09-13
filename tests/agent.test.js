@@ -185,12 +185,15 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardHtml, /id="license-server-tailscale-status"/);
   assert.match(dashboardHtml, /Copy this command only when using a source checkout/);
   assert.doesNotMatch(dashboardHtml, /bottom-left/);
+  assert.match(dashboardRenderer, /el\("authorization-panel"\)\.classList\.toggle\("hidden", mode === "admin"\)/);
   assert.match(dashboardCss, /\.dashboard-actions\{position:fixed;left:0;right:0;bottom:0/);
   assert.match(dashboardCss, /\.authorization-panel\{grid-column:1 \/ -1\}/);
   assert.match(dashboardCss, /\.admin-action\{background:#102c3d;border:1px solid/);
   assert.match(dashboardPreload, /agent:start-license-server/);
   assert.match(dashboardPreload, /agent:get-license-server-state/);
   assert.match(electronMain, /licenseServerManager\.watchForStorage/);
+  assert.match(electronMain, /ensureOwnerLicenseServer/);
+  assert.match(electronMain, /state\.ownerConfigured && !state\.healthy/);
   assert.match(electronMain, /licenseServerManager\?\.stopWatching/);
   assert.match(dashboardPreload, /agent:login-activation/);
   assert.match(dashboardPreload, /agent:logout-activation/);
