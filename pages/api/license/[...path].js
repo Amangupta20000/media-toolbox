@@ -1,5 +1,6 @@
 const MAX_BODY_BYTES = 1024 * 1024;
-const REQUEST_TIMEOUT_MS = 10_000;
+const REQUEST_TIMEOUT_MS = 4_500;
+const MAX_UPSTREAM_ATTEMPTS = 2;
 
 export const config = {
   api: {
@@ -63,17 +64,30 @@ export default async function handler(request, response) {
     if (value) headers[name] = Array.isArray(value) ? value.join(", ") : String(value);
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let body;
+  let upstream;
+  let lastError;
   try {
-    const body = ["GET", "HEAD"].includes(request.method) ? undefined : await readBody(request);
-    const upstream = await fetch(target, {
-      method: request.method,
-      headers,
-      body,
-      signal: controller.signal,
-      redirect: "error",
-    });
+    body = ["GET", "HEAD"].includes(request.method) ? undefined : await readBody(request);
+    for (let attempt = 0; attempt < MAX_UPSTREAM_ATTEMPTS; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        upstream = await fetch(target, {
+          method: request.method,
+          headers,
+          body,
+          signal: controller.signal,
+          redirect: "error",
+        });
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt === MAX_UPSTREAM_ATTEMPTS - 1) throw error;
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
     const payload = Buffer.from(await upstream.arrayBuffer());
     response.status(upstream.status);
     response.setHeader("Cache-Control", "no-store");
@@ -81,6 +95,7 @@ export default async function handler(request, response) {
     if (contentType) response.setHeader("Content-Type", contentType);
     return response.send(payload);
   } catch (error) {
+    error = lastError || error;
     if (error?.statusCode) return json(response, error.statusCode, { error: error.message });
     if (error?.name === "AbortError") return json(response, 504, { error: "The licensing server request timed out." });
     return json(response, 502, { error: `The licensing server could not be reached: ${error?.message || "request failed"}` });
