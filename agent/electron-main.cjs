@@ -1,7 +1,7 @@
 const path = require("node:path");
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
-const { execFileSync, spawnSync } = require("node:child_process");
+const { execFile, execFileSync, spawnSync } = require("node:child_process");
 const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, shell, Tray } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { createLicenseServerManager, findNode22Executable } = require("./license-server-manager.cjs");
@@ -366,6 +366,20 @@ if (!app.requestSingleInstanceLock()) {
     return checkPublicLicenseServer(url);
   }
 
+  function configureTailscaleFunnel({ host = "127.0.0.1", port = 4900 } = {}) {
+    if (process.platform !== "darwin") return Promise.resolve();
+    const executable = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
+    return new Promise((resolve, reject) => {
+      execFile(executable, ["funnel", "--bg", "--https=443", `http://${host}:${port}`], { timeout: 10_000 }, (error, _stdout, stderr) => {
+        if (error) {
+          reject(new Error(String(stderr || error.message || "Tailscale Funnel could not be configured.").trim()));
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+
   function showPairingCode() {
     const pairingState = agent?.getAgentState() || {};
     const initialPairingCode = pairingState.pairingCode;
@@ -425,6 +439,7 @@ if (!app.requestSingleInstanceLock()) {
       useElectronRuntime: !process.defaultApp,
       publicHealthCheck: checkPublicLicenseServer,
       publicProxyHealthCheck: checkPublicLicenseProxy,
+      tailscaleFunnelConfigure: configureTailscaleFunnel,
     });
     // Prefer loopback only when this is the owner Mac. A released client agent
     // must not spend its first licensing request trying to contact a server on

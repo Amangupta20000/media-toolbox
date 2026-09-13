@@ -113,6 +113,7 @@ function createLicenseServerManager({
   publicHealthCheck = (url) => probeEndpoint(url),
   publicProxyHealthCheck = null,
   publicProxyUrl = process.env.AGENT_LICENSE_SERVER_PROXY_URL || DEFAULT_LICENSE_PROXY_URL,
+  tailscaleFunnelConfigure = null,
   logger = console,
 } = {}) {
   let child = null;
@@ -121,6 +122,8 @@ function createLicenseServerManager({
   let autoStartRun = null;
   let startRun = null;
   let manuallyStopped = false;
+  let publicHealthyBeforeFailure = null;
+  let consecutivePublicFailures = 0;
   const checkTailscaleRunning = tailscaleRunningCheck || (async () => {
     const result = await runExecFile(execFileImpl, TAILSCALE_PGREP_PATH, ["-x", TAILSCALE_PROCESS_NAME]);
     return result.ok;
@@ -256,6 +259,20 @@ function createLicenseServerManager({
     }
   }
 
+  async function ensureTailscaleFunnel() {
+    if (platform !== "darwin" || typeof tailscaleFunnelConfigure !== "function") return { configured: false, skipped: true };
+    try {
+      await tailscaleFunnelConfigure({ host, port });
+      return { configured: true, error: "", message: "Tailscale Funnel is configured for the local licensing server." };
+    } catch (error) {
+      return {
+        configured: false,
+        error: error instanceof Error ? error.message : String(error || "The Tailscale Funnel route could not be configured."),
+        message: "The licensing server is running locally, but Tailscale Funnel could not be configured.",
+      };
+    }
+  }
+
   async function getState() {
     const publicEndpoint = publicUrl();
     const [healthy, directPublicHealthy, tailscale] = await Promise.all([
@@ -263,15 +280,32 @@ function createLicenseServerManager({
       publicEndpoint ? publicHealthCheck(`${publicEndpoint}/v1/health`) : Promise.resolve(null),
       getTailscaleState(),
     ]);
-    let publicHealthy = directPublicHealthy;
+    let observedPublicHealthy = directPublicHealthy;
     let publicHealthSource = directPublicHealthy === true ? "public" : "";
     if (publicEndpoint && directPublicHealthy === false && typeof publicProxyHealthCheck === "function") {
       const proxyHealthy = await publicProxyHealthCheck(`${String(publicProxyUrl).replace(/\/$/, "")}/v1/health`);
       if (proxyHealthy) {
-        publicHealthy = true;
+        observedPublicHealthy = true;
         publicHealthSource = "website-proxy";
       }
     }
+    if (publicEndpoint && observedPublicHealthy === true) {
+      publicHealthyBeforeFailure = true;
+      consecutivePublicFailures = 0;
+    } else if (publicEndpoint && observedPublicHealthy === false) {
+      consecutivePublicFailures += 1;
+      // A public probe can fail briefly while Funnel reconnects or the
+      // website proxy is redeployed. Keep an already healthy client state
+      // stable for one failed probe and only report a real outage after two
+      // consecutive failures.
+      if (publicHealthyBeforeFailure === true && consecutivePublicFailures < 2) {
+        observedPublicHealthy = true;
+        publicHealthSource = "previous-check";
+      } else {
+        publicHealthyBeforeFailure = false;
+      }
+    }
+    const publicHealthy = observedPublicHealthy;
     const storage = storageState();
     const autoStartStatus = manuallyStopped
       ? "stopped"
@@ -341,18 +375,34 @@ function createLicenseServerManager({
     const currentWithTailscale = tailscale.opened || tailscale.error
       ? { ...current, tailscale }
       : current;
+    // Do not reconfigure Funnel until the local service is ready. Starting
+    // with a stale route is safe; pointing it at a not-yet-listening service
+    // can make the public endpoint flap during owner startup.
+    const funnel = current.healthy || (child && isAlive(child))
+      ? (tailscale.error || tailscale.installed === false ? { configured: false, skipped: true } : await ensureTailscaleFunnel())
+      : { configured: false, skipped: true };
+    const tailscaleWithFunnel = funnel.skipped ? tailscale : { ...tailscale, funnel };
+    const currentWithTailscaleAndFunnel = funnel.skipped
+      ? currentWithTailscale
+      : { ...currentWithTailscale, tailscale: tailscaleWithFunnel };
     const startMessage = tailscale.opened
       ? "The licensing server is running. Tailscale was closed, so the Tailscale app was opened. Wait for it to connect before checking the public endpoint."
+      : funnel.error
+        ? `The licensing server is running locally, but ${funnel.error}`
       : tailscale.error
         ? `The licensing server is running locally, but ${tailscale.error}`
         : tailscale.installed === false
           ? "The licensing server is running locally, but Tailscale is not installed."
           : "The licensing server is running.";
-    if (current.healthy) return { ...currentWithTailscale, started: false, message: startMessage };
+    if (current.healthy) return { ...currentWithTailscaleAndFunnel, started: false, message: startMessage };
     if (child && isAlive(child)) {
       await waitForHealth(child);
+      const waitedFunnel = funnel.skipped && !funnel.configured && !funnel.error
+        ? await ensureTailscaleFunnel()
+        : funnel;
       const state = await getState();
-      return { ...state, ...(tailscale.opened || tailscale.error ? { tailscale } : {}), started: false, message: startMessage };
+      const waitedTailscale = waitedFunnel.skipped ? tailscale : { ...tailscale, funnel: waitedFunnel };
+      return { ...state, ...(waitedFunnel.skipped ? (tailscale.opened || tailscale.error ? { tailscale } : {}) : { tailscale: waitedTailscale }), started: false, message: waitedFunnel.error ? `The licensing server is running locally, but ${waitedFunnel.error}` : startMessage };
     }
 
     lastError = "";
@@ -405,9 +455,11 @@ function createLicenseServerManager({
 
     try {
       await waitForHealth(nextChild);
+      const startedFunnel = await ensureTailscaleFunnel();
+      const finalTailscale = startedFunnel.skipped ? tailscale : { ...tailscale, funnel: startedFunnel };
       rememberOwnerMachine();
       const state = await getState();
-      return { ...state, tailscale: tailscale.opened || tailscale.error ? tailscale : state.tailscale, started: true, message: startMessage };
+      return { ...state, tailscale: startedFunnel.skipped && !tailscale.opened && !tailscale.error ? state.tailscale : finalTailscale, started: true, message: startedFunnel.error ? `The licensing server is running locally, but ${startedFunnel.error}` : startMessage };
     } catch (error) {
       if (isAlive(nextChild)) nextChild.kill?.("SIGTERM");
       throw error;

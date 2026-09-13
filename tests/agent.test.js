@@ -447,6 +447,44 @@ test("dashboard licensing server manager opens Tailscale before starting when th
   await manager.stop();
 });
 
+test("owner startup reapplies the Tailscale Funnel route after the local service is ready", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const mountPath = path.join(testRoot, "license-server-funnel-repair");
+  const dataDirectory = path.join(mountPath, "MediaToolboxLicensing");
+  let healthy = false;
+  let configured = 0;
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.killed = false;
+  child.kill = () => { child.killed = true; child.exitCode = 0; healthy = false; child.emit("exit", 0, "SIGTERM"); };
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(root, "agent"),
+    dataDirectory,
+    mountPath,
+    nodeExecutable: "/node22/bin/node",
+    platform: "darwin",
+    tailscaleRunningCheck: async () => true,
+    tailscaleFunnelConfigure: async ({ host, port }) => {
+      assert.equal(host, "127.0.0.1");
+      assert.equal(port, 4900);
+      configured += 1;
+    },
+    existsSync: (value) => value === mountPath || value === dataDirectory || value === "/Applications/Tailscale.app" || value.endsWith(path.join("license-server", "index.js")),
+    healthCheck: async () => healthy,
+    spawnImpl: () => { healthy = true; return child; },
+    logger: { log() {}, warn() {} },
+  });
+  try {
+    const started = await manager.start();
+    assert.equal(started.started, true);
+    assert.equal(configured, 1);
+    assert.equal(started.tailscale.funnel.configured, true);
+  } finally {
+    await manager.stop();
+  }
+});
+
 test("packaged licensing server manager uses a real cwd and can restart after stopping", async () => {
   const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -671,6 +709,33 @@ test("client licensing status can use the website fallback when direct HTTPS is 
     assert.equal(state.ownerConfigured, false);
     assert.equal(state.publicHealthy, true);
     assert.equal(state.publicHealthSource, "website-proxy");
+  } finally {
+    if (previousPublicUrl === undefined) delete process.env.LICENSE_SERVER_PUBLIC_URL;
+    else process.env.LICENSE_SERVER_PUBLIC_URL = previousPublicUrl;
+  }
+});
+
+test("client licensing status does not flicker offline after one transient public probe failure", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const previousPublicUrl = process.env.LICENSE_SERVER_PUBLIC_URL;
+  process.env.LICENSE_SERVER_PUBLIC_URL = "https://license.example.test";
+  let publicProbe = 0;
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(root, "agent"),
+    dataDirectory: path.join(testRoot, "client-health-stability"),
+    mountPath: path.join(testRoot, "missing-client-health-ssd"),
+    existsSync: (value) => value.endsWith(path.join("license-server", "index.js")),
+    healthCheck: async () => false,
+    publicHealthCheck: async () => { publicProbe += 1; return publicProbe === 1; },
+  });
+  try {
+    assert.equal((await manager.getState()).publicHealthy, true);
+    const transient = await manager.getState();
+    assert.equal(transient.publicHealthy, true);
+    assert.equal(transient.publicHealthSource, "previous-check");
+    const recovered = await manager.getState();
+    assert.equal(recovered.publicHealthy, false);
   } finally {
     if (previousPublicUrl === undefined) delete process.env.LICENSE_SERVER_PUBLIC_URL;
     else process.env.LICENSE_SERVER_PUBLIC_URL = previousPublicUrl;
