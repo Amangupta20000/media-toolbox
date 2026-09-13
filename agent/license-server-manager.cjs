@@ -15,6 +15,7 @@ const DEFAULT_TAILSCALE_APP_PATH = "/Applications/Tailscale.app";
 const TAILSCALE_PROCESS_NAME = "Tailscale";
 const TAILSCALE_PGREP_PATH = "/usr/bin/pgrep";
 const TAILSCALE_OPEN_PATH = "/usr/bin/open";
+const DEFAULT_LICENSE_PROXY_URL = "https://media-toolbox-woad.vercel.app/api/license";
 
 function isAlive(child) {
   return Boolean(child && child.exitCode === null && !child.killed);
@@ -110,6 +111,8 @@ function createLicenseServerManager({
   tailscaleOpen = null,
   healthCheck = (url) => probeHealth(url),
   publicHealthCheck = (url) => probeEndpoint(url),
+  publicProxyHealthCheck = null,
+  publicProxyUrl = process.env.AGENT_LICENSE_SERVER_PROXY_URL || DEFAULT_LICENSE_PROXY_URL,
   logger = console,
 } = {}) {
   let child = null;
@@ -255,11 +258,20 @@ function createLicenseServerManager({
 
   async function getState() {
     const publicEndpoint = publicUrl();
-    const [healthy, publicHealthy, tailscale] = await Promise.all([
+    const [healthy, directPublicHealthy, tailscale] = await Promise.all([
       healthCheck(`${url}/v1/health`),
       publicEndpoint ? publicHealthCheck(`${publicEndpoint}/v1/health`) : Promise.resolve(null),
       getTailscaleState(),
     ]);
+    let publicHealthy = directPublicHealthy;
+    let publicHealthSource = directPublicHealthy === true ? "public" : "";
+    if (publicEndpoint && directPublicHealthy === false && typeof publicProxyHealthCheck === "function") {
+      const proxyHealthy = await publicProxyHealthCheck(`${String(publicProxyUrl).replace(/\/$/, "")}/v1/health`);
+      if (proxyHealthy) {
+        publicHealthy = true;
+        publicHealthSource = "website-proxy";
+      }
+    }
     const storage = storageState();
     const autoStartStatus = manuallyStopped
       ? "stopped"
@@ -278,6 +290,7 @@ function createLicenseServerManager({
       managed: isAlive(child),
       url,
       publicUrl: publicEndpoint,
+      publicHealthSource,
       autoStartEnabled: true,
       autoStartStatus,
       ...storage,

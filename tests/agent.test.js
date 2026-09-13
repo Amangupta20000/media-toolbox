@@ -648,6 +648,35 @@ test("dashboard licensing server manager reports local and public health separat
   }
 });
 
+test("client licensing status can use the website fallback when direct HTTPS is unavailable", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(root, "agent"),
+    dataDirectory: path.join(testRoot, "client-fallback-data"),
+    mountPath: path.join(testRoot, "missing-client-fallback-ssd"),
+    publicHealthCheck: async (value) => {
+      assert.equal(value, "https://license.example.test/v1/health");
+      return false;
+    },
+    publicProxyUrl: "https://media-toolbox-woad.vercel.app/api/license",
+    publicProxyHealthCheck: async (value) => value === "https://media-toolbox-woad.vercel.app/api/license/v1/health",
+    existsSync: (value) => value.endsWith(path.join("license-server", "index.js")),
+    healthCheck: async () => false,
+  });
+  const previousPublicUrl = process.env.LICENSE_SERVER_PUBLIC_URL;
+  process.env.LICENSE_SERVER_PUBLIC_URL = "https://license.example.test";
+  try {
+    const state = await manager.getState();
+    assert.equal(state.ownerConfigured, false);
+    assert.equal(state.publicHealthy, true);
+    assert.equal(state.publicHealthSource, "website-proxy");
+  } finally {
+    if (previousPublicUrl === undefined) delete process.env.LICENSE_SERVER_PUBLIC_URL;
+    else process.env.LICENSE_SERVER_PUBLIC_URL = previousPublicUrl;
+  }
+});
+
 test("packaged licensing-server manager reads the embedded public URL", async () => {
   const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
   const moduleDirectory = path.join(testRoot, "packaged-agent");
@@ -691,7 +720,9 @@ test("client installations do not advertise the owner-only SSD licensing server"
 test("Admin dashboard shows licensing-server status on non-owner installations without enabling SSD controls", async () => {
   const source = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard-renderer.js"), "utf8");
   assert.match(source, /panel\.classList\.toggle\("hidden", !visible\)/);
-  assert.match(source, /Owner machine not configured/);
+  assert.match(source, /Online licensing connected/);
+  assert.match(source, /website fallback/);
+  assert.match(source, /Not applicable/);
   assert.match(source, /!ownerMachine \|\| !mounted/);
 });
 
@@ -891,6 +922,34 @@ test("licensing requests can use Electron's browser-compatible network client", 
     else process.env.AGENT_LICENSE_SERVER_URL = previousServerUrl;
     if (previousLocalServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
     else process.env.AGENT_LICENSE_SERVER_LOCAL_URL = previousLocalServerUrl;
+  }
+});
+
+test("online licensing falls back to the website proxy on a client laptop", async () => {
+  const auth = await import("../agent/auth.js");
+  const previousServerUrl = process.env.AGENT_LICENSE_SERVER_URL;
+  const previousLocalServerUrl = process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
+  const previousProxyUrl = process.env.AGENT_LICENSE_SERVER_PROXY_URL;
+  const server = http.createServer((request, response) => {
+    assert.equal(request.url, "/v1/license-requests/fallback-request");
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ status: "pending" }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    process.env.AGENT_LICENSE_SERVER_URL = "https://license-unreachable.invalid";
+    delete process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
+    process.env.AGENT_LICENSE_SERVER_PROXY_URL = `http://127.0.0.1:${server.address().port}`;
+    const result = await auth.getActivationRequestStatus("fallback-request", "fallback-token");
+    assert.deepEqual(result, { status: "pending" });
+  } finally {
+    if (previousServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_URL;
+    else process.env.AGENT_LICENSE_SERVER_URL = previousServerUrl;
+    if (previousLocalServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
+    else process.env.AGENT_LICENSE_SERVER_LOCAL_URL = previousLocalServerUrl;
+    if (previousProxyUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_PROXY_URL;
+    else process.env.AGENT_LICENSE_SERVER_PROXY_URL = previousProxyUrl;
+    await new Promise((resolve) => server.close(resolve));
   }
 });
 

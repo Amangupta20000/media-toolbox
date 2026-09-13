@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { config, paths } from "../lib/config.js";
 import { createAgentAuth, getAgentAuth, hasUsedAgentLicense, recordUsedAgentLicense, updateAgentAuth } from "../lib/db.js";
 import { activationDurationOptions, isAllowedActivationDuration, verifyLicenseToken } from "./token.js";
+import { DEFAULT_LICENSE_PROXY_URL } from "./license-proxy.cjs";
 
 export const ADMIN_USERNAME = "Admin";
 export const ADMIN_PASSWORD = "Aman";
@@ -428,7 +429,17 @@ function localLicenseServerUrl() {
 }
 
 function onlineLicenseUrls(pathname) {
-  const configuredUrls = [localLicenseServerUrl(), onlineLicenseServerUrl()].filter(Boolean);
+  const publicUrl = onlineLicenseServerUrl();
+  const proxyUrl = publicUrl && !/^https?:\/\/127\.0\.0\.1(?::|\/)/i.test(publicUrl) && !/^https?:\/\/localhost(?::|\/)/i.test(publicUrl)
+    ? String(process.env.AGENT_LICENSE_SERVER_PROXY_URL || DEFAULT_LICENSE_PROXY_URL).trim().replace(/\/$/, "")
+    : "";
+  const localUrl = localLicenseServerUrl();
+  // Packaged client installations should not wait on an unreachable Tailscale
+  // Funnel before using the website's same-origin proxy. The owner Mac still
+  // uses its loopback service first, and every path retains the direct URL as
+  // a fallback if the website is unavailable.
+  const preferProxy = Boolean(process.resourcesPath && !localUrl);
+  const configuredUrls = [localUrl, ...(preferProxy ? [proxyUrl] : []), publicUrl, ...(preferProxy ? [] : [proxyUrl])].filter(Boolean);
   if (!configuredUrls.length) throw new Error("The online licensing server is not configured on this agent.");
   return [...new Set(configuredUrls)].map((serverUrl) => {
     let parsed;

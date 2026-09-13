@@ -13,6 +13,8 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   const shell = await read("components/pdf-editor.jsx");
   const previewRoute = await read("pages/api/pdf/preview.js");
   const workerRoute = await read("pages/api/pdf/worker.js");
+  const licenseClient = await read("components/license-client.js");
+  const licenseProxy = await read("pages/api/license/[...path].js");
   assert.match(shell, /const pixelRatio = Math\.min\(3, Math\.max\(2,/);
   assert.match(shell, /const renderViewport = pageInfo\.pdfPage\.getViewport\(\{ scale: scale \* pixelRatio, rotation \}\)/);
   assert.match(shell, /canvas\.style\.width = "100%"/);
@@ -46,6 +48,10 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(styles, /\.pdf-editor-shell \{[^}]*overflow: hidden/);
   assert.match(styles, /\.pdf-retention-check \{[^}]*font-size: 13px/);
   assert.match(workerRoute, /path\.join\(process\.cwd\(\), "node_modules", "pdfjs-dist"/);
+  assert.match(licenseClient, /LICENSE_PROXY_URL = "\/api\/license"/);
+  assert.match(licenseClient, /direct Funnel URL/);
+  assert.match(licenseProxy, /bodyParser: false/);
+  assert.match(licenseProxy, /The licensing server request timed out/);
 });
 
 test("PDF editor can export blank-page-only projects and lets users rename downloads", async () => {

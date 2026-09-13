@@ -172,9 +172,10 @@
     licenseServerState = value || {};
     const panel = el("license-server-panel");
     const ownerMachine = value.ownerConfigured === true;
-    // Admin should be able to inspect the licensing endpoint from any
-    // installation. Only the owner installation can start or stop the SSD
-    // server; the manager still enforces the SSD check in the main process.
+    const clientInstallation = !ownerMachine;
+    // Admin should be able to inspect the online licensing endpoint from any
+    // installation. SSD/Tailscale controls belong only to the owner Mac; a
+    // client laptop must not look broken merely because it has no SSD.
     if (panel) panel.classList.toggle("hidden", !visible);
     if (!visible) return;
     const badge = el("license-server-badge");
@@ -188,15 +189,25 @@
     const publicHealthy = value.publicHealthy === null || value.publicHealthy === undefined ? null : Boolean(value.publicHealthy);
     const mounted = Boolean(value.ssdMounted);
     const tailscale = value.tailscale || {};
-    const fullyReachable = healthy && (!publicConfigured || publicHealthy !== false);
+    const fullyReachable = clientInstallation
+      ? publicHealthy === true
+      : healthy && (!publicConfigured || publicHealthy !== false);
     const autoStartStatus = value.autoStartStatus || "";
     const waitingForSsd = ownerMachine && autoStartStatus === "waiting-for-ssd";
     const starting = ownerMachine && autoStartStatus === "starting";
-    badge.textContent = !ownerMachine ? "Owner machine not configured" : waitingForSsd ? "Waiting for licensing SSD" : starting ? "Starting" : !mounted ? "SSD not mounted" : !healthy ? "Stopped" : fullyReachable ? "Running" : "Public endpoint unavailable";
-    const statusIndicator = !ownerMachine || waitingForSsd || starting ? "status-warning" : !mounted || !healthy ? "status-stopped" : fullyReachable ? "status-running" : "status-warning";
-    badge.className = `badge ${!ownerMachine ? "warning" : waitingForSsd || starting ? "warning" : !mounted || !healthy ? "error" : fullyReachable ? "ready" : "warning"} ${statusIndicator}`;
-    message.textContent = !ownerMachine
-      ? "This Admin session can inspect the licensing endpoint, but this installation is not configured as the owner machine. Connect the licensing SSD on the owner computer to start the server."
+    badge.textContent = clientInstallation
+      ? !publicConfigured ? "Online licensing not configured" : fullyReachable ? "Online licensing connected" : publicHealthy === null ? "Checking online licensing" : "Online licensing unavailable"
+      : waitingForSsd ? "Waiting for licensing SSD" : starting ? "Starting" : !mounted ? "SSD not mounted" : !healthy ? "Stopped" : fullyReachable ? "Running" : "Public endpoint unavailable";
+    const statusIndicator = clientInstallation
+      ? fullyReachable ? "status-running" : "status-warning"
+      : waitingForSsd || starting ? "status-warning" : !mounted || !healthy ? "status-stopped" : fullyReachable ? "status-running" : "status-warning";
+    badge.className = `badge ${clientInstallation ? fullyReachable ? "ready" : "warning" : waitingForSsd || starting ? "warning" : !mounted || !healthy ? "error" : fullyReachable ? "ready" : "warning"} ${statusIndicator}`;
+    message.textContent = clientInstallation
+      ? fullyReachable
+        ? `This client installation is connected to the owner's licensing service${value.publicHealthSource === "website-proxy" ? " through the website fallback" : ""}. The SSD and Tailscale controls are available only on the owner's Mac.`
+        : !publicConfigured
+          ? "This client installation has no online licensing endpoint. Install the latest agent release or configure the owner's public HTTPS URL."
+          : "This client installation cannot reach the owner's licensing service right now. The agent will use the website fallback when direct Tailscale access is unavailable."
       : waitingForSsd
       ? "Waiting for the licensing SSD. The server will start automatically when the configured storage path becomes available."
       : starting
@@ -210,10 +221,10 @@
           ? `The licensing service is reachable at ${value.url || "http://127.0.0.1:4900"}, but Tailscale is not installed. Install Tailscale to make the public endpoint reachable.`
           : `The licensing service is reachable at ${value.url || "http://127.0.0.1:4900"}. Tailscale Funnel can forward to it using its saved configuration.`
       : value.error || (mounted ? "The licensing service is not running. Click Start licensing server after the SSD is mounted." : "Connect the Sandisk Exf licensing SSD, then click Start licensing server.");
-    el("license-server-url").textContent = value.url || "http://127.0.0.1:4900";
-    el("license-server-local-status").textContent = healthy ? "Connected" : "Unavailable";
-    el("license-server-storage").textContent = value.dataDir || "/Volumes/Sandisk Exf/MediaToolboxLicensing";
-    el("license-server-tailscale-status").textContent = tailscale.supported === false
+    el("license-server-url").textContent = clientInstallation ? "Owner machine only" : value.url || "http://127.0.0.1:4900";
+    el("license-server-local-status").textContent = clientInstallation ? "Not applicable" : healthy ? "Connected" : "Unavailable";
+    el("license-server-storage").textContent = clientInstallation ? "Owner machine only" : value.dataDir || "/Volumes/Sandisk Exf/MediaToolboxLicensing";
+    el("license-server-tailscale-status").textContent = clientInstallation ? "Not applicable" : tailscale.supported === false
       ? "Not applicable"
       : tailscale.installed === false
         ? "Not installed"
@@ -231,7 +242,7 @@
     const commandElement = el("license-server-command");
     if (commandElement) commandElement.textContent = command;
     startButton.disabled = healthy || starting || !ownerMachine || !mounted || value.available === false;
-    startButton.textContent = healthy ? "Licensing server running" : starting ? "Starting licensing server" : ownerMachine ? "Start licensing server" : "Available on owner machine";
+    startButton.textContent = healthy ? "Licensing server running" : starting ? "Starting licensing server" : ownerMachine ? "Start licensing server" : "Owner machine only";
     const serverRunning = healthy || Boolean(value.managed) || starting;
     const managedByAgent = Boolean(value.managed);
     // Keep the control visible while an owner server is running so the

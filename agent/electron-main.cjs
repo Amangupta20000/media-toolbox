@@ -349,13 +349,21 @@ if (!app.requestSingleInstanceLock()) {
 
   async function checkPublicLicenseServer(url) {
     if (typeof net?.fetch !== "function") return false;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
     try {
-      const response = await net.fetch(url, { cache: "no-store" });
+      const response = await net.fetch(url, { cache: "no-store", signal: controller.signal });
       await response.arrayBuffer?.();
       return response.status === 200;
     } catch {
       return false;
+    } finally {
+      clearTimeout(timeout);
     }
+  }
+
+  async function checkPublicLicenseProxy(url) {
+    return checkPublicLicenseServer(url);
   }
 
   function showPairingCode() {
@@ -416,6 +424,7 @@ if (!app.requestSingleInstanceLock()) {
       electronExecutable: process.execPath,
       useElectronRuntime: !process.defaultApp,
       publicHealthCheck: checkPublicLicenseServer,
+      publicProxyHealthCheck: checkPublicLicenseProxy,
     });
     // Prefer loopback only when this is the owner Mac. A released client agent
     // must not spend its first licensing request trying to contact a server on

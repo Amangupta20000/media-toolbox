@@ -1,5 +1,6 @@
 const LICENSE_SERVER_URL = String(process.env.NEXT_PUBLIC_LICENSE_SERVER_URL || "").replace(/\/$/, "");
 const LOCAL_LICENSE_SERVER_URL = "http://127.0.0.1:4900";
+const LICENSE_PROXY_URL = "/api/license";
 const ADMIN_TOKEN_KEY = "media-toolbox-license-admin-token";
 
 export function licenseServerUrl() {
@@ -8,7 +9,10 @@ export function licenseServerUrl() {
 
 async function licenseFetch(path, options = {}) {
   const localDevelopment = typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname);
-  const urls = [...new Set([...(localDevelopment ? [LOCAL_LICENSE_SERVER_URL] : []), LICENSE_SERVER_URL].filter(Boolean))];
+  // Keep local development fast, but use the same-origin proxy before the
+  // direct Funnel URL in deployed browsers. This avoids browser-specific
+  // Tailscale/DNS/CORS failures while keeping the direct URL as a fallback.
+  const urls = [...new Set([...(localDevelopment ? [LOCAL_LICENSE_SERVER_URL] : []), ...(LICENSE_SERVER_URL ? [LICENSE_PROXY_URL] : []), LICENSE_SERVER_URL].filter(Boolean))];
   if (!urls.length) throw new Error("The licensing server is not configured for this website.");
   let lastError;
   for (const baseUrl of urls) {
