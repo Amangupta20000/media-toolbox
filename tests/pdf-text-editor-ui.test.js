@@ -55,7 +55,13 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /applyRasterTextEdits/);
   assert.doesNotMatch(shell, /pdf-text-edit-preview/);
   assert.match(shell, /Continue editing/);
+  assert.match(shell, /PdfTextJobLog logs=\{job\.logs \|\| \[\]\}/);
+  assert.match(shell, /takeHistoryEdit\("pdf-text-editor"\)/);
+  assert.match(shell, /saved PDF could not be reopened/);
+  assert.match(shell, /graphemeCount\(value\) > graphemeCount\(run\.text\)/);
   assert.match(await read("lib/pdf-text-preview.js"), /document.context.flateStream/);
+  assert.match(await read("lib/pdf-text-preview.js"), /parseToUnicodeCMap/);
+  assert.match(await read("lib/pdf-text-preview.js"), /embedded font code sequence/);
   assert.match(await read("lib/pdf-ocr-raster.js"), /expandedBox/);
   assert.match(await read("lib/pdf-ocr.js"), /applyRasterTextEdits/);
   assert.match(shell, /devicePixelRatio/);

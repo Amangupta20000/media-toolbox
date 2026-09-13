@@ -51,7 +51,7 @@ function xObjectCount(page) {
   return xObjects ? [...xObjects.entries()].length : 0;
 }
 
-function type0Fixture(operator = "Tj", baseFont = "Helvetica") {
+function type0Fixture(operator = "Tj", baseFont = "Helvetica", cmapEntries = [["0001", "0041"], ["0002", "0042"]]) {
   return (async () => {
     const document = await PDFDocument.create();
     const page = document.addPage([400, 260]);
@@ -61,7 +61,7 @@ function type0Fixture(operator = "Tj", baseFont = "Helvetica") {
 /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
 /CMapName /Adobe-Identity-UCS def /CMapType 2 def
 1 begincodespacerange <0000> <FFFF> endcodespacerange
-2 beginbfchar <0001> <0041> <0002> <0042> endbfchar
+${cmapEntries.length} beginbfchar ${cmapEntries.map(([code, unicode]) => `<${code}> <${unicode}>`).join(" ")} endbfchar
 endcmap CMapName currentdict /CMap defineresource pop end end`;
     const cmapReference = context.register(context.flateStream(Buffer.from(cmap, "latin1")));
     const descendantReference = context.register(context.obj({
@@ -306,6 +306,19 @@ test("live PDF preview removes native text when the replacement is empty", async
   const after = await extractPdfTextRuns(preview);
   assert.equal(after.pages[0].runs.some((item) => item.text === "First occurrence"), false);
   assert.equal(after.pages[0].runs[0].text, "");
+});
+
+test("live PDF preview uses the embedded ToUnicode map for Hindi replacements", async () => {
+  const source = await type0Fixture("Tj", "Hindi", [["0001", "0915"], ["0002", "0916"]]);
+  const extracted = await extractPdfTextRuns(source);
+  assert.equal(extracted.pages[0].runs[0].text, "क");
+  const preview = await createPdfTextPreview(source, [{ pageIndex: 0, operatorOrdinal: 0, replacementText: "ख", mode: "native" }]);
+  const afterPreview = await searchableText(preview);
+  assert.match(afterPreview[0], /ख/);
+  assert.doesNotMatch(afterPreview[0], /क/);
+  const run = extracted.pages[0].runs[0];
+  const output = await applyPdfTextEdits(source, [{ pageIndex: 0, runId: run.runId, originalTextHash: run.originalTextHash, replacementText: "ख" }]);
+  assert.deepEqual(output.warnings, []);
 });
 
 test("native extraction supports ReportLab WinAnsi bullet text", async () => {

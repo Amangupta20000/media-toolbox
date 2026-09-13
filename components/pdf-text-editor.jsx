@@ -11,6 +11,8 @@ import { deleteProcessingJob, getProcessingJob, inspectPdfWithOcr, isProcessingL
 import { applyRasterTextEdits } from "../lib/pdf-ocr-raster.js";
 import { MAX_PDF_BYTES } from "../lib/pdf-limits.js";
 import { mergeAdjacentTextRuns } from "../lib/pdf-text-runs.js";
+import { graphemeCount } from "../lib/text-metrics.js";
+import { takeHistoryEdit } from "./history-edit.js";
 
 async function loadPdfLibrary() {
   const library = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -458,8 +460,17 @@ function VirtualizedPdfTextRail({ pages, onSelect }) {
 
 function TextEditPopover({ run, value, onChange, onSave, onCancel, onRestore }) {
   if (!run) return null;
-  const overflow = value.length > run.text.length;
+  const overflow = graphemeCount(value) > graphemeCount(run.text);
   return <div className="pdf-text-edit-popover" role="dialog" aria-label={`Edit ${run.text} on page ${run.pageIndex + 1}`}><div className="pdf-text-edit-heading"><div><span>Selected text · Page {run.pageIndex + 1}</span><strong title={run.text}>{run.text}</strong></div><button className="icon-button" type="button" onClick={onCancel} aria-label="Close text editor" title="Close"><X size={17} /></button></div><input autoFocus value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onSave(); if (event.key === "Escape") onCancel(); }} aria-label="Replacement text" /><div className="pdf-text-edit-actions"><button className="primary-button" type="button" onClick={onSave}><Save size={15} /> Save text</button><button className="secondary-button" type="button" onClick={onRestore}><RotateCcw size={15} /> Restore original</button><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button></div>{overflow && <div className="pdf-text-overflow-warning"><AlertTriangle size={15} /><span>This replacement is longer. It will overflow if necessary; surrounding content will not reflow.</span></div>}</div>;
+}
+
+function formatLogTime(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "--:--:--" : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function PdfTextJobLog({ logs }) {
+  return <div className="job-log-panel"><div className="job-log-heading"><span><span className="log-live-dot" /> Worker log</span><span>{logs.length} events</span></div><div className="job-log-list" aria-live="polite">{logs.length ? logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{formatLogTime(entry.time)}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for the worker to report progress…</div>}</div></div>;
 }
 
 function PdfTextJobCard({ initialJob, mode, onReset, onContinue, keepResult }) {
@@ -503,7 +514,7 @@ function PdfTextJobCard({ initialJob, mode, onReset, onContinue, keepResult }) {
       setPrintError(error instanceof Error ? error.message : "The PDF could not be opened for printing.");
     } finally { setPrinting(false); }
   };
-  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be edited" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}{job.warnings?.length > 0 && <div className="pdf-text-export-warnings"><AlertTriangle size={16} /><div>{job.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div></div>}{done && job.result && <><div className="pdf-text-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>{job.result.pageCount} pages</small></div><iframe src={`${job.result.downloadUrl}${job.result.downloadUrl.includes("?") ? "&" : "?"}preview=1`} title={`Preview of ${job.result.filename}`} /></div><div className="result-summary"><div><span>Output</span><strong title={job.result.filename}>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Edits</span><strong>{job.result.editCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div><ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} /></>}{printError && <div className="error-banner"><AlertTriangle size={17} /><span>{printError}</span></div>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={job.result.downloadUrl} download={job.result.filename}><Download size={17} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button></>}{(done || failed) && <button className="secondary-button" type="button" onClick={onContinue}><Pencil size={17} /> Continue editing</button>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
+  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be edited" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<PdfTextJobLog logs={job.logs || []} />{job.warnings?.length > 0 && <div className="pdf-text-export-warnings"><AlertTriangle size={16} /><div>{job.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div></div>}{done && job.result && <><div className="pdf-text-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>{job.result.pageCount} pages</small></div><iframe src={`${job.result.downloadUrl}${job.result.downloadUrl.includes("?") ? "&" : "?"}preview=1`} title={`Preview of ${job.result.filename}`} /></div><div className="result-summary"><div><span>Output</span><strong title={job.result.filename}>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Edits</span><strong>{job.result.editCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div><ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} /></>}{printError && <div className="error-banner"><AlertTriangle size={17} /><span>{printError}</span></div>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={job.result.downloadUrl} download={job.result.filename}><Download size={17} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button></>}{(done || failed) && <button className="secondary-button" type="button" onClick={onContinue}><Pencil size={17} /> Continue editing</button>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
 }
 
 export function PdfTextEditor() {
@@ -531,6 +542,7 @@ export function PdfTextEditor() {
   const [previewRevision, setPreviewRevision] = useState(0);
   const previewVirtualizerRef = useRef(null);
   const previewRequestRef = useRef(0);
+  const historyEditLoadedRef = useRef(false);
   const sourceBytesRef = useRef(null);
   const sourcePasswordRef = useRef("");
 
@@ -621,6 +633,22 @@ export function PdfTextEditor() {
       setError(loadError?.name === "PasswordException" ? "The PDF password was incorrect or the encrypted PDF cannot be edited safely." : loadError instanceof Error ? loadError.message : "The PDF could not be opened for text editing.");
     } finally { setLoading(false); setOcrProgress(0); }
   };
+
+  useEffect(() => {
+    if (!pdfLibrary || historyEditLoadedRef.current) return undefined;
+    historyEditLoadedRef.current = true;
+    const pending = takeHistoryEdit("pdf-text-editor");
+    if (!pending?.downloadUrl) return undefined;
+    let active = true;
+    fetch(pending.downloadUrl, { cache: "no-store" }).then(async (response) => {
+      if (!response.ok) throw new Error("The saved PDF could not be reopened.");
+      const blob = await response.blob();
+      if (active) await selectFile(new File([blob], pending.filename || "saved.pdf", { type: pending.mime || "application/pdf" }));
+    }).catch((loadError) => {
+      if (active) setError(loadError instanceof Error ? loadError.message : "The saved PDF could not be reopened.");
+    });
+    return () => { active = false; };
+  }, [pdfLibrary]);
 
   const editableCount = pages.reduce((total, page) => total + page.runs.filter((run) => run.editable).length, 0);
   const ocrPages = pages.filter((page) => page.ocr);
