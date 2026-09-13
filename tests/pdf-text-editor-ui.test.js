@@ -92,7 +92,6 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /onAppearanceChange/);
   assert.match(shell, /moveOnly/);
   assert.match(shell, /moveOnly: true/);
-  assert.match(shell, /pdf-text-selection-controls/);
   assert.match(shell, /pdf-text-selection-frame/);
   assert.match(shell, /pdf-text-rotation-handle/);
   assert.match(shell, /pdf-text-resize-handle/);
@@ -117,7 +116,10 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.doesNotMatch(shell, /Increase selected text size/);
   assert.doesNotMatch(shell, /Selected text size/);
   assert.doesNotMatch(shell, /pdf-text-appearance-controls/);
-  assert.match(await read("styles/globals.css"), /\.pdf-text-selection-controls \{[^}]*position: absolute/);
+  assert.doesNotMatch(shell, /TextSelectionControls/);
+  assert.doesNotMatch(shell, /pdf-text-selection-reset/);
+  assert.doesNotMatch(await read("styles/globals.css"), /\.pdf-text-selection-controls/);
+  assert.doesNotMatch(await read("styles/globals.css"), /\.pdf-text-selection-reset/);
   assert.match(await read("styles/globals.css"), /\.pdf-text-rotation-handle \{[^}]*touch-action: none/);
   assert.match(await read("styles/globals.css"), /\.pdf-text-resize-handle \{[^}]*touch-action: none/);
   assert.match(shell, /gesturechange/);

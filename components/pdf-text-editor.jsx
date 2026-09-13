@@ -343,15 +343,6 @@ function useEstimatedPreviewPageHeight(previewZoom = 1) {
   return height;
 }
 
-function TextSelectionControls({ run, appearance, onChange, position }) {
-  const transform = textTransform(appearance);
-  const update = (patch) => onChange?.(run.runId, textTransform({ ...transform, ...patch }));
-  const stopPointer = (event) => event.stopPropagation();
-  return <div className="pdf-text-selection-controls" style={position} role="toolbar" aria-label={`Controls for selected text ${run.text}`} onPointerDown={stopPointer} onClick={stopPointer}>
-    <button type="button" className="pdf-text-selection-reset" onClick={() => update({ scale: 1, scaleX: 1, scaleY: 1, rotation: 0 })} aria-label="Reset selected text size and rotation" title="Reset size and rotation">Reset</button>
-  </div>;
-}
-
 function pointerAngle(event, center) {
   return Math.atan2(event.clientY - center.y, event.clientX - center.x) * 180 / Math.PI;
 }
@@ -721,12 +712,7 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
       title={run.editable ? `Edit “${run.text}”` : run.reason}
       aria-label={run.editable ? `Edit text ${run.text}` : `Text not editable: ${run.reason}`}
     />;
-    return <Fragment key={run.runId}>
-      {selectionFrame}
-      {selectedRunId === run.runId && run.editable && <>
-        <TextSelectionControls run={run} appearance={textTransforms[run.runId]} onChange={onAppearanceChange} position={{ left: run.left + Math.max(4, run.width || 0) / 2, top: run.top >= 58 ? run.top - 48 : run.top + Math.max(12, run.height || 0) + 38, transform: "translateX(-50%)" }} />
-      </>}
-    </Fragment>;
+    return <Fragment key={run.runId}>{selectionFrame}</Fragment>;
   };
   return <article ref={pageRef} className="pdf-text-page" aria-label={model.pageLabel}>
     <div className="pdf-text-page-heading"><strong>{model.pageLabel}</strong><span>{model.runs.length ? `${model.runs.length} ${model.ocr ? "OCR text regions" : "detected text runs"}` : "No editable text detected"}</span></div>
