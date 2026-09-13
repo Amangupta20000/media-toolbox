@@ -28,6 +28,7 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /Background color for text box/);
   assert.match(shell, /onChangeTextBoxes/);
   assert.match(shell, /textBoxFontName/);
+  assert.match(shell, /images\.length \? <ImageOverlayLayer[\s\S]*?textBoxes\.length \? null : <button className="blank-page-message"/);
   assert.match(workerRoute, /path\.join\(process\.cwd\(\), "node_modules", "pdfjs-dist"/);
 });
 
