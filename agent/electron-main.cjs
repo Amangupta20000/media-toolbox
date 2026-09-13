@@ -172,7 +172,16 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   function registerDashboardIpc() {
-    ipcMain.handle("agent:get-state", () => agent?.getManagementState?.() || {});
+    ipcMain.handle("agent:get-state", async () => {
+      const state = await agent?.getManagementState?.() || {};
+      // Local Admin authorization is persistent. Include the separately
+      // persisted licensing-server session as well so a runtime update/restart
+      // can restore the owner dashboard without forcing a second login.
+      if (state.authorization?.mode === "admin" && agent?.hasOnlineLicenseServerConfigured?.()) {
+        state.licenseAdmin = agent.getLicenseAdminState?.() || { authenticated: false };
+      }
+      return state;
+    });
     ipcMain.handle("agent:get-update-state", () => ({ ...updateState }));
     ipcMain.handle("agent:check-for-updates", () => checkForUpdates());
     ipcMain.handle("agent:download-update", () => downloadUpdate());

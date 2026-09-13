@@ -908,6 +908,7 @@ export function getManagementState() {
     .then((capabilities) => ({
       ...getAgentState(),
       authorization,
+      licenseAdmin: hasOnlineLicenseServer() ? getLicenseAdminStateAgent() : { authenticated: false },
       capabilities: { ...capabilities, agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION },
       sessions,
     }));

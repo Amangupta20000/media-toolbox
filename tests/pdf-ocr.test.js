@@ -165,6 +165,37 @@ test("OCR raster edits keep neighbouring artwork out of the replacement backgrou
   assert.ok(whitePixels > 100, "the replacement should use the original white visual colour");
 });
 
+test("OCR raster edits move the replacement while clearing the original region", () => {
+  const canvas = createCanvas(500, 180);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#101820";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#ffffff";
+  context.font = "700 48px Arial";
+  const text = "Move";
+  const metrics = context.measureText(text);
+  const baseline = 90;
+  context.fillText(text, 30, baseline);
+  applyRasterTextEdits(canvas, [{
+    originalText: text,
+    replacementText: text,
+    bbox: { x0: 30, y0: baseline - metrics.actualBoundingBoxAscent, x1: 30 + metrics.width, y1: baseline + metrics.actualBoundingBoxDescent },
+    offsetX: 150,
+    offsetY: 25,
+  }]);
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  const lightPixels = (x0, y0, x1, y1) => {
+    let count = 0;
+    for (let y = y0; y < y1; y += 1) for (let x = x0; x < x1; x += 1) {
+      const offset = (y * canvas.width + x) * 4;
+      if (pixels[offset] > 180 && pixels[offset + 1] > 180 && pixels[offset + 2] > 180) count += 1;
+    }
+    return count;
+  };
+  assert.ok(lightPixels(170, 55, 300, 140) > 100, "the moved replacement should be painted at its new page position");
+  assert.ok(lightPixels(15, 15, 145, 105) < 100, "the original OCR text region should be cleared before painting the moved text");
+});
+
 test("OCR font matching chooses a close installed family for image-only text", () => {
   const canvas = createCanvas(1000, 240);
   const context = canvas.getContext("2d");
@@ -194,4 +225,33 @@ test("OCR font matching chooses a close installed family for image-only text", (
   assert.equal(matches.length, 1);
   assert.ok(["Comic Sans MS", "Chalkboard SE", "Chalkboard", "Bradley Hand", "Marker Felt", "Noteworthy"].includes(matches[0].fontFamily), `Expected a handwritten match, got ${matches[0].fontFamily}`);
   assert.ok(matches[0].scaleX > 0, "the matched font should retain the source text width");
+});
+
+test("OCR Latin matching ignores incompatible system and bitmap fonts", () => {
+  const canvas = createCanvas(1000, 240);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#9a6514";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#ffffff";
+  context.font = "700 52px Arial";
+  const text = "PREMIUM PERSONALISED";
+  const metrics = context.measureText(text);
+  context.fillText(text, 100, 130);
+  const matches = [];
+  applyRasterTextEdits(canvas, [{
+    originalText: text,
+    replacementText: "PREMIU PERSONALISED",
+    bbox: {
+      x0: 100,
+      y0: 130 - metrics.actualBoundingBoxAscent,
+      x1: 100 + metrics.width,
+      y1: 130 + metrics.actualBoundingBoxDescent,
+    },
+  }], {
+    availableFonts: ["Kannada MN", "Gurmukhi MT", "Mishafi Gold", "GB18030 Bitmap", "Zapfino", "Arial", "Times New Roman"],
+    onFontMatch: (match) => matches.push(match),
+  });
+  assert.equal(matches.length, 1);
+  assert.ok(!["Kannada MN", "Gurmukhi MT", "Mishafi Gold", "GB18030 Bitmap", "Zapfino"].includes(matches[0].fontFamily));
+  assert.ok(matches[0].fontSize < 200, "a Latin replacement must not use a pathological system-font metric");
 });

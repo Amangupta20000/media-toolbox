@@ -615,15 +615,22 @@ async function processPdfTextEditor(job) {
   const nativeEdits = (options.edits || []).filter((edit) => edit.mode !== "ocr");
   const isOcr = Boolean(options.ocr || ocrEdits.length);
   update(job.id, 8, isOcr ? "Reading OCR text" : "Reading PDF text", isOcr ? "Verifying the selected OCR regions against the original PDF." : "Verifying the selected text runs against the original PDF.");
+  let lastReadProgress = 8;
+  const reportReadProgress = (progress) => {
+    const nextProgress = Math.max(lastReadProgress, Math.min(75, Number(progress) || lastReadProgress));
+    if (nextProgress - lastReadProgress < 5 && nextProgress < 75) return;
+    lastReadProgress = nextProgress;
+    update(job.id, nextProgress, isOcr ? "Reading OCR text" : "Reading PDF text", isOcr ? "Verifying the selected OCR regions against the original PDF." : "Verifying the selected text runs against the original PDF.");
+  };
   let edited;
   if (ocrEdits.length && nativeEdits.length) {
-    const native = await applyPdfTextEdits(input, nativeEdits, { password: Boolean(options.passwordProvided) });
+    const native = await applyPdfTextEdits(input, nativeEdits, { password: Boolean(options.passwordProvided), onProgress: reportReadProgress });
     const ocr = await applyPdfOcrEdits(native.bytes, ocrEdits, { runSourceHash: options.sourceHash, password: Boolean(options.passwordProvided) });
     edited = { bytes: ocr.bytes, warnings: [...native.warnings, ...ocr.warnings] };
   } else if (ocrEdits.length || options.ocr) {
     edited = await applyPdfOcrEdits(input, ocrEdits.length ? ocrEdits : options.edits, { sourceHash: options.sourceHash, password: Boolean(options.passwordProvided) });
   } else {
-    edited = await applyPdfTextEdits(input, nativeEdits, { password: Boolean(options.passwordProvided) });
+    edited = await applyPdfTextEdits(input, nativeEdits, { password: Boolean(options.passwordProvided), onProgress: reportReadProgress });
   }
   update(job.id, 82, "Writing PDF", isOcr ? "Rebuilding only the edited OCR page regions." : "Replacing the selected text operators without rasterizing the document.", edited.warnings);
   const outputName = `${stem(job.source_name)}_${isOcr ? "ocr_text" : "text"}_edited.pdf`;

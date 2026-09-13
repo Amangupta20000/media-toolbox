@@ -11,6 +11,7 @@
   let licenseServerState = {};
   let licenseServerNotice = "";
   let licenseServerNoticeKind = "";
+  let updateDismissTimer = null;
 
   function showNotice(message) {
     const notice = el("notice");
@@ -27,6 +28,8 @@
     const progressBar = el("agent-update-progress-bar");
     if (!panel || !title || !message || !action || !progress || !progressBar) return;
     const status = value.status || "unavailable";
+    if (updateDismissTimer) window.clearTimeout(updateDismissTimer);
+    updateDismissTimer = null;
     const fullRequired = status === "full-required" || value.updateType === "full";
     const runtime = value.kind === "runtime" && !fullRequired;
     const visible = ["checking", "available", "up-to-date", "downloading", "downloaded", "error", "manual", "full-required"].includes(status);
@@ -66,6 +69,10 @@
       action.textContent = "Check again";
       action.dataset.action = "check";
       action.disabled = false;
+      updateDismissTimer = window.setTimeout(() => {
+        panel.classList.add("hidden");
+        updateDismissTimer = null;
+      }, 10000);
     } else if (status === "manual") {
       title.textContent = "Update manually from GitHub Releases";
       message.textContent = value.error || "Automatic macOS updates require an Apple Developer ID signed build.";
@@ -478,7 +485,18 @@
 
   function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]); }
 
-  async function refresh() { try { const state = await api.getState(); render(state); if (state.authorization?.mode === "admin") await refreshLicenseServer(); } catch (error) { showNotice(error.message || "The agent dashboard could not read its state."); } }
+  async function refresh() {
+    try {
+      const state = await api.getState();
+      render(state);
+      if (state.authorization?.mode === "admin") {
+        await refreshLicenseServer();
+        if (state.licenseAdmin?.authenticated) await refreshLicenseOwnerRequests();
+      }
+    } catch (error) {
+      showNotice(error.message || "The agent dashboard could not read its state.");
+    }
+  }
 
   async function refreshUpdateState() {
     if (!api.getUpdateState) return;

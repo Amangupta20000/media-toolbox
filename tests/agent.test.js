@@ -209,6 +209,8 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardRenderer, /Restart and install/);
   assert.match(dashboardRenderer, /status === "up-to-date"/);
   assert.match(dashboardRenderer, /Agent is up to date/);
+  assert.match(dashboardRenderer, /updateDismissTimer/);
+  assert.match(dashboardRenderer, /window\.setTimeout\(\(\) => \{[\s\S]*panel\.classList\.add\("hidden"\)[\s\S]*\}, 10000\)/);
   assert.match(dashboardRenderer, /full-required/);
   assert.match(dashboardRenderer, /Full agent update required/);
   assert.match(dashboardRenderer, /update-full-required/);
@@ -707,6 +709,63 @@ test("desktop dashboard can request and poll an online activation code", async (
     assert.equal(ownerRequests.items[0].durationMs, 86400000);
     await auth.logoutLicenseAdmin();
     assert.equal(requests.length, 5);
+  } finally {
+    if (previousServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_URL;
+    else process.env.AGENT_LICENSE_SERVER_URL = previousServerUrl;
+    if (previousLocalServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
+    else process.env.AGENT_LICENSE_SERVER_LOCAL_URL = previousLocalServerUrl;
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("desktop dashboard restores its licensing Admin session after a runtime restart", async () => {
+  const auth = await import("../agent/auth.js");
+  const restartedAuth = await import(`../agent/auth.js?restart=${randomUUID()}`);
+  const previousServerUrl = process.env.AGENT_LICENSE_SERVER_URL;
+  const previousLocalServerUrl = process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
+  const requests = [];
+  const server = http.createServer(async (request, response) => {
+    requests.push({ method: request.method, url: request.url, authorization: request.headers.authorization || "" });
+    response.setHeader("Content-Type", "application/json");
+    if (request.method === "POST" && request.url === "/v1/admin/login") {
+      response.writeHead(200);
+      response.end(JSON.stringify({ ok: true, token: "persisted-dashboard-admin-token", expiresAt: Date.now() + 60 * 60 * 1000 }));
+      return;
+    }
+    if (request.method === "GET" && request.url === "/v1/admin/license-requests") {
+      assert.equal(request.headers.authorization, "Bearer persisted-dashboard-admin-token");
+      response.writeHead(200);
+      response.end(JSON.stringify({ items: [{ id: "persisted-request", status: "pending" }] }));
+      return;
+    }
+    if (request.method === "POST" && request.url === "/v1/admin/logout") {
+      assert.equal(request.headers.authorization, "Bearer persisted-dashboard-admin-token");
+      response.writeHead(200);
+      response.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    response.writeHead(404);
+    response.end(JSON.stringify({ error: "Not found" }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    process.env.AGENT_LICENSE_SERVER_URL = `http://127.0.0.1:${server.address().port}`;
+    delete process.env.AGENT_LICENSE_SERVER_LOCAL_URL;
+    await auth.loginLicenseAdmin("Admin", "Aman");
+    assert.deepEqual(restartedAuth.getLicenseAdminState(), { authenticated: true });
+    const ownerRequests = await restartedAuth.getLicenseAdminRequests();
+    assert.equal(ownerRequests.items[0].id, "persisted-request");
+    await restartedAuth.logoutLicenseAdmin();
+    // The first module represents the pre-restart process. Clear its in-memory
+    // copy too so the shared test process cannot retain a stale bearer token.
+    await auth.logoutLicenseAdmin();
+    assert.deepEqual(restartedAuth.getLicenseAdminState(), { authenticated: false });
+    assert.deepEqual(requests.map(({ method, url }) => ({ method, url })), [
+      { method: "POST", url: "/v1/admin/login" },
+      { method: "GET", url: "/v1/admin/license-requests" },
+      { method: "POST", url: "/v1/admin/logout" },
+      { method: "POST", url: "/v1/admin/logout" },
+    ]);
   } finally {
     if (previousServerUrl === undefined) delete process.env.AGENT_LICENSE_SERVER_URL;
     else process.env.AGENT_LICENSE_SERVER_URL = previousServerUrl;

@@ -56,6 +56,7 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.doesNotMatch(shell, /pdf-text-edit-preview/);
   assert.match(shell, /Continue editing/);
   assert.match(shell, /PdfTextJobLog logs=\{job\.logs \|\| \[\]\}/);
+  assert.match(shell, /error\?\.code === "request_timeout"/);
   assert.match(shell, /takeHistoryEdit\("pdf-text-editor"\)/);
   assert.match(shell, /saved PDF could not be reopened/);
   assert.match(shell, /graphemeCount\(value\) > graphemeCount\(run\.text\)/);
@@ -76,11 +77,18 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /VirtualizedPdfTextPreview/);
   assert.match(shell, /VirtualizedPdfTextRail/);
   assert.match(shell, /scrollToIndex/);
+  assert.match(shell, /onPointerDown=\{\(event\) => startTextDrag/);
+  assert.match(shell, /onMoveRunEnd/);
+  assert.match(shell, /offsetX: offset\.x/);
+  assert.match(shell, /gesturechange/);
+  assert.match(shell, /event\.preventDefault\(\)/);
   assert.doesNotMatch(shell, /pages\.map\(\(model\) => <PdfTextPage/);
   assert.doesNotMatch(shell, /pages\.map\(\(model\) => <PdfTextThumbnail/);
   const styles = await read("styles/globals.css");
   assert.match(styles, /\.pdf-text-run\.selected \{[^}]*z-index: 20/);
   assert.match(styles, /\.pdf-text-preview-scroll \{[^}]*display: block/);
+  assert.match(styles, /\.pdf-text-preview-scroll \{[^}]*touch-action: pan-x pan-y/);
+  assert.match(styles, /\.pdf-text-run \{[^}]*cursor: grab/);
   assert.match(styles, /\.pdf-text-page-rail-scroll/);
   assert.match(styles, /\.pdf-text-virtual-item \{[^}]*justify-content: center/);
   assert.match(styles, /\.pdf-text-page-frame \{[^}]*justify-content: center/);
@@ -101,6 +109,7 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(await read("components/processing-client.js"), /pageIndexes/);
   assert.match(await read("components/processing-client.js"), /response\.body\.getReader\(\)/);
   assert.match(await read("components/processing-client.js"), /agent_update_required/);
+  assert.match(await read("components/processing-client.js"), /120 \* 1000/);
   assert.match(await read("components/processing-client.js"), /PDF OCR requires the latest Local Agent/);
   assert.match(shell, /capabilities\.pdf\?\.ocr !== true/);
   assert.match(await read("pages/api/pdf/ocr.js"), /type: "progress"/);
@@ -110,5 +119,7 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(await read("pages/api/pdf/ocr.js"), /pageIndexes/);
   assert.match(await read("agent/server.js"), /pageIndexes/);
   assert.match(worker, /without rasterizing/);
+  assert.match(worker, /onProgress: reportReadProgress/);
+  assert.match(await read("lib/pdf-text-editor.js"), /yieldToEventLoop/);
   assert.ok(shell.indexOf("Add one PDF") < shell.indexOf("pdf-text-editor-shell"), "the upload card should be above the preview shell");
 });

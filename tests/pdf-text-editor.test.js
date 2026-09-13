@@ -250,6 +250,10 @@ test("PDF text editor replaces grouped text operators without leaving the origin
   const first = extracted.pages[0].runs[0];
   const second = extracted.pages[0].runs[1];
   const output = await applyPdfTextEdits(source, [{ pageIndex: 0, runId: first.runId, originalTextHash: first.originalTextHash, originalText: "AB", operatorOrdinals: [first.ordinal, second.ordinal], replacementText: "CD" }]);
+  const outputDocument = await PDFDocument.load(output.bytes);
+  const outputContent = decodedPageContent(outputDocument, outputDocument.getPages()[0]);
+  assert.doesNotMatch(outputContent, /<>\s+Tj/);
+  assert.match(outputContent, /\(\)\s+Tj/);
   const text = (await searchableText(output.bytes))[0];
   assert.match(text, /CD/);
   assert.doesNotMatch(text, /AB/);
@@ -296,6 +300,22 @@ test("live PDF preview rewrites native text instead of drawing over the original
   const after = await extractPdfTextRuns(preview);
   assert.equal(after.pages[0].runs.some((item) => item.text === "Changed heading"), true);
   assert.equal(after.pages[0].runs.some((item) => item.text === "First occurrence"), false);
+});
+
+test("native text movement is applied to the selected operator in preview and export", async () => {
+  const source = await createFixture();
+  const extracted = await extractPdfTextRuns(source);
+  const run = extracted.pages[0].runs.find((item) => item.text === "First occurrence");
+  const edit = { pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, runId: run.runId, originalText: run.text, originalTextHash: run.originalTextHash, replacementText: run.text, offsetX: 12, offsetY: -8 };
+  const output = await applyPdfTextEdits(source, [edit]);
+  const outputDocument = await PDFDocument.load(output.bytes);
+  const outputContent = decodedPageContent(outputDocument, outputDocument.getPages()[0]);
+  assert.match(outputContent, /q 1 0 0 1 -8 12 cm/);
+  assert.match((await searchableText(output.bytes))[0], /First occurrence/);
+
+  const preview = await createPdfTextPreview(source, [{ ...edit, mode: "native" }]);
+  const previewDocument = await PDFDocument.load(preview);
+  assert.match(decodedPageContent(previewDocument, previewDocument.getPages()[0]), /q 1 0 0 1 -8 12 cm/);
 });
 
 test("live PDF preview removes native text when the replacement is empty", async () => {

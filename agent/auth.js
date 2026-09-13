@@ -29,6 +29,39 @@ const DEFAULT_ORIGINS = [
 
 let onlineLicenseAdminToken = "";
 let licenseServerFetch = typeof fetch === "function" ? fetch.bind(globalThis) : null;
+const LICENSE_ADMIN_SESSION_FILE = "license-admin-session.json";
+
+function licenseAdminSessionPath() {
+  return path.join(config.dataDir, LICENSE_ADMIN_SESSION_FILE);
+}
+
+function clearPersistedLicenseAdminSession() {
+  try { fs.rmSync(licenseAdminSessionPath(), { force: true }); } catch { /* a missing or locked session file is harmless */ }
+}
+
+function restorePersistedLicenseAdminSession() {
+  if (onlineLicenseAdminToken) return;
+  let session;
+  try {
+    session = JSON.parse(fs.readFileSync(licenseAdminSessionPath(), "utf8"));
+  } catch {
+    return;
+  }
+  const token = typeof session?.token === "string" ? session.token.trim() : "";
+  const expiresAt = Number(session?.expiresAt);
+  if (!token || token.length > 4096 || (Number.isFinite(expiresAt) && expiresAt <= Date.now())) {
+    clearPersistedLicenseAdminSession();
+    return;
+  }
+  onlineLicenseAdminToken = token;
+}
+
+function persistLicenseAdminSession(token, expiresAt) {
+  fs.mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
+  const filename = licenseAdminSessionPath();
+  fs.writeFileSync(filename, `${JSON.stringify({ token, expiresAt: Number.isFinite(Number(expiresAt)) ? Number(expiresAt) : null })}\n`, { mode: 0o600 });
+  fs.chmodSync(filename, 0o600);
+}
 
 // Packaged Electron uses Chromium's network stack for licensing requests so
 // certificate and proxy handling matches the browser. Source/CLI execution
@@ -502,6 +535,7 @@ export async function activateOnline(code, now = Date.now()) {
 }
 
 export function getLicenseAdminState() {
+  restorePersistedLicenseAdminSession();
   return { authenticated: Boolean(onlineLicenseAdminToken) };
 }
 
@@ -513,12 +547,15 @@ export async function loginLicenseAdmin(username, password) {
   });
   if (!body.token) throw new Error("The licensing server did not return an Admin session.");
   onlineLicenseAdminToken = body.token;
+  persistLicenseAdminSession(onlineLicenseAdminToken, body.expiresAt);
   return getLicenseAdminState();
 }
 
 export async function logoutLicenseAdmin() {
+  restorePersistedLicenseAdminSession();
   const token = onlineLicenseAdminToken;
   onlineLicenseAdminToken = "";
+  clearPersistedLicenseAdminSession();
   if (!token) return getLicenseAdminState();
   try {
     await onlineLicenseFetch("/v1/admin/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } });
@@ -527,25 +564,42 @@ export async function logoutLicenseAdmin() {
 }
 
 function onlineLicenseAdminOptions(options = {}) {
+  restorePersistedLicenseAdminSession();
   if (!onlineLicenseAdminToken) throw new Error("Log in as Admin in the local agent dashboard to view license requests.");
   return { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${onlineLicenseAdminToken}` } };
 }
 
+async function onlineLicenseAdminFetch(pathname, options = {}) {
+  try {
+    return await onlineLicenseFetch(pathname, onlineLicenseAdminOptions(options));
+  } catch (error) {
+    // A licensing server can expire or revoke a persisted session while the
+    // local Admin authorization remains valid. Forget the stale bearer token
+    // so the next dashboard action asks for a fresh licensing login instead
+    // of repeatedly sending a known-invalid session.
+    if (Number(error?.status) === 401) {
+      onlineLicenseAdminToken = "";
+      clearPersistedLicenseAdminSession();
+    }
+    throw error;
+  }
+}
+
 export async function getLicenseAdminRequests() {
-  return onlineLicenseFetch("/v1/admin/license-requests", onlineLicenseAdminOptions());
+  return onlineLicenseAdminFetch("/v1/admin/license-requests");
 }
 
 export async function getLicenseAdminAudit(limit = 200) {
   const safeLimit = Math.max(1, Math.min(500, Number.parseInt(limit, 10) || 200));
-  return onlineLicenseFetch(`/v1/admin/audit-log?limit=${safeLimit}`, onlineLicenseAdminOptions());
+  return onlineLicenseAdminFetch(`/v1/admin/audit-log?limit=${safeLimit}`);
 }
 
 export async function approveLicenseRequest(requestId) {
-  return onlineLicenseFetch(`/v1/admin/license-requests/${encodeURIComponent(String(requestId || ""))}/approve`, onlineLicenseAdminOptions({ method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }));
+  return onlineLicenseAdminFetch(`/v1/admin/license-requests/${encodeURIComponent(String(requestId || ""))}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
 }
 
 export async function declineLicenseRequest(requestId, reason = "Declined by owner") {
-  return onlineLicenseFetch(`/v1/admin/license-requests/${encodeURIComponent(String(requestId || ""))}/decline`, onlineLicenseAdminOptions({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason }) }));
+  return onlineLicenseAdminFetch(`/v1/admin/license-requests/${encodeURIComponent(String(requestId || ""))}/decline`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason }) });
 }
 
 export function getDeviceId() {

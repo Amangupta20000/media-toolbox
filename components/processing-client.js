@@ -114,7 +114,7 @@ export function localAgentToken() {
   return storedAgentToken();
 }
 
-async function fetchJson(url, options = {}, timeoutMs = 8000) {
+async function fetchJson(url, options = {}, timeoutMs = 8000, timeoutMessage = "The request timed out. Check that the local agent is running.") {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -130,7 +130,11 @@ async function fetchJson(url, options = {}, timeoutMs = 8000) {
     }
     return payload;
   } catch (error) {
-    if (error?.name === "AbortError") throw new Error("The request timed out. Check that the local agent is running.");
+    if (error?.name === "AbortError") {
+      const timeoutError = new Error(timeoutMessage);
+      timeoutError.code = "request_timeout";
+      throw timeoutError;
+    }
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -381,7 +385,14 @@ export async function inspectPdfWithOcr(file, mode, onProgress, password = "", p
 }
 
 export async function getProcessingJob(mode, id) {
-  return fetchJson(endpoint(mode, `/jobs/${encodeURIComponent(id)}`), requestOptions(mode));
+  // PDF edits can legitimately take longer than the short control-plane
+  // timeout used for capabilities and pairing, especially for large PDFs.
+  return fetchJson(
+    endpoint(mode, `/jobs/${encodeURIComponent(id)}`),
+    requestOptions(mode),
+    120 * 1000,
+    "The request timed out while the worker is busy. It will keep processing."
+  );
 }
 
 export async function deleteProcessingJob(mode, id) {
