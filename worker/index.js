@@ -850,11 +850,14 @@ async function processPdfCompressor(job) {
 
   // PDFs made from scans are often image-only or image-heavy but use a codec
   // (JPX, CCITT, JBIG2, or inline image data) that pdf-lib cannot safely
-  // decode. When the lossless/resource passes barely help, use a visual
-  // fallback for image-heavy pages. Text/vector-only pages remain untouched;
-  // rasterized searchable pages receive an invisible text overlay.
-  if (bestBytes && bestBytes.length > input.length * 0.88) {
-    update(job.id, 80, "Applying visual compression", "The PDF has not reduced enough; checking for image-heavy pages.");
+  // decode. Always evaluate the visual pass so the page-aware browser
+  // estimate and the submitted result use the same candidate path. The
+  // rasterizer returns unchanged for text/vector-only documents, and the
+  // candidate selector keeps the smaller validated result when direct image
+  // compression is already better. Rasterized searchable pages receive an
+  // invisible text overlay.
+  if (bestBytes) {
+    update(job.id, 80, "Applying visual compression", "Checking image-heavy pages for a page-aware compression pass.");
     try {
       const rasterResult = await rasterizeImageHeavyPdf(input, profile, {
         compressionOptions,

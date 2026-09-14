@@ -470,9 +470,42 @@ test("PDF compressor re-encodes embedded page images when structural compression
   assert.equal(output.getPageCount(), 3);
   assert.match(outputText, /Searchable PDF page 1/);
   assert.ok(result.bytes < inputBytes * 0.9, `expected meaningful image compression, got ${result.reductionPercent}%`);
-  assert.match(result.method, /image|Ghostscript/i);
+  assert.match(result.method, /image|visual|Ghostscript/i);
   assert.equal(await sha256(sourcePath), sourceHash);
   assert.equal(db.getJobForPublic(job.id).logs.some((entry) => entry.message.includes("embedded image")), true);
+});
+
+test("PDF compressor evaluates the visual candidate for balanced image-heavy PDFs", async () => {
+  const sharp = (await import("sharp")).default;
+  const sourcePath = path.join(testRoot, "balanced-visual-compress-source.pdf");
+  const sourceDocument = await PDFDocument.create();
+  for (let index = 0; index < 3; index += 1) {
+    const pixels = crypto.randomBytes(1400 * 950 * 4);
+    const png = await sharp(pixels, { raw: { width: 1400, height: 950, channels: 4 } }).png().toBuffer();
+    const image = await sourceDocument.embedPng(png);
+    const page = sourceDocument.addPage([1400, 950]);
+    page.drawImage(image, { x: 0, y: 0, width: 1400, height: 950 });
+    page.drawText(`Balanced visual page ${index + 1}`, { x: 24, y: 24, size: 14 });
+  }
+  await fs.writeFile(sourcePath, await sourceDocument.save());
+  const inputBytes = (await fs.stat(sourcePath)).size;
+  const jobDir = path.join(testRoot, "pdf-balanced-visual-compressor-job");
+  await fs.mkdir(jobDir, { recursive: true });
+  const intakeResult = await createJobFromMultipart({
+    id: crypto.randomUUID(),
+    jobDir,
+    fields: { tool: "pdf-compressor", compressionProfile: "balanced" },
+    files: [{ field: "source", name: "balanced-visual-compress-source.pdf", mime: "application/pdf", path: sourcePath, size: inputBytes }],
+  });
+  const job = db.getJob(intakeResult.ids[0]);
+  await worker.processJob(job);
+
+  const completed = db.getJob(job.id);
+  const result = JSON.parse(completed.result_json);
+  assert.equal(completed.status, "completed");
+  assert.ok(result.bytes < inputBytes * 0.8, `expected the visual candidate to be selected, got ${result.reductionPercent}%`);
+  assert.match(result.method, /visual/i);
+  assert.equal(db.getJobForPublic(job.id).logs.some((entry) => entry.message.includes("Rebuilt 3 image-heavy pages")), true);
 });
 
 test("PDF compressor tunes a custom target to the nearest validated size", async () => {

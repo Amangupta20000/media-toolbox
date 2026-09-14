@@ -285,7 +285,10 @@ export function ToolPage({ tool }) {
     }
     let active = true;
     const fallback = estimatePdfCompression(source, compressionProfile, customQuality, removeColor, customTargetMb);
-    setCompressionEstimate({ status: "loading", data: fallback });
+    // Do not show the quick ratio while the PDF is being sampled. That value
+    // can describe a different worker path than the page-aware estimate and
+    // causes a visible 32 MB -> 21 MB jump for image-heavy documents.
+    setCompressionEstimate({ status: "loading", data: fallback?.target ? fallback : null });
     calculatePdfCompressionEstimate(source, compressionProfile, customQuality, removeColor, customTargetMb).then((data) => {
       if (active) setCompressionEstimate({ status: "ready", data });
     }).catch(() => {
@@ -508,7 +511,7 @@ function PdfCompressionSettingsCard({ source, profile, customQuality, removeColo
   const compressionEngine = capabilities?.pdf?.compressorEngine || "the bundled PDF optimizer";
   return <section className="tool-card settings-card pdf-compression-settings-card">
     <div className="card-heading"><div><span className="card-index">02</span><h2>Choose compression</h2></div><span className="optional-label">PDF quality</span></div>
-    <p className="card-description">Choose the balance between file size and image detail. The original stays unchanged; image-heavy pages may be rebuilt as optimized images when direct compression cannot reduce them.</p>
+    <p className="card-description">Choose the balance between file size and image detail. The original stays unchanged; image-heavy pages may be rebuilt as optimized images to match the selected compression quality.</p>
     <div className="format-grid" aria-label="PDF compression profiles">{pdfCompressionProfiles.map(([value, label, detail]) => <button type="button" key={value} className={`format-option ${profile === value ? "selected" : ""}`} onClick={() => onChange(value)}><span className="format-radio" /><strong>{label}</strong><small>{detail}</small></button>)}</div>
     {profile === "custom" && <div className="pdf-custom-controls">
       <label className="field-label" htmlFor="pdf-custom-target"><span>Target file size</span><strong>Optional</strong></label>
@@ -524,8 +527,9 @@ function PdfCompressionSettingsCard({ source, profile, customQuality, removeColo
 
 function PdfCompressionEstimate({ source, profile, customQuality, removeColor, customTargetMb, estimate: estimateState }) {
   const fallback = estimatePdfCompression(source, profile, customQuality, removeColor, customTargetMb);
-  const estimate = estimateState?.data || fallback;
-  if (!estimate) return <div className="pdf-compression-estimate empty"><strong>Estimated new file size</strong><span>Add a PDF above to see an estimate.</span></div>;
+  const loading = estimateState?.status === "loading";
+  const estimate = estimateState?.data || (!loading ? fallback : null);
+  if (!estimate) return <div className="pdf-compression-estimate empty"><strong>Estimated new file size</strong><span>{loading ? "Analyzing page samples for a closer estimate..." : "Add a PDF above to see an estimate."}</span></div>;
   const fillPercent = Math.max(5, Math.min(100, Math.round((estimate.estimatedBytes / estimate.originalBytes) * 100)));
   const statusText = estimate.target
     ? "Custom target; the worker will iterate validated compression passes."
