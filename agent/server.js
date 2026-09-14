@@ -89,12 +89,11 @@ function addCors(request, response, allowAny = false) {
     // hidden behind a browser-level CORS failure. Include it on the actual
     // response too because Edge/Chromium versions differ in when they check
     // the permission header.
-    if (String(request.headers["access-control-request-private-network"] || "").toLowerCase() === "true" || origin.startsWith("https:")) {
-      response.setHeader("Access-Control-Allow-Private-Network", "true");
-    }
+    response.setHeader("Access-Control-Allow-Private-Network", "true");
   }
-  response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
-  response.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+  response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Range, X-Requested-With");
+  response.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS, HEAD");
+  response.setHeader("Access-Control-Expose-Headers", "Accept-Ranges, Content-Disposition, Content-Length, Content-Range");
   response.setHeader("Access-Control-Max-Age", "600");
   return origin;
 }

@@ -1328,7 +1328,25 @@ test("secure website session preflight exposes authorization responses to the br
   });
   assert.equal(response.status, 204);
   assert.equal(response.headers.get("access-control-allow-origin"), "https://media-toolbox-woad.vercel.app");
-  assert.equal(response.headers.get("access-control-allow-headers"), "Authorization, Content-Type");
+  assert.equal(response.headers.get("access-control-allow-headers"), "Authorization, Content-Type, Accept, Range, X-Requested-With");
+  assert.equal(response.headers.get("access-control-allow-private-network"), "true");
+});
+
+test("secure website capability preflight allows the complete browser request contract", async () => {
+  const response = await fetch(url("/v1/capabilities"), {
+    method: "OPTIONS",
+    headers: {
+      Origin: "https://media-toolbox-woad.vercel.app",
+      "Access-Control-Request-Method": "GET",
+      "Access-Control-Request-Headers": "authorization,accept,range",
+      "Access-Control-Request-Private-Network": "true",
+    },
+  });
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get("access-control-allow-origin"), "https://media-toolbox-woad.vercel.app");
+  assert.equal(response.headers.get("access-control-allow-headers"), "Authorization, Content-Type, Accept, Range, X-Requested-With");
+  assert.equal(response.headers.get("access-control-allow-methods"), "GET, POST, DELETE, OPTIONS, HEAD");
+  assert.equal(response.headers.get("access-control-expose-headers"), "Accept-Ranges, Content-Disposition, Content-Length, Content-Range");
   assert.equal(response.headers.get("access-control-allow-private-network"), "true");
 });
 
