@@ -2,25 +2,61 @@ name: Build local agent installers
 
 on:
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: "Platforms to package (use a single platform only when rerunning an existing release tag)"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - mac
+          - win
+          - linux
   push:
     tags:
       - "agent-v*"
 
 jobs:
+  select-platforms:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - id: select
+        shell: bash
+        env:
+          SELECTED_PLATFORMS: ${{ inputs.platforms || 'all' }}
+        run: |
+          set -euo pipefail
+          if [[ "$SELECTED_PLATFORMS" != "all" && "$GITHUB_REF" != refs/tags/agent-v* ]]; then
+            echo "A single-platform build must be dispatched from an existing agent-v* release tag." >&2
+            exit 1
+          fi
+          case "$SELECTED_PLATFORMS" in
+            all)
+              echo 'matrix={"include":[{"os":"macos-latest","platform":"mac","artifact":"mac"},{"os":"windows-latest","platform":"win","artifact":"win"},{"os":"ubuntu-latest","platform":"linux","artifact":"linux"}]}' >> "$GITHUB_OUTPUT"
+              ;;
+            mac)
+              echo 'matrix={"include":[{"os":"macos-latest","platform":"mac","artifact":"mac"}]}' >> "$GITHUB_OUTPUT"
+              ;;
+            win)
+              echo 'matrix={"include":[{"os":"windows-latest","platform":"win","artifact":"win"}]}' >> "$GITHUB_OUTPUT"
+              ;;
+            linux)
+              echo 'matrix={"include":[{"os":"ubuntu-latest","platform":"linux","artifact":"linux"}]}' >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unsupported platform selection: $SELECTED_PLATFORMS" >&2
+              exit 1
+              ;;
+          esac
+
   package:
+    needs: select-platforms
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            platform: mac
-            artifact: mac
-          - os: windows-latest
-            platform: win
-            artifact: win
-          - os: ubuntu-latest
-            platform: linux
-            artifact: linux
+      matrix: ${{ fromJSON(needs.select-platforms.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -216,6 +252,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: release
+          pattern: media-toolbox-agent-*
+          merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
