@@ -1,0 +1,11 @@
+MEDIA TOOLBOX AGENT — macOS FIRST LAUNCH
+
+The current macOS release is not Apple-notarized. macOS may show a warning that it cannot verify “Media Toolbox Agent.app”.
+
+1. Open Media Toolbox Agent.app once from the Applications folder.
+2. If macOS shows the warning, click Done.
+3. Open System Settings, then Privacy & Security.
+4. In the Security section, click Open Anyway for Media Toolbox Agent.app.
+5. Confirm Open.
+
+This approval is normally needed only once for a fresh full installation. Future launches and in-app updates use the existing update flow.

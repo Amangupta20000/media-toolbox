@@ -933,6 +933,25 @@ test("website local-agent setup exposes installers for all supported desktop pla
   assert.match(workflow, /- os: ubuntu-latest\n\s+platform: linux\n\s+artifact: linux/);
 });
 
+test("macOS first-launch guidance is included on the website, in releases, and in the DMG", async () => {
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const website = await fs.readFile(path.join(root, "components", "local-agent-setup.jsx"), "utf8");
+  const releaseWorkflow = await fs.readFile(path.join(root, ".github", "workflows", "agent-release.yml"), "utf8");
+  const builderConfig = await fs.readFile(path.join(root, "electron-builder.yml"), "utf8");
+  const dmgGuide = await fs.readFile(path.join(root, "agent", "MACOS-FIRST-LAUNCH.txt"), "utf8");
+  const releaseGuide = await fs.readFile(path.join(root, "docs", "macos-first-launch.md"), "utf8");
+  for (const source of [website, dmgGuide, releaseGuide]) {
+    assert.match(source, /System Settings.*Privacy.*Security/i);
+    assert.match(source, /Open Anyway/);
+    assert.match(source, /Applications/);
+  }
+  assert.match(releaseWorkflow, /cat docs\/macos-first-launch\.md/);
+  assert.match(releaseWorkflow, /--notes "\$release_notes"/);
+  assert.match(builderConfig, /path: agent\/MACOS-FIRST-LAUNCH\.txt/);
+  assert.match(builderConfig, /name: First launch\.txt/);
+  assert.doesNotMatch(releaseWorkflow + builderConfig, /xattr\s+-[^\n]*quarantine/i);
+});
+
 test("web admin panel uses the hidden /admin route and is not in navigation", async () => {
   const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
   const adminPage = await fs.readFile(path.join(root, "pages", "admin.jsx"), "utf8");

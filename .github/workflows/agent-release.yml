@@ -58,6 +58,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - name: Ensure draft release exists
         env:
           GH_TOKEN: ${{ github.token }}
@@ -67,11 +68,13 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $GITHUB_REF_NAME already exists; keeping it available for platform uploads."
           else
+            release_notes="$(cat docs/macos-first-launch.md)"
             gh release create "$GITHUB_REF_NAME" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --draft \
               --title "Media Toolbox Agent $GITHUB_REF_NAME" \
+              --notes "$release_notes" \
               --generate-notes
           fi
 

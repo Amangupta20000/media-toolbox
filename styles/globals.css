@@ -943,6 +943,10 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .agent-macos-note { display: flex; gap: 9px; align-items: flex-start; margin: 12px 0; padding: 12px; color: #765b22; background: #fff8e7; border: 1px solid #f1d58a; border-radius: 10px; font-size: 10px; line-height: 1.55; }
 .agent-macos-note svg { flex: 0 0 auto; color: #bd8616; }
 .agent-macos-note strong { color: #694d14; }
+.agent-macos-note-copy { display: grid; gap: 5px; padding-right: 20px; }
+.agent-macos-note-copy p, .agent-macos-note-copy ol, .agent-macos-note-copy small { margin: 0; }
+.agent-macos-note-copy ol { padding-left: 18px; }
+.agent-macos-note-copy small { font-size: 9px; }
 .agent-macos-note code { display: inline-block; margin-top: 4px; padding: 2px 5px; color: #5b461a; background: #ffefc4; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; overflow-wrap: anywhere; }
 .agent-https-note { display: flex; gap: 9px; align-items: flex-start; margin: 12px 0; padding: 12px; color: #2e6f75; background: #eaf8f7; border: 1px solid #b9e0dc; border-radius: 10px; font-size: 10px; line-height: 1.55; }
 .agent-https-note svg { flex: 0 0 auto; color: #178d8f; }
