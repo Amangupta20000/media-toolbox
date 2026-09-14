@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { agentBaseCandidates, probeLocalAgent } from "../components/processing-client.js";
+import { agentBaseCandidates, agentBaseUrl, probeLocalAgent } from "../components/processing-client.js";
 
 test("local HTTP website falls back to the installed HTTPS loopback agent", () => {
   const candidates = agentBaseCandidates({
@@ -37,13 +37,11 @@ test("secure Windows/Linux pages discover HTTP loopback while macOS stays HTTPS-
   try {
     Object.defineProperty(globalThis, "navigator", { value: { platform: "Win32" }, configurable: true, writable: true });
     assert.deepEqual(agentBaseCandidates({ secure: true, configured: "http://127.0.0.1:4789", remembered: "" }), [
-      "http://localhost:4789",
       "http://127.0.0.1:4789",
     ]);
 
     Object.defineProperty(globalThis, "navigator", { value: { platform: "Linux x86_64" }, configurable: true, writable: true });
     assert.deepEqual(agentBaseCandidates({ secure: true, configured: "http://127.0.0.1:4789", remembered: "" }), [
-      "http://localhost:4789",
       "http://127.0.0.1:4789",
     ]);
 
@@ -65,10 +63,26 @@ test("secure Windows pages discard a remembered HTTPS loopback endpoint", () => 
   globalThis.window = { location: { protocol: "https:", origin: "https://media-toolbox-woad.vercel.app" } };
   try {
     Object.defineProperty(globalThis, "navigator", { value: { platform: "Win32" }, configurable: true, writable: true });
-    assert.deepEqual(agentBaseCandidates({ secure: true, configured: "http://127.0.0.1:4789", remembered: "https://127.0.0.1:4789" }).slice(0, 2), [
-      "http://localhost:4789",
+    assert.deepEqual(agentBaseCandidates({ secure: true, configured: "http://127.0.0.1:4789", remembered: "https://127.0.0.1:4789" }), [
       "http://127.0.0.1:4789",
     ]);
+  } finally {
+    globalThis.window = originalWindow;
+    if (navigatorDescriptor) Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
+    else delete globalThis.navigator;
+  }
+});
+
+test("secure Windows pages expose only the HTTP loopback URL to direct callers", () => {
+  const originalWindow = globalThis.window;
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  globalThis.window = {
+    location: { protocol: "https:", origin: "https://media-toolbox-woad.vercel.app" },
+    localStorage: { getItem: () => "https://127.0.0.1:4789" },
+  };
+  try {
+    Object.defineProperty(globalThis, "navigator", { value: { platform: "Win32" }, configurable: true, writable: true });
+    assert.equal(agentBaseUrl(), "http://127.0.0.1:4789");
   } finally {
     globalThis.window = originalWindow;
     if (navigatorDescriptor) Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
@@ -82,8 +96,7 @@ test("secure Windows pages use HTTP when the browser only exposes a user agent",
   globalThis.window = { location: { protocol: "https:", origin: "https://media-toolbox-woad.vercel.app" } };
   try {
     Object.defineProperty(globalThis, "navigator", { value: { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36" }, configurable: true, writable: true });
-    assert.deepEqual(agentBaseCandidates({ secure: true, configured: "http://127.0.0.1:4789", remembered: "https://127.0.0.1:4789" }).slice(0, 2), [
-      "http://localhost:4789",
+    assert.deepEqual(agentBaseCandidates({ secure: true, configured: "http://127.0.0.1:4789", remembered: "https://127.0.0.1:4789" }), [
       "http://127.0.0.1:4789",
     ]);
   } finally {
@@ -99,8 +112,7 @@ test("secure Windows pages prefer an explicit Windows user agent over a conflict
   globalThis.window = { location: { protocol: "https:", origin: "https://media-toolbox-woad.vercel.app" } };
   try {
     Object.defineProperty(globalThis, "navigator", { value: { userAgentData: { platform: "macOS" }, platform: "MacIntel", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edg/140.0.0.0" }, configurable: true, writable: true });
-    assert.deepEqual(agentBaseCandidates({ secure: true, configured: "http://127.0.0.1:4789", remembered: "https://127.0.0.1:4789" }).slice(0, 2), [
-      "http://localhost:4789",
+    assert.deepEqual(agentBaseCandidates({ secure: true, configured: "http://127.0.0.1:4789", remembered: "https://127.0.0.1:4789" }), [
       "http://127.0.0.1:4789",
     ]);
   } finally {

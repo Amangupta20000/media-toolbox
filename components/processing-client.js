@@ -11,13 +11,11 @@ const AGENT_BASE_KEY = "media-toolbox-agent-base";
 export function agentBaseUrl() {
   if (typeof window !== "undefined") {
     const remembered = window.localStorage.getItem(AGENT_BASE_KEY);
+    if (securePageSupportsPlainLoopback()) return DEFAULT_AGENT_URL;
     // A previous Windows/Linux agent release advertised HTTPS on this same
     // loopback port. Do not let that stale value win after the transport was
     // migrated to browser-compatible HTTP.
-    if (securePageSupportsPlainLoopback() && isLoopbackAgentBase(remembered)) {
-      return remembered.startsWith("http://") ? remembered : DEFAULT_AGENT_URL;
-    }
-    if (remembered && (!isSecurePage() || remembered.startsWith("https://") || securePageSupportsPlainLoopback())) return remembered;
+    if (remembered && (!isSecurePage() || remembered.startsWith("https://"))) return remembered;
   }
   return configuredAgentBaseUrl();
 }
@@ -34,6 +32,7 @@ function securePageSupportsPlainLoopback() {
     navigator.userAgent,
   ].filter(Boolean).join(" ")).toLowerCase();
   const userAgent = String(navigator.userAgent || "").toLowerCase();
+  const browserPlatform = String(navigator.platform || "").toLowerCase();
   // Windows/Linux browsers commonly reject the installation-specific
   // self-signed certificate used by the desktop agent. Their browsers treat
   // loopback as a trustworthy local origin, so packaged agents use HTTP there.
@@ -42,8 +41,8 @@ function securePageSupportsPlainLoopback() {
   // userAgentData/platform hint. Some Chromium privacy settings can expose a
   // reduced or inconsistent platform hint, which otherwise sends Windows to
   // HTTPS and produces ERR_SSL_PROTOCOL_ERROR against its HTTP agent.
-  if (/windows|win32|win64|linux|x11|cros/.test(userAgent)) return true;
-  if (/mac|iphone|ipad|ipod/.test(platform)) return false;
+  if (/windows|win32|win64|linux|x11|cros/.test(userAgent) || /win|linux|x11|cros/.test(browserPlatform)) return true;
+  if (/mac|iphone|ipad|ipod/.test(userAgent) || /mac|iphone|ipad|ipod/.test(browserPlatform)) return false;
   // Released non-macOS desktop agents listen on HTTP. Fall back to HTTP when
   // a browser hides its platform hint (for example because of reduced UA
   // data) rather than sending HTTPS to an HTTP socket and producing
@@ -73,8 +72,12 @@ function isLoopbackAgentBase(value) {
 
 export function agentBaseCandidates({ secure = isSecurePage(), configured = configuredAgentBaseUrl(), remembered = typeof window !== "undefined" ? window.localStorage.getItem(AGENT_BASE_KEY) : "" } = {}) {
   const plainLoopback = secure && securePageSupportsPlainLoopback();
+  // Released Windows/Linux agents always bind plain HTTP to 127.0.0.1:4789.
+  // Keep discovery deterministic: stale HTTPS values and localhost aliases
+  // must never create extra SSL requests or hide the real health error.
+  if (plainLoopback) return [DEFAULT_AGENT_URL];
   const candidates = plainLoopback
-    ? [remembered?.startsWith("http://") ? remembered : "", "http://localhost:4789", configured?.startsWith("http://") ? configured : "", DEFAULT_AGENT_URL]
+    ? [DEFAULT_AGENT_URL]
     : secure
       ? [remembered?.startsWith("https://") ? remembered : "", configured]
       : [remembered, configured];
