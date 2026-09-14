@@ -86,8 +86,10 @@ function addCors(request, response, allowAny = false) {
     // Chromium sends this preflight when a public HTTPS website accesses a
     // loopback agent. It is harmless for browsers that do not use Private
     // Network Access and prevents the successful local endpoint from being
-    // hidden behind a browser-level CORS failure.
-    if (String(request.headers["access-control-request-private-network"] || "").toLowerCase() === "true") {
+    // hidden behind a browser-level CORS failure. Include it on the actual
+    // response too because Edge/Chromium versions differ in when they check
+    // the permission header.
+    if (String(request.headers["access-control-request-private-network"] || "").toLowerCase() === "true" || origin.startsWith("https:")) {
       response.setHeader("Access-Control-Allow-Private-Network", "true");
     }
   }

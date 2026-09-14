@@ -11,6 +11,12 @@ const AGENT_BASE_KEY = "media-toolbox-agent-base";
 export function agentBaseUrl() {
   if (typeof window !== "undefined") {
     const remembered = window.localStorage.getItem(AGENT_BASE_KEY);
+    // A previous Windows/Linux agent release advertised HTTPS on this same
+    // loopback port. Do not let that stale value win after the transport was
+    // migrated to browser-compatible HTTP.
+    if (securePageSupportsPlainLoopback() && isLoopbackAgentBase(remembered)) {
+      return remembered.startsWith("http://") ? remembered : DEFAULT_AGENT_URL;
+    }
     if (remembered && (!isSecurePage() || remembered.startsWith("https://") || securePageSupportsPlainLoopback())) return remembered;
   }
   return configuredAgentBaseUrl();
@@ -22,12 +28,12 @@ function isSecurePage() {
 
 function securePageSupportsPlainLoopback() {
   if (!isSecurePage() || typeof navigator === "undefined") return false;
-  const platform = String(navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
+  const platform = String(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || "").toLowerCase();
   // Windows/Linux browsers commonly reject the installation-specific
   // self-signed certificate used by the desktop agent. Their browsers treat
   // loopback as a trustworthy local origin, so packaged agents use HTTP there.
   // macOS intentionally stays HTTPS for Safari compatibility.
-  return /win|linux/.test(platform) && !/mac/.test(platform);
+  return /win|linux|x11|cros/.test(platform) && !/mac|iphone|ipad|ipod/.test(platform);
 }
 
 function configuredAgentBaseUrl() {
@@ -50,21 +56,17 @@ function isLoopbackAgentBase(value) {
 }
 
 export function agentBaseCandidates({ secure = isSecurePage(), configured = configuredAgentBaseUrl(), remembered = typeof window !== "undefined" ? window.localStorage.getItem(AGENT_BASE_KEY) : "" } = {}) {
-  const candidates = secure
-    ? [remembered?.startsWith("https://") ? remembered : "", configured]
-    : [remembered, configured];
-
-  if (secure && securePageSupportsPlainLoopback()) {
-    // Keep HTTPS candidates first for a remembered/custom endpoint, then
-    // discover the HTTP transport used by packaged Windows/Linux agents.
-    if (remembered?.startsWith("http://")) candidates.push(remembered);
-    candidates.push(DEFAULT_AGENT_URL);
-  }
+  const plainLoopback = secure && securePageSupportsPlainLoopback();
+  const candidates = plainLoopback
+    ? [remembered?.startsWith("http://") ? remembered : "", "http://localhost:4789", configured?.startsWith("http://") ? configured : "", DEFAULT_AGENT_URL]
+    : secure
+      ? [remembered?.startsWith("https://") ? remembered : "", configured]
+      : [remembered, configured];
 
   // macOS uses HTTPS so Safari production pages do not trigger mixed-content
   // blocking. Keep HTTP as the first local-development candidate for
-  // `npm run agent:dev`; Windows/Linux secure pages also discover the
-  // packaged HTTP loopback transport added above.
+  // `npm run agent:dev`; Windows/Linux secure pages use only the packaged HTTP
+  // loopback transport so a stale HTTPS value cannot make discovery fail.
   for (const base of [...candidates]) {
     if (!base || !isLoopbackAgentBase(base)) continue;
     try {

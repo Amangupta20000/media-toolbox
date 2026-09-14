@@ -1307,6 +1307,15 @@ test("secure website preflight is allowed for the Windows/Linux HTTP loopback tr
   assert.equal(response.headers.get("access-control-allow-private-network"), "true");
 });
 
+test("secure website health responses include the private-network permission", async () => {
+  const response = await fetch(url("/v1/health"), {
+    headers: { Origin: "https://media-toolbox-woad.vercel.app" },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("access-control-allow-origin"), "https://media-toolbox-woad.vercel.app");
+  assert.equal(response.headers.get("access-control-allow-private-network"), "true");
+});
+
 test("agent rejects a different origin after pairing", async () => {
   const response = await fetch(url("/v1/capabilities"), { headers: { Authorization: "Bearer invalid", Origin: "http://evil.example" } });
   assert.equal(response.status, 401);
