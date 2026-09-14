@@ -15,15 +15,12 @@ jobs:
           - os: macos-latest
             platform: mac
             artifact: mac
-          # Temporarily disabled while the macOS owner licensing-server
-          # packaging is stabilized. Re-enable these entries after macOS is
-          # verified in a full release.
-          # - os: windows-latest
-          #   platform: win
-          #   artifact: win
-          # - os: ubuntu-latest
-          #   platform: linux
-          #   artifact: linux
+          - os: windows-latest
+            platform: win
+            artifact: win
+          - os: ubuntu-latest
+            platform: linux
+            artifact: linux
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

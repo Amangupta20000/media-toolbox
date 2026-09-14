@@ -917,15 +917,17 @@ test("website local-agent setup does not expose license-request controls", async
   assert.match(source, /request a code.*desktop dashboard|request a code.*desktop/i);
 });
 
-test("website local-agent setup keeps Windows and Linux installers disabled", async () => {
+test("website local-agent setup exposes installers for all supported desktop platforms", async () => {
   const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
   const source = await fs.readFile(path.join(root, "components", "local-agent-setup.jsx"), "utf8");
-  const styles = await fs.readFile(path.join(root, "styles", "globals.css"), "utf8");
-  assert.match(source, /macOS available/);
-  assert.match(source, /agent-platform-disabled" type="button" disabled[^>]*>.*Windows installer/);
-  assert.match(source, /agent-platform-disabled" type="button" disabled[^>]*>.*Linux installer/);
-  assert.match(source, /Windows and Linux installers will be available in a future release/);
-  assert.match(styles, /\.agent-platform-disabled[^}]*cursor: not-allowed/);
+  const workflow = await fs.readFile(path.join(root, ".github", "workflows", "agent-release.yml"), "utf8");
+  assert.match(source, /macOS, Windows &amp; Linux/);
+  assert.match(source, /Choose the matching installer from the latest GitHub release/);
+  assert.match(source, /href=\{releasesUrl\}[^>]*>[\s\S]*Windows installer/);
+  assert.match(source, /href=\{releasesUrl\}[^>]*>[\s\S]*Linux installer/);
+  assert.doesNotMatch(source, /agent-platform-disabled|Coming soon/);
+  assert.match(workflow, /- os: windows-latest\n\s+platform: win\n\s+artifact: win/);
+  assert.match(workflow, /- os: ubuntu-latest\n\s+platform: linux\n\s+artifact: linux/);
 });
 
 test("web admin panel uses the hidden /admin route and is not in navigation", async () => {
