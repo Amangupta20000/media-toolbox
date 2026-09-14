@@ -76,6 +76,23 @@ test("secure Windows pages discard a remembered HTTPS loopback endpoint", () => 
   }
 });
 
+test("secure Windows pages use HTTP when the browser only exposes a user agent", () => {
+  const originalWindow = globalThis.window;
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  globalThis.window = { location: { protocol: "https:", origin: "https://media-toolbox-woad.vercel.app" } };
+  try {
+    Object.defineProperty(globalThis, "navigator", { value: { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36" }, configurable: true, writable: true });
+    assert.deepEqual(agentBaseCandidates({ secure: true, configured: "http://127.0.0.1:4789", remembered: "https://127.0.0.1:4789" }).slice(0, 2), [
+      "http://localhost:4789",
+      "http://127.0.0.1:4789",
+    ]);
+  } finally {
+    globalThis.window = originalWindow;
+    if (navigatorDescriptor) Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
+    else delete globalThis.navigator;
+  }
+});
+
 test("an authorized localhost browser creates its session during discovery", async () => {
   const values = new Map();
   const calls = [];

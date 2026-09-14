@@ -28,12 +28,22 @@ function isSecurePage() {
 
 function securePageSupportsPlainLoopback() {
   if (!isSecurePage() || typeof navigator === "undefined") return false;
-  const platform = String(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || "").toLowerCase();
+  const platform = String([
+    navigator.userAgentData?.platform,
+    navigator.platform,
+    navigator.userAgent,
+  ].filter(Boolean).join(" ")).toLowerCase();
   // Windows/Linux browsers commonly reject the installation-specific
   // self-signed certificate used by the desktop agent. Their browsers treat
   // loopback as a trustworthy local origin, so packaged agents use HTTP there.
   // macOS intentionally stays HTTPS for Safari compatibility.
-  return /win|linux|x11|cros/.test(platform) && !/mac|iphone|ipad|ipod/.test(platform);
+  if (/mac|iphone|ipad|ipod/.test(platform)) return false;
+  // Released non-macOS desktop agents listen on HTTP. Fall back to HTTP when
+  // a browser hides its platform hint (for example because of reduced UA
+  // data) rather than sending HTTPS to an HTTP socket and producing
+  // ERR_SSL_PROTOCOL_ERROR. The explicit Apple check above preserves the
+  // macOS HTTPS transport.
+  return true;
 }
 
 function configuredAgentBaseUrl() {
