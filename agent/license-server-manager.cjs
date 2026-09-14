@@ -96,6 +96,12 @@ function probeEndpointStatus(url, { timeoutMs = HEALTH_TIMEOUT_MS } = {}) {
   }
 }
 
+function isAddressInUseError(error) {
+  const code = error?.code || error?.cause?.code;
+  const message = error instanceof Error ? error.message : String(error || "");
+  return code === "EADDRINUSE" || /EADDRINUSE|address already in use/i.test(message);
+}
+
 function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -397,6 +403,71 @@ function createLicenseServerManager({
     };
   }
 
+  function portInspectionCommand() {
+    if (platform === "win32") return { file: "netstat", args: ["-ano", "-p", "tcp"] };
+    return { file: platform === "darwin" ? "/usr/sbin/lsof" : "lsof", args: ["-nP", "-t", `-iTCP:${port}`, "-sTCP:LISTEN"] };
+  }
+
+  function portKillCommand(pid, signal = "TERM") {
+    return platform === "win32"
+      ? { file: "taskkill", args: ["/PID", String(pid), "/T", "/F"] }
+      : { file: "/bin/kill", args: [`-${signal}`, String(pid)] };
+  }
+
+  async function listPortOwnerPids() {
+    const command = portInspectionCommand();
+    const result = await runExecFile(execFileImpl, command.file, command.args);
+    if (!result.ok) throw new Error(String(result.stderr || result.error?.message || `The process using ${host}:${port} could not be identified.`));
+    const pids = new Set();
+    if (platform === "win32") {
+      const endpoint = `${host}:${port}`;
+      for (const line of String(result.stdout || "").split(/\r?\n/)) {
+        if (!new RegExp(`TCP\\s+${host.replaceAll(".", "\\.")}:${port}\\s+\\S+\\s+LISTENING\\s+(\\d+)`, "i").test(line)) continue;
+        const match = line.match(/\s(\d+)\s*$/);
+        if (match) pids.add(Number(match[1]));
+      }
+      // Some Windows netstat versions print an IPv6 loopback listener instead
+      // of the IPv4 form even when the service was requested on localhost.
+      if (!pids.size && endpoint === "127.0.0.1:4900") {
+        for (const line of String(result.stdout || "").split(/\r?\n/)) {
+          const match = line.match(new RegExp(`TCP\\s+\\[::1\\]:${port}\\s+\\S+\\s+LISTENING\\s+(\\d+)`, "i"));
+          if (match) pids.add(Number(match[1]));
+        }
+      }
+    } else {
+      for (const value of String(result.stdout || "").split(/\s+/)) {
+        const pid = Number(value.trim());
+        if (Number.isInteger(pid) && pid > 1) pids.add(pid);
+      }
+    }
+    return [...pids].filter((pid) => pid !== process.pid);
+  }
+
+  async function stopPortOwners() {
+    const pids = await listPortOwnerPids();
+    // The conflicting process can exit between EADDRINUSE and inspection. In
+    // that case the port is already free and the caller can simply retry.
+    if (!pids.length) return false;
+    const failures = [];
+    for (const pid of pids) {
+      const command = portKillCommand(pid);
+      const result = await runExecFile(execFileImpl, command.file, command.args);
+      if (!result.ok) failures.push(`${pid}: ${String(result.stderr || result.error?.message || "termination failed")}`);
+    }
+    if (failures.length) throw new Error(`Could not stop the process using ${host}:${port} (${failures.join(", ")}).`);
+    await wait(150);
+    if (platform !== "win32") {
+      const remaining = await listPortOwnerPids().catch(() => []);
+      for (const pid of remaining) {
+        const command = portKillCommand(pid, "KILL");
+        const result = await runExecFile(execFileImpl, command.file, command.args);
+        if (!result.ok) failures.push(`${pid}: force termination failed`);
+      }
+      if (failures.length) throw new Error(`Could not stop the process using ${host}:${port} (${failures.join(", ")}).`);
+    }
+    return true;
+  }
+
   async function getState() {
     const publicEndpoint = publicUrl();
     const storage = storageState();
@@ -483,10 +554,12 @@ function createLicenseServerManager({
     }
   }
 
-  async function waitForHealth(childProcess) {
+  async function waitForHealth(childProcess, childError = () => null) {
     const startedAt = Date.now();
     while (Date.now() - startedAt < START_TIMEOUT_MS) {
       if (manuallyStopped) throw new Error("The licensing server start was cancelled.");
+      const spawnError = childError();
+      if (spawnError) throw spawnError;
       if (childProcess && childProcess.exitCode !== null) {
         throw new Error(lastError || "The licensing server exited before becoming healthy.");
       }
@@ -509,7 +582,7 @@ function createLicenseServerManager({
     return startRun;
   }
 
-  async function startInternal() {
+  async function startInternal({ recoverPortConflict = true } = {}) {
     const current = await getState();
     if (manuallyStopped) throw new Error("The licensing server start was cancelled.");
     if (!current.ssdMounted) throw new Error("Connect the Sandisk Exf licensing SSD before starting the server.");
@@ -576,13 +649,22 @@ function createLicenseServerManager({
       ].filter(Boolean).join(path.delimiter);
     }
 
-    const nextChild = spawnImpl(command, args, {
-      cwd: spawnWorkingDirectory(),
-      env: environment,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
+    let nextChild;
+    try {
+      nextChild = spawnImpl(command, args, {
+        cwd: spawnWorkingDirectory(),
+        env: environment,
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      });
+    } catch (error) {
+      if (!recoverPortConflict || manuallyStopped || !isAddressInUseError(error)) throw error;
+      await stopPortOwners();
+      lastError = "";
+      return startInternal({ recoverPortConflict: false });
+    }
     child = nextChild;
+    let childError = null;
     nextChild.stdout?.on?.("data", (chunk) => logger.log?.(String(chunk).trim()));
     nextChild.stderr?.on?.("data", (chunk) => {
       const value = String(chunk).trim();
@@ -590,6 +672,7 @@ function createLicenseServerManager({
       logger.warn?.(value);
     });
     nextChild.once?.("error", (error) => {
+      childError = error;
       lastError = error instanceof Error ? error.message : String(error);
     });
     nextChild.once?.("exit", (code, signal) => {
@@ -599,7 +682,7 @@ function createLicenseServerManager({
     });
 
     try {
-      await waitForHealth(nextChild);
+      await waitForHealth(nextChild, () => childError);
       const startedFunnel = await ensureTailscaleFunnel();
       const finalTailscale = startedFunnel.skipped ? tailscale : { ...tailscale, funnel: startedFunnel };
       rememberOwnerMachine();
@@ -607,6 +690,11 @@ function createLicenseServerManager({
       return { ...state, tailscale: startedFunnel.skipped && !tailscale.opened && !tailscale.error ? state.tailscale : finalTailscale, started: true, message: startedFunnel.error ? `The licensing server is running locally, but ${startedFunnel.error}` : startMessage };
     } catch (error) {
       if (isAlive(nextChild)) nextChild.kill?.("SIGTERM");
+      if (recoverPortConflict && !manuallyStopped && isAddressInUseError(error)) {
+        await stopPortOwners();
+        lastError = "";
+        return startInternal({ recoverPortConflict: false });
+      }
       throw error;
     }
   }

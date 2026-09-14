@@ -417,6 +417,72 @@ test("dashboard licensing server manager starts and stops the loopback service",
   assert.equal(stopped.managed, false);
 });
 
+test("licensing server manager clears a conflicting loopback port and retries", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const mountPath = path.join(testRoot, "license-server-port-conflict");
+  const dataDirectory = path.join(mountPath, "MediaToolboxLicensing");
+  let healthy = false;
+  let portOccupied = true;
+  let spawnCount = 0;
+  const killedPids = [];
+  const createChild = () => {
+    const child = new EventEmitter();
+    child.exitCode = null;
+    child.killed = false;
+    child.kill = () => {
+      child.killed = true;
+      child.exitCode = 0;
+      healthy = false;
+      child.emit("exit", 0, "SIGTERM");
+    };
+    return child;
+  };
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(root, "agent"),
+    dataDirectory,
+    mountPath,
+    nodeExecutable: "/node22/bin/node",
+    platform: "darwin",
+    existsSync: (value) => value === mountPath || value === dataDirectory || value.endsWith(path.join("license-server", "index.js")),
+    healthCheck: async () => healthy,
+    spawnImpl: () => {
+      spawnCount += 1;
+      const child = createChild();
+      if (spawnCount === 1) {
+        process.nextTick(() => {
+          const error = Object.assign(new Error("listen EADDRINUSE: address already in use 127.0.0.1:4900"), { code: "EADDRINUSE" });
+          child.emit("error", error);
+          child.exitCode = 1;
+          child.emit("exit", 1);
+        });
+      } else {
+        healthy = true;
+      }
+      return child;
+    },
+    execFileImpl: (file, args, callback) => {
+      if (String(file).includes("lsof")) return callback(null, portOccupied ? "4242\n" : "", "");
+      if (String(file).endsWith("/kill")) {
+        killedPids.push({ signal: args[0], pid: args[1] });
+        portOccupied = false;
+        return callback(null, "", "");
+      }
+      return callback(null, "", "");
+    },
+    logger: { log() {}, warn() {} },
+  });
+  try {
+    const started = await manager.start();
+    assert.equal(started.healthy, true);
+    assert.equal(started.started, true);
+    assert.equal(spawnCount, 2);
+    assert.deepEqual(killedPids, [{ signal: "-TERM", pid: "4242" }]);
+  } finally {
+    await manager.stop();
+  }
+});
+
 test("licensing server manager uses its built-in health probe when starting", async () => {
   const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
