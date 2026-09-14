@@ -311,6 +311,24 @@ test("live PDF preview rewrites native text instead of drawing over the original
   assert.equal(after.pages[0].runs.some((item) => item.text === "First occurrence"), false);
 });
 
+test("live PDF preview rebuilds all native edits and restores the source when edits are cleared", async () => {
+  const source = await createFixture();
+  const extracted = await extractPdfTextRuns(source);
+  const first = extracted.pages[0].runs.find((item) => item.text === "First occurrence");
+  const duplicate = extracted.pages[0].runs.find((item) => item.text === "Duplicate");
+  const edited = await createPdfTextPreview(source, [
+    { pageIndex: first.pageIndex, operatorOrdinal: first.ordinal, replacementText: "Changed heading", mode: "native" },
+    { pageIndex: duplicate.pageIndex, operatorOrdinal: duplicate.ordinal, replacementText: "Changed duplicate", mode: "native" },
+  ]);
+  const editedText = await extractPdfTextRuns(edited);
+  assert.equal(editedText.pages[0].runs.some((item) => item.text === "Changed heading"), true);
+  assert.equal(editedText.pages[0].runs.some((item) => item.text === "Changed duplicate"), true);
+  const restored = await createPdfTextPreview(source, []);
+  const restoredText = await extractPdfTextRuns(restored);
+  assert.equal(restoredText.pages[0].runs.some((item) => item.text === "First occurrence"), true);
+  assert.equal(restoredText.pages[0].runs.some((item) => item.text === "Duplicate"), true);
+});
+
 test("native text movement is applied to the selected operator in preview and export", async () => {
   const source = await createFixture();
   const extracted = await extractPdfTextRuns(source);

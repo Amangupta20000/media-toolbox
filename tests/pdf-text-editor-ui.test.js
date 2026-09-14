@@ -42,7 +42,7 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /Zoom in/);
   assert.match(shell, /Preview zoom/);
   assert.match(shell, /import\("\.\.\/lib\/pdf-text-preview\.js"\)/);
-  assert.match(shell, /await Promise\.all\(pages\.map\(\(page\) => previewPdf\.getPage/);
+  assert.match(shell, /await Promise\.all\(pageModels\.map\(\(page\) => previewPdf\.getPage/);
   assert.match(shell, /setPreviewRevision\(\(current\) => current \+ 1\)/);
   assert.match(shell, /key=\{`\$\{model\.pageIndex\}-\$\{previewRevision\}`\}/);
   assert.match(shell, /sourceBytesRef\.current = data\.slice\(\)/);
@@ -90,6 +90,8 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /onMoveRunEnd/);
   assert.match(shell, /offsetX: offset\.x/);
   assert.match(shell, /textTransforms/);
+  assert.match(shell, /const point = \[\.\.\.displayCenter\]/);
+  assert.match(shell, /Util\.applyTransform\(point, inverse\)/);
   assert.match(shell, /scale: transform\.scale/);
   assert.match(shell, /rotation: transform\.rotation/);
   assert.match(shell, /onAppearanceChange/);
@@ -97,6 +99,9 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /moveOnly: true/);
   assert.match(shell, /run\.graphic/);
   assert.match(shell, /Selected graphic/);
+  assert.match(shell, /Automatic/);
+  assert.match(shell, /chooseOcrMode\("auto"\)/);
+  assert.match(shell, /requestedOcrMode === "auto"/);
   assert.match(shell, /Use OCR/);
   assert.match(shell, /Use embedded text only/);
   assert.match(shell, /chooseOcrMode\("ocr"\)/);
@@ -165,7 +170,10 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /Mixed text mode/);
   assert.match(shell, /Selected text · Page \{run\.pageIndex \+ 1\}/);
   assert.match(shell, /previewRequestRef/);
-  assert.match(shell, /previewPagesByIndex = new Map\(pages\.map/);
+  assert.match(shell, /const sourceBytes = sourceBytesRef\.current\.slice\(\)/);
+  assert.match(shell, /const pageModels = pages\.slice\(\)/);
+  assert.match(shell, /An empty native edit list intentionally rebuilds from the source too/);
+  assert.match(shell, /previewPagesByIndex = new Map\(pageModels\.map/);
   assert.match(shell, /hidden behind page artwork/);
   assert.match(shell, /OCR fallback/);
   assert.match(await read("components/processing-client.js"), /application\/x-ndjson/);

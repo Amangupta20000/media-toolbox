@@ -85,7 +85,11 @@ function textOrigin(model, run, pdfLibrary) {
     return null;
   }
   const inverse = pdfLibrary.Util.inverseTransform(baseViewport.transform);
-  const point = pdfLibrary.Util.applyTransform(displayCenter, inverse);
+  // PDF.js mutates the point array in place and returns undefined. Treating
+  // its return value as the transformed point crashes export before the job
+  // upload starts.
+  const point = [...displayCenter];
+  pdfLibrary.Util.applyTransform(point, inverse);
   return point.every(Number.isFinite) ? { x: point[0], y: point[1] } : null;
 }
 
@@ -926,6 +930,7 @@ export function PdfTextEditor() {
   const [loading, setLoading] = useState(false);
   const [activeView, setActiveView] = useState("tool");
   const [previewUpdating, setPreviewUpdating] = useState(false);
+  const [checkingLocation, setCheckingLocation] = useState(false);
   const [previewRevision, setPreviewRevision] = useState(0);
   const [pendingOcrFile, setPendingOcrFile] = useState(null);
   const [ocrMode, setOcrMode] = useState(null);
@@ -998,9 +1003,15 @@ export function PdfTextEditor() {
         if (!models.some((model) => model.runs.some((run) => run.editable))) setError("OCR was skipped. This PDF does not expose embedded selectable text.");
         return;
       }
+      // Automatic mode keeps usable embedded text native, but still scans
+      // pages that do not expose an editable text layer. Without this per-page
+      // check, a mixed PDF could silently leave image-only pages unsearchable
+      // just because another page contained embedded text.
       const ocrPageIndexes = requestedOcrMode === "ocr"
         ? models.map((model) => model.pageIndex)
-        : models.filter((model) => model.requiresOcr).map((model) => model.pageIndex);
+        : requestedOcrMode === "auto"
+          ? models.filter((model) => model.requiresOcr || !model.runs.some((run) => run.editable)).map((model) => model.pageIndex)
+          : models.filter((model) => model.requiresOcr).map((model) => model.pageIndex);
       if (ocrPageIndexes.length && !isProcessingLocationReady(locations, processingMode)) {
         setPages(models);
         setError("Some pages contain hidden or unsupported text. Connect the Local agent or Server to run OCR on those pages.");
@@ -1018,9 +1029,9 @@ export function PdfTextEditor() {
         setPages(mergedModels);
         setOcrMode("ocr");
         if (!Number(ocrResult.totalRuns)) setError("OCR could not detect readable text on the affected PDF pages. Scanned pages may have low resolution or unsupported handwriting.");
-      } else if (models.some((model) => model.runs.some((run) => run.editable))) {
+      } else if (requestedOcrMode === "auto" || models.some((model) => model.runs.some((run) => run.editable))) {
         setPages(models);
-        setOcrMode("embedded");
+        setOcrMode(requestedOcrMode === "auto" ? "auto" : "embedded");
       } else if (!isProcessingLocationReady(locations, processingMode)) {
         setPages(models);
         setError("This PDF has no embedded text. Connect the Local agent or Server to run OCR on scanned pages.");
@@ -1073,13 +1084,13 @@ export function PdfTextEditor() {
   const ocrPageScope = ocrPages.length <= 3
     ? `OCR on ${ocrPages.map((page) => `page ${page.pageIndex + 1}`).join(", ")}`
     : `OCR on ${ocrPages.length} pages`;
-  const textReadModeLabel = ocrMode === "ocr" ? " · OCR selected" : ocrMode === "embedded" ? " · embedded text only" : "";
+  const textReadModeLabel = ocrMode === "ocr" ? " · OCR selected" : ocrMode === "embedded" ? " · embedded text only" : ocrMode === "auto" ? " · automatic" : "";
   const changedEdits = pages.flatMap((page) => page.runs
     .filter((run) => (run.editable && (edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]))) || (run.graphic && (hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]))))
     .map((run) => edits[run.runId] !== undefined
       ? ({ runId: run.runId, replacementText: edits[run.runId], moveOnly: false, ...textTransform(textTransforms[run.runId]) })
       : ({ runId: run.runId, moveOnly: true, ...textTransform(textTransforms[run.runId]) })));
-  const canSubmit = Boolean(source && sourceHash && changedEdits.length && !loading && !uploadProgress && isProcessingLocationReady(locations, processingMode));
+  const canSubmit = Boolean(source && sourceHash && changedEdits.length && !loading && !uploadProgress && !checkingLocation);
 
   const chooseRun = (run) => {
     // Resolve the clicked run from the current page model. PDF.js page
@@ -1099,36 +1110,40 @@ export function PdfTextEditor() {
     if (!sourceBytesRef.current || !pdfLibrary) return;
     const requestId = previewRequestRef.current + 1;
     previewRequestRef.current = requestId;
-    const previewEdits = pages.flatMap((page) => page.runs
+    // Snapshot both inputs before any async work. React may commit a newer
+    // page model while PDF.js is rebuilding; using the live ref for bytes and
+    // the old render's page array together can otherwise paint a stale page.
+    const sourceBytes = sourceBytesRef.current.slice();
+    const pageModels = pages.slice();
+    const previewEdits = pageModels.flatMap((page) => page.runs
       .filter((run) => nextEdits[run.runId] !== undefined || hasTextOffset(nextOffsets[run.runId]) || hasTextTransform(nextTransforms[run.runId]))
       .map((run) => {
         const offset = textOffset(nextOffsets[run.runId]);
         const textChanged = nextEdits[run.runId] !== undefined;
         const moveOnly = !textChanged;
         const transform = textTransform(nextTransforms[run.runId]);
-        const model = pages.find((candidate) => candidate.pageIndex === run.pageIndex);
+        const model = pageModels.find((candidate) => candidate.pageIndex === run.pageIndex);
         const origin = textOrigin(model, run, pdfLibrary);
         return { pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), originalText: run.text || run.originalText, ...(moveOnly ? { moveOnly: true } : { replacementText: nextEdits[run.runId] }), mode: run.mode || "native", offsetX: offset.x, offsetY: offset.y, scale: transform.scale, scaleX: transform.scaleX, scaleY: transform.scaleY, rotation: transform.rotation, ...(origin ? { originX: origin.x, originY: origin.y } : {}), ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) };
       }));
     setPreviewUpdating(true);
     try {
       const nativePreviewEdits = previewEdits.filter((edit) => edit.mode !== "ocr");
-      if (!nativePreviewEdits.length) {
-        // OCR pages are rendered from the original PDF page and edited on the
-        // canvas by PdfTextPage. This gives immediate feedback and keeps the
-        // preview on the exact same raster path as the worker export.
-        setError("");
-        return;
-      }
       const { createPdfTextPreview } = await import("../lib/pdf-text-preview.js");
-      const previewBytes = await createPdfTextPreview(sourceBytesRef.current, nativePreviewEdits);
+      // An empty native edit list intentionally rebuilds from the source too.
+      // This is required when the user restores the original text; simply
+      // returning would leave the previous edited PDF.js page mounted.
+      const previewBytes = await createPdfTextPreview(sourceBytes, nativePreviewEdits);
       const previewPdf = await pdfLibrary.getDocument({ data: previewBytes }).promise;
       // PDF.js returns a Promise from getPage(). Passing that Promise into the
       // page model leaves the old canvas in place and prevents an empty
       // replacement from visibly removing the original text.
-      const previewPages = await Promise.all(pages.map((page) => previewPdf.getPage(page.pageIndex + 1)));
-      if (requestId !== previewRequestRef.current) return;
-      const previewPagesByIndex = new Map(pages.map((page, index) => [page.pageIndex, previewPages[index]]));
+      const previewPages = await Promise.all(pageModels.map((page) => previewPdf.getPage(page.pageIndex + 1)));
+      if (requestId !== previewRequestRef.current) {
+        previewPdf.cleanup?.();
+        return;
+      }
+      const previewPagesByIndex = new Map(pageModels.map((page, index) => [page.pageIndex, previewPages[index]]));
       setPages((current) => current.map((page) => {
         const previewPage = previewPagesByIndex.get(page.pageIndex);
         return previewPage ? { ...page, page: previewPage } : page;
@@ -1186,11 +1201,34 @@ export function PdfTextEditor() {
   const reset = () => {
     previewRequestRef.current += 1;
     if (job && ["queued", "processing"].includes(job.status)) deleteProcessingJob(jobMode, job.id).catch(() => undefined);
-    setPendingOcrFile(null); setOcrMode(null); setSource(null); setSourceHash(""); setPages([]); setEdits({}); setTextOffsets({}); setTextTransforms({}); setSelectedRun(null); setJob(null); setError(""); setUploadProgress(0); setPreviewUpdating(false); sourceBytesRef.current = null; sourcePasswordRef.current = "";
+    setPendingOcrFile(null); setOcrMode(null); setSource(null); setSourceHash(""); setPages([]); setEdits({}); setTextOffsets({}); setTextTransforms({}); setSelectedRun(null); setJob(null); setError(""); setUploadProgress(0); setPreviewUpdating(false); setCheckingLocation(false); sourceBytesRef.current = null; sourcePasswordRef.current = "";
   };
   const continueEditing = () => { setJob(null); setSelectedRun(null); setError(""); setUploadProgress(0); };
   const submit = async () => {
-    if (!canSubmit) { setError(!source ? "Add a PDF first." : !changedEdits.length ? "Select and save at least one text replacement." : processingMode === "local" ? "Admin login or activation is required in the Local agent dashboard." : "Server processing is unavailable."); return; }
+    if (!canSubmit) { setError(!source ? "Add a PDF first." : !changedEdits.length ? "Select and save at least one text replacement." : "The PDF is still being prepared. Try again in a moment."); return; }
+    // The initial location probe can finish after the PDF has loaded. Probe
+    // once more at export time so a worker that has just started is not left
+    // behind a stale disabled state, while still reporting a useful error when
+    // the selected processing location is genuinely unavailable.
+    let exportLocations = locations;
+    if (!isProcessingLocationReady(exportLocations, processingMode)) {
+      setError("");
+      setCheckingLocation(true);
+      try {
+        exportLocations = await probeProcessingLocations();
+        setLocations(exportLocations);
+      } catch (probeError) {
+        setCheckingLocation(false);
+        setError(probeError instanceof Error ? probeError.message : "The selected processing worker could not be reached.");
+        return;
+      }
+      setCheckingLocation(false);
+      if (!isProcessingLocationReady(exportLocations, processingMode)) {
+        const locationError = exportLocations?.[processingMode]?.error;
+        setError(locationError || (processingMode === "local" ? "The Local agent is not ready. Start and authorize it, then try again." : "The Server worker is not ready. Start the worker, then try again."));
+        return;
+      }
+    }
     const editPayload = [];
     const availableRuns = pages.flatMap((page) => page.runs);
     for (const { runId, replacementText, moveOnly } of changedEdits) {
@@ -1235,11 +1273,11 @@ export function PdfTextEditor() {
                   <div><span className="card-index">01</span><h2>Add one PDF</h2></div>
                   <span className="required-label">Required</span>
                 </div>
-                <FileDropzone file={source || pendingOcrFile} onFile={selectFile} onClear={reset} variant="pdf" accept="application/pdf,.pdf" label="Drop a PDF here" hint="or click to browse · choose embedded text or OCR after upload" disabled={loading || Boolean(job)} />
+                <FileDropzone file={source || pendingOcrFile} onFile={selectFile} onClear={reset} variant="pdf" accept="application/pdf,.pdf" label="Drop a PDF here" hint="or click to browse · choose automatic, embedded text, or OCR after upload" disabled={loading || Boolean(job)} />
                 <div className="limit-row"><span>Maximum file size</span><strong>200 MB</strong></div>
                 {pendingOcrFile && <div className="pdf-text-ocr-choice" role="dialog" aria-labelledby="pdf-text-ocr-choice-title">
-                  <div className="pdf-text-ocr-choice-copy"><strong id="pdf-text-ocr-choice-title">How should this PDF be read?</strong><span>Choose whether to scan every page with OCR or use only text already embedded in the PDF.</span></div>
-                  <div className="pdf-text-ocr-choice-actions"><button className="primary-button" type="button" onClick={() => chooseOcrMode("ocr")}><Pencil size={16} /> Use OCR</button><button className="secondary-button" type="button" onClick={() => chooseOcrMode("embedded")}><FileText size={16} /> Use embedded text only</button></div>
+                  <div className="pdf-text-ocr-choice-copy"><strong id="pdf-text-ocr-choice-title">How should this PDF be read?</strong><span>Automatic keeps usable embedded text and runs OCR only on pages that need visual text detection.</span></div>
+                  <div className="pdf-text-ocr-choice-actions"><button className="primary-button" type="button" onClick={() => chooseOcrMode("auto")}><FileText size={16} /> Automatic</button><button className="secondary-button" type="button" onClick={() => chooseOcrMode("ocr")}><Pencil size={16} /> Use OCR</button><button className="secondary-button" type="button" onClick={() => chooseOcrMode("embedded")}><FileText size={16} /> Use embedded text only</button></div>
                   <small>OCR makes detected words and symbol-like graphics selectable. Symbols stay artwork and can be moved, resized, or rotated, but their text cannot be replaced.</small>
                 </div>}
               </section>
@@ -1256,7 +1294,7 @@ export function PdfTextEditor() {
                       <button className="icon-button" type="button" onClick={() => changePreviewZoom(0.1)} aria-label="Zoom in" title="Zoom in (+)"><ZoomIn size={16} /></button>
                     </div>
                     <button className="primary-button" type="button" onClick={submit} disabled={!canSubmit}>
-                      {uploadProgress ? <><LoaderCircle className="spin" size={17} /> Uploading {uploadProgress}%</> : <><Pencil size={17} /> Export edited PDF</>}
+                      {uploadProgress ? <><LoaderCircle className="spin" size={17} /> Uploading {uploadProgress}%</> : checkingLocation ? <><LoaderCircle className="spin" size={17} /> Checking worker…</> : <><Pencil size={17} /> Export edited PDF</>}
                     </button>
                   </div>
                 </div>
