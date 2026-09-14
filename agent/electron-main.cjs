@@ -21,6 +21,7 @@ if (!app.requestSingleInstanceLock()) {
   const latestReleaseUrl = "https://github.com/Amangupta20000/media-toolbox/releases/latest";
   const updateState = {
     kind: "electron",
+    platform: process.platform,
     status: "unavailable",
     currentVersion: app.getVersion(),
     checkedAt: null,
@@ -254,6 +255,12 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle("agent:open-release-page", async () => {
       await shell.openExternal(latestReleaseUrl);
       return { ok: true, url: latestReleaseUrl };
+    });
+    ipcMain.handle("agent:open-macos-security-settings", async () => {
+      if (process.platform !== "darwin") throw new Error("macOS Privacy & Security is only available on macOS.");
+      const settingsUrl = "x-apple.systempreferences:com.apple.preference.security?General";
+      await shell.openExternal(settingsUrl);
+      return { ok: true, url: settingsUrl };
     });
     ipcMain.handle("agent:run-diagnostics", () => agent?.runDiagnostics?.() || Promise.reject(new Error("The agent diagnostics are not ready.")));
     ipcMain.handle("agent:open-results-folder", async () => {

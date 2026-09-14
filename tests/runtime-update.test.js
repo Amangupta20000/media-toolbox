@@ -309,6 +309,7 @@ test("runtime package includes the verified dashboard shell used after an unsign
     "agent/token.js",
     "agent/dashboard.html",
     "agent/dashboard.css",
+    "agent/dashboard-updates.css",
     "agent/dashboard-legal.css",
     "agent/dashboard-renderer.js",
     "agent/legal/privacy-policy.html",

@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("mediaToolboxAgent", {
   downloadUpdate: () => ipcRenderer.invoke("agent:download-update"),
   installUpdate: () => ipcRenderer.invoke("agent:install-update"),
   openReleasePage: () => ipcRenderer.invoke("agent:open-release-page"),
+  openMacosSecuritySettings: () => ipcRenderer.invoke("agent:open-macos-security-settings"),
   onUpdateState: (callback) => {
     if (typeof callback !== "function") return;
     ipcRenderer.on("agent:update-state", (_event, value) => callback(value));

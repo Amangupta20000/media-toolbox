@@ -39,6 +39,7 @@ for (const file of [
   "agent/preload.cjs",
   "agent/dashboard.html",
   "agent/dashboard.css",
+  "agent/dashboard-updates.css",
   "agent/dashboard-legal.css",
   "agent/dashboard-renderer.js",
   "agent/legal/privacy-policy.html",

@@ -26,6 +26,7 @@
     const action = el("agent-update-action");
     const progress = el("agent-update-progress");
     const progressBar = el("agent-update-progress-bar");
+    const guidance = el("agent-update-guidance");
     if (!panel || !title || !message || !action || !progress || !progressBar) return;
     const status = value.status || "unavailable";
     if (updateDismissTimer) window.clearTimeout(updateDismissTimer);
@@ -39,6 +40,7 @@
     panel.classList.toggle("update-ready", status === "downloaded");
     progress.classList.toggle("hidden", status !== "downloading");
     progressBar.style.width = `${Math.max(0, Math.min(100, Number(value.progress) || 0))}%`;
+    if (guidance) guidance.classList.toggle("hidden", value.platform !== "darwin" || !["manual", "full-required"].includes(status));
     if (status === "checking") {
       title.textContent = runtime ? "Checking for verified processing updates" : "Checking for agent updates";
       message.textContent = runtime ? "Checking the latest signed runtime package…" : "Checking the latest signed release…";
@@ -780,6 +782,15 @@
       renderUpdate(nextState);
     } catch (error) {
       renderUpdate({ status: "error", error: error.message || "The agent update could not be completed." });
+    } finally { button.disabled = false; }
+  });
+  el("agent-update-security-settings")?.addEventListener("click", async () => {
+    const button = el("agent-update-security-settings");
+    button.disabled = true;
+    try {
+      await api.openMacosSecuritySettings();
+    } catch (error) {
+      showNotice(error.message || "macOS Privacy & Security could not be opened.");
     } finally { button.disabled = false; }
   });
   el("check-updates-bottom")?.addEventListener("click", async () => {
