@@ -703,6 +703,8 @@ export function PdfEditor() {
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [job, setJob] = useState(null);
+  const [saveJob, setSaveJob] = useState(null);
+  const [saveNotice, setSaveNotice] = useState(null);
   const [error, setError] = useState("");
   const [previewError, setPreviewError] = useState("");
   const [pdfDragActive, setPdfDragActive] = useState(false);
@@ -765,6 +767,45 @@ export function PdfEditor() {
     if (!locations || keepResultTouchedRef.current) return;
     setKeepResult(Boolean(locations.local?.connected));
   }, [locations]);
+
+  // Saving to the device is a background persistence action. It still uses
+  // the local worker to produce the PDF, but it must not replace the editor
+  // with the export/result screen like an explicit Export PDF action does.
+  useEffect(() => {
+    if (!saveJob?.id) return undefined;
+    let active = true;
+    let timer = null;
+    const poll = async () => {
+      try {
+        const current = await getProcessingJob("local", saveJob.id);
+        if (!active) return;
+        if (current.status === "completed") {
+          const resultError = validatePdfResult(current.result);
+          setSaveJob(null);
+          setSaveNotice(resultError
+            ? { type: "error", message: `The PDF could not be saved: ${resultError}` }
+            : { type: "success", message: `Saved “${current.result.filename}” to the Local agent Results folder.` });
+          return;
+        }
+        if (current.status === "failed") {
+          setSaveJob(null);
+          setSaveNotice({ type: "error", message: current.error || "The PDF could not be saved to this device." });
+          return;
+        }
+        setSaveJob(current);
+        timer = window.setTimeout(poll, 1000);
+      } catch (error) {
+        if (!active) return;
+        setSaveJob(null);
+        setSaveNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to verify the saved PDF." });
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [saveJob?.id]);
 
   const defaultResultFilename = useMemo(() => {
     if (pdfFiles.length === 1) return `${filenameStem(pdfFiles[0]?.name)}_edited.pdf`;
@@ -841,6 +882,7 @@ export function PdfEditor() {
     const currentPages = pagesRef.current;
     const currentPdfFiles = pdfFilesRef.current;
     if (nextPages === currentPages && nextPdfFiles === currentPdfFiles) return false;
+    setSaveNotice(null);
     if (history === "coalesce") {
       if (!pendingHistoryRef.current) {
         pendingHistoryRef.current = { pages: currentPages, pdfFiles: currentPdfFiles };
@@ -1435,6 +1477,7 @@ export function PdfEditor() {
 
   const reset = () => {
     if (job && jobMode !== "browser" && (job.status === "queued" || job.status === "processing")) deleteProcessingJob(jobMode, job.id).catch(() => undefined);
+    if (saveJob && (saveJob.status === "queued" || saveJob.status === "processing")) deleteProcessingJob("local", saveJob.id).catch(() => undefined);
     for (const page of pages) for (const image of getPageImages(page)) if (image.url) { URL.revokeObjectURL(image.url); imageUrlsRef.current.delete(image.url); }
     documentsRef.current = [];
     if (browserResultUrlRef.current) URL.revokeObjectURL(browserResultUrlRef.current);
@@ -1443,7 +1486,7 @@ export function PdfEditor() {
     pdfFilesRef.current = [];
     pagesRef.current = [];
     resultFilenameTouchedRef.current = false;
-    setPdfFiles([]); setPages([]); setSelectedId(null); setSelectedObject(null); setJob(null); setJobKeepResult(false); setContinuingFile(null); setError(""); setPreviewError(""); setUploadProgress(0); setResultFilenameStem("");
+    setPdfFiles([]); setPages([]); setSelectedId(null); setSelectedObject(null); setJob(null); setSaveJob(null); setSaveNotice(null); setJobKeepResult(false); setContinuingFile(null); setError(""); setPreviewError(""); setUploadProgress(0); setResultFilenameStem("");
   };
 
   const continueEditing = async (result) => {
@@ -1536,7 +1579,12 @@ export function PdfEditor() {
       const response = await uploadWithProgress(form, processingMode, setUploadProgress);
       setUploadProgress(0);
       setJobKeepResult(effectiveKeepResult);
-      setJob({ id: response.jobId, status: "queued", progress: 0, stage: "Queued", message: effectiveKeepResult ? "Waiting for the worker. The completed PDF will be saved to this device." : "Waiting for the worker.", logs: [], warnings: [], error: null, result: null });
+      if (saveToDevice && processingMode === "local") {
+        setSaveNotice(null);
+        setSaveJob({ id: response.jobId, status: "queued", progress: 0, stage: "Saving…", message: "Saving the current PDF to this device…", logs: [], warnings: [], error: null, result: null });
+      } else {
+        setJob({ id: response.jobId, status: "queued", progress: 0, stage: "Queued", message: effectiveKeepResult ? "Waiting for the worker. The completed PDF will be saved to this device." : "Waiting for the worker.", logs: [], warnings: [], error: null, result: null });
+      }
     } catch (submitError) {
       setUploadProgress(0);
       setError(submitError instanceof Error ? submitError.message : "The PDF project could not be uploaded.");
@@ -1558,6 +1606,12 @@ export function PdfEditor() {
       if (command && event.key.toLowerCase() === "d") {
         event.preventDefault();
         void duplicateSelectedPage();
+        return;
+      }
+      if (command && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        if (processingMode === "local" && !saveJob) void submit({ saveToDevice: true });
+        else if (processingMode !== "local") setError("Save to device requires Local agent mode.");
         return;
       }
       if (command && event.key === "Enter") {
@@ -1598,7 +1652,7 @@ export function PdfEditor() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeView, job, loadingFiles, selectedPage, previewZoom, pages, pdfFiles, processingMode, canRedo, canUndo]);
+  }, [activeView, job, saveJob, loadingFiles, selectedPage, previewZoom, pages, pdfFiles, processingMode, canRedo, canUndo]);
 
   return <AppShell>
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools · Beta <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · 200 MB total</span></div><h1>PDF editor</h1><p>Merge documents, reorder pages, remove pages, add images, or place styled text boxes on PDF pages and new blank pages.</p></div></div>
@@ -1633,10 +1687,10 @@ export function PdfEditor() {
             </div>}
           </div>
           <div className="pdf-zoom-controls" aria-label="Preview zoom"><button className="icon-button" type="button" onClick={() => changePreviewZoom(-0.1)} aria-label="Zoom out" title="Zoom out (-)"><ZoomOut size={16} /></button><button className="pdf-zoom-value" type="button" onClick={resetPreviewZoom} title="Reset zoom (0)">{Math.round(previewZoom * 100)}%</button><button className="icon-button" type="button" onClick={() => changePreviewZoom(0.1)} aria-label="Zoom in" title="Zoom in (+)"><ZoomIn size={16} /></button></div>
-          {processingMode === "local" && <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles} title="Process the PDF and keep it in the Local agent Results folder"><Save size={17} /> Save to device</button>}
+          {processingMode === "local" && <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles || Boolean(saveJob)} title="Save the current PDF to the Local agent Results folder without leaving the editor"><Save size={17} /> {saveJob ? "Saving…" : "Save to device"}</button>}
           <button className="primary-button" type="button" onClick={submit} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles}><WandSparkles size={17} /> {uploadProgress ? `Uploading ${uploadProgress}%` : "Export PDF"}</button>
         </div>
-        <div className="pdf-shortcuts"><Keyboard size={14} /> ←/→ rotate · ⌘/Ctrl+D duplicate · ⌘/Ctrl+Z undo · ⇧⌘/Ctrl+Z redo · Delete remove · +/- zoom · ⌘/Ctrl+Enter export</div>
+        <div className="pdf-shortcuts"><Keyboard size={14} /> ←/→ rotate · ⌘/Ctrl+D duplicate · ⌘/Ctrl+Z undo · ⇧⌘/Ctrl+Z redo · Delete remove · +/- zoom · ⌘/Ctrl+S save · ⌘/Ctrl+Enter export</div>
       </div>
       <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { addPdfFiles(event.target.files); event.target.value = ""; }} />
       <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/heic,image/heif,image/tiff,image/gif,image/bmp,.png,.jpg,.jpeg,.heic,.heif,.tif,.tiff,.gif,.bmp" multiple hidden onChange={(event) => { const targetPageId = imageTargetPageIdRef.current; imageTargetPageIdRef.current = null; addImages(event.target.files, targetPageId || undefined); event.target.value = ""; }} />
@@ -1645,6 +1699,8 @@ export function PdfEditor() {
         <aside className="pdf-page-rail"><div className="pdf-rail-heading"><span>Pages</span><small>Pages load as you scroll</small></div><div ref={pageListRef} className="pdf-page-list" onDragOver={handlePageListDragOver} onDrop={handlePageListDrop}>{renderPageList()}</div></aside>
         <section className="pdf-selected-panel"><div className="pdf-selected-heading"><div><span>Selected page {selectedPage ? pages.findIndex((page) => page.id === selectedPage.id) + 1 : "—"}</span><small>{selectedPage?.kind === "blank" ? "Blank page" : selectedPage?.sourceName || "Choose a page"}{selectedPage?.kind === "source" ? ` · Original page ${selectedPage.pageNumber}` : ""}</small></div></div><div ref={previewScrollRef} className="pdf-document-preview" onScroll={handlePreviewScroll}>{pages.map((page, index) => <Fragment key={page.id}><PdfPreviewPage page={page} index={index} selected={page.id === selectedPage?.id} previewZoom={previewZoom} pdfDocument={documentsRef.current[page.pdfIndex]} previewRootRef={previewScrollRef} elementRef={(element) => { if (element) previewElementRefs.current.set(page.id, element); else previewElementRefs.current.delete(page.id); }} selectedObject={selectedObject?.pageId === page.id ? selectedObject : null} onSelectObject={(object) => setSelectedObject(object ? { ...object, pageId: page.id } : null)} onChange={(images, history) => updatePage(page.id, { images }, history)} onRemove={(imageId) => removeImage(page.id, imageId)} onChangeTextBoxes={(textBoxes, history) => updatePage(page.id, { textBoxes }, history)} onRemoveTextBox={(textBoxId) => removeTextBox(page.id, textBoxId)} onAddImages={() => openImagePickerForPage(page.id)} onError={setPreviewError} /><PdfInsertPageButton pageNumber={index + 1} onClick={() => addBlankPageAfter(page.id)} /></Fragment>)}</div>{previewError && <DismissibleMessage className="pdf-preview-error" resetKey={previewError}><AlertTriangle size={16} /><span>{previewError}</span></DismissibleMessage>}<p className="pdf-editor-tip"><GripVertical size={15} /> Scroll the preview to select a page. Click + Add page between previews to insert a blank page. Use Text box to add editable text to the selected page.</p></section>
       </div>}
+      {saveJob && <div className="pdf-save-progress" role="status" aria-live="polite"><LoaderCircle className="spin" size={16} /><span>{saveJob.message || "Saving the current PDF to this device…"}</span></div>}
+      {saveNotice && <DismissibleMessage className={saveNotice.type === "success" ? "success-banner pdf-save-notice" : "error-banner pdf-save-notice"} resetKey={saveNotice.message}>{saveNotice.type === "success" ? <CheckCircle2 size={17} /> : <AlertTriangle size={18} />}<span>{saveNotice.message}</span></DismissibleMessage>}
       {error && <DismissibleMessage className="error-banner" resetKey={error}><AlertTriangle size={18} /><span>{error}</span></DismissibleMessage>}
     </section>}
     </>}

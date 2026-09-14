@@ -101,6 +101,21 @@ test("PDF editor can export blank-page-only projects and lets users rename downl
   assert.match(intake, /styled range/);
 });
 
+test("PDF editor saves to the device in place without opening the export result view", async () => {
+  const shell = await read("components/pdf-editor.jsx");
+  const styles = await read("styles/globals.css");
+  assert.match(shell, /const \[saveJob, setSaveJob\] = useState\(null\)/);
+  assert.match(shell, /getProcessingJob\("local", saveJob\.id\)/);
+  assert.match(shell, /setSaveJob\(\{ id: response\.jobId/);
+  assert.match(shell, /setSaveJob\(null\);\s*setSaveNotice\(/);
+  assert.match(shell, /without leaving the editor/);
+  assert.match(shell, /⌘\/Ctrl\+S save/);
+  assert.match(shell, /className="pdf-save-progress"/);
+  assert.match(shell, /className=\{saveNotice\.type === "success" \? "success-banner pdf-save-notice"/);
+  assert.match(styles, /\.pdf-save-progress \{/);
+  assert.match(styles, /\.pdf-save-notice \{/);
+});
+
 test("PDF result download route accepts a safe custom filename while preserving the extension", async () => {
   const route = await read("pages/api/jobs/[id]/download.js");
   const agent = await read("agent/server.js");
