@@ -539,7 +539,11 @@ async function handle(request, response) {
   const authorization = refreshAuthorization();
   const url = new URL(request.url || "/", `${state.protocol}://${request.headers.host || "127.0.0.1"}`);
   const pathParts = url.pathname.split("/").filter(Boolean);
-  const origin = addCors(request, response, pathParts[0] === "v1" && ["health", "pair"].includes(pathParts[1]));
+  // CORS negotiation is separate from authorization. Echo the requesting
+  // website origin for every agent API so browsers can read a useful 401/402
+  // or 403 response during session discovery; each endpoint still validates
+  // the origin, pairing, token, and authorization before returning data.
+  const origin = addCors(request, response, pathParts[0] === "v1");
   if (request.method === "OPTIONS") {
     response.statusCode = origin || !request.headers.origin ? 204 : 403;
     response.end();

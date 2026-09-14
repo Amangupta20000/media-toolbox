@@ -1316,6 +1316,22 @@ test("secure website health responses include the private-network permission", a
   assert.equal(response.headers.get("access-control-allow-private-network"), "true");
 });
 
+test("secure website session preflight exposes authorization responses to the browser", async () => {
+  const response = await fetch(url("/v1/session"), {
+    method: "OPTIONS",
+    headers: {
+      Origin: "https://media-toolbox-woad.vercel.app",
+      "Access-Control-Request-Method": "POST",
+      "Access-Control-Request-Headers": "content-type",
+      "Access-Control-Request-Private-Network": "true",
+    },
+  });
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get("access-control-allow-origin"), "https://media-toolbox-woad.vercel.app");
+  assert.equal(response.headers.get("access-control-allow-headers"), "Authorization, Content-Type");
+  assert.equal(response.headers.get("access-control-allow-private-network"), "true");
+});
+
 test("agent rejects a different origin after pairing", async () => {
   const response = await fetch(url("/v1/capabilities"), { headers: { Authorization: "Bearer invalid", Origin: "http://evil.example" } });
   assert.equal(response.status, 401);
