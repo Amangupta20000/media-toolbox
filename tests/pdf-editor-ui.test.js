@@ -114,8 +114,15 @@ test("PDF editor saves to the device in place without opening the export result 
   assert.match(shell, /⌘\/Ctrl\+S save/);
   assert.match(shell, /className="pdf-save-progress"/);
   assert.match(shell, /className=\{saveNotice\.type === "success" \? "success-banner pdf-save-notice"/);
+  assert.match(shell, /className="pdf-editor-toolbar-name"[\s\S]*ResultFilenameField/);
+  assert.match(shell, /className="pdf-more-tools pdf-more-tools-bottom"/);
+  const toolbarActions = shell.match(/<div className="pdf-editor-actions">([\s\S]*?)<\/div>\s*\{processingMode === "local" && <div className="pdf-editor-toolbar-name">/)?.[1];
+  assert.ok(toolbarActions, "PDF editor toolbar action placement could not be located");
+  assert.doesNotMatch(toolbarActions, /pdf-more-tools/);
   assert.match(styles, /\.pdf-save-progress \{/);
   assert.match(styles, /\.pdf-save-notice \{/);
+  assert.match(styles, /\.pdf-editor-toolbar-name/);
+  assert.match(styles, /\.pdf-more-tools-bottom \.pdf-more-tools-menu/);
 });
 
 test("PDF result download route accepts a safe custom filename while preserving the extension", async () => {
