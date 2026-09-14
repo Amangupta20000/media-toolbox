@@ -54,6 +54,8 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /resultFilenameStem/);
   assert.match(shell, /form\.append\("filename"/);
   assert.match(shell, /Saved PDF name/);
+  assert.match(shell, /Save to device/);
+  assert.match(shell, /Exported PDFs are temporary unless you choose Save to device/);
   assert.match(await read("lib/job-intake.js"), /safePdfOutputFilename/);
   assert.match(await read("worker/index.js"), /manifest\.outputFilename/);
   const styles = await read("styles/globals.css");
@@ -83,6 +85,8 @@ test("PDF editor can export blank-page-only projects and lets users rename downl
   assert.match(worker, /manifest\.pdfs\.length > 1 \? "merged" : "blank_pages"/);
   assert.match(await read("scripts/stage-agent-package.mjs"), /staged Local agent still contains the old PDF-editor requirement/);
   assert.match(filenameField, /Download file name/);
+  assert.match(shell, /Save to device/);
+  assert.match(shell, /Exported PDFs are temporary unless you choose Save to device/);
   assert.match(await read("components/tool-page.jsx"), /ResultFilenameField/);
   assert.match(await read("components/pdf-text-editor.jsx"), /ResultFilenameField/);
   assert.match(worker, /layoutPdfTextRuns/);

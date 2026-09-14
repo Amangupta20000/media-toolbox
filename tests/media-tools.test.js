@@ -949,6 +949,8 @@ test("PDF text editor intake and worker preserve searchable output and live job 
     jobDir: testRoot,
     fields: {
       tool: "pdf-text-editor",
+      filename: "Client edited text.pdf",
+      retention: "keep",
       edits: JSON.stringify([{ pageIndex: 0, runId: run.runId, originalTextHash: run.originalTextHash, replacementText: "Local and server" }]),
     },
     files: [{ field: "source", name: "text-edit-source.pdf", mime: "application/pdf", path: sourcePath, size: (await fs.stat(sourcePath)).size }],
@@ -962,6 +964,7 @@ test("PDF text editor intake and worker preserve searchable output and live job 
   assert.equal(completed.progress, 100);
   assert.equal(publicJob.logs.some((entry) => entry.message.includes("PDF text editing")), true);
   assert.equal(output.editCount, 1);
+  assert.equal(output.filename, "Client_edited_text.pdf");
   const edited = await extractPdfTextRuns(await fs.readFile(output.path));
   assert.equal(edited.pages[0].runs[0].text, "Local and server");
 });

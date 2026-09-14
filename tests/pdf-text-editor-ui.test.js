@@ -58,6 +58,13 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /applyRasterTextEdits/);
   assert.doesNotMatch(shell, /pdf-text-edit-preview/);
   assert.match(shell, /Continue editing/);
+  assert.match(shell, /Keep final result on this device/);
+  assert.match(shell, /Saved PDF name/);
+  assert.match(shell, /Save to device/);
+  assert.match(shell, /Exported PDFs are temporary unless you choose Save to device/);
+  assert.match(shell, /form\.append\("filename"/);
+  assert.match(intake, /outputFilename/);
+  assert.match(worker, /safePdfOutputFilename\(options\.outputFilename/);
   assert.match(shell, /PdfTextJobLog logs=\{job\.logs \|\| \[\]\}/);
   assert.match(shell, /error\?\.code === "request_timeout"/);
   assert.match(shell, /takeHistoryEdit\("pdf-text-editor"\)/);

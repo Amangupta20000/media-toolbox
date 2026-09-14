@@ -984,7 +984,7 @@ async function processPdfTextEditor(job) {
     edited = await applyPdfTextEdits(input, nativeEdits, { password: Boolean(options.passwordProvided), onProgress: reportReadProgress });
   }
   update(job.id, 82, "Writing PDF", isOcr ? "Rebuilding only the edited OCR page regions." : "Replacing the selected text operators without rasterizing the document.", edited.warnings);
-  const outputName = `${stem(job.source_name)}_${isOcr ? "ocr_text" : "text"}_edited.pdf`;
+  const outputName = safePdfOutputFilename(options.outputFilename, `${stem(job.source_name)}_${isOcr ? "ocr_text" : "text"}_edited.pdf`);
   const outputPath = path.join(path.dirname(job.source_path), outputName);
   await fsp.writeFile(outputPath, edited.bytes);
   let outputDocument;
