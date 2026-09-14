@@ -449,6 +449,16 @@ function onlineLicenseUrls(pathname) {
   });
 }
 
+function auditDeviceHeaders() {
+  const record = ensureAgentAuth();
+  const deviceName = String(os.hostname() || "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 200);
+  return {
+    "X-Media-Toolbox-Device-Id": String(record.device_id || "").slice(0, 200),
+    "X-Media-Toolbox-Device-Name": deviceName,
+    "X-Media-Toolbox-OS": process.platform,
+  };
+}
+
 async function onlineLicenseFetch(pathname, options = {}) {
   let lastError;
   const attempts = [];
@@ -460,6 +470,7 @@ async function onlineLicenseFetch(pathname, options = {}) {
       const response = await licenseServerFetch(requestUrl, {
         cache: "no-store",
         ...options,
+        headers: { ...auditDeviceHeaders(), ...(options.headers || {}) },
         signal: controller.signal,
       });
       let body = {};

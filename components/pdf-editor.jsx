@@ -1467,6 +1467,7 @@ export function PdfEditor() {
     const height = Math.min(86, Math.max(52, selectedPage.height * 0.12));
     const textBox = { id: makeId(), text: "", x: Math.max(0, (selectedPage.width - width) / 2), y: Math.max(0, (selectedPage.height - height) / 2), width, height, rotation: 0, fontSize: 18, fontFamily: "Helvetica", bold: false, italic: false, underline: false, color: "#173b53", backgroundColor: "transparent" };
     updatePage(selectedPage.id, { textBoxes: [...getPageTextBoxes(selectedPage), textBox] });
+    setSelectedObject({ type: "textBox", id: textBox.id, pageId: selectedPage.id });
     setError("");
   };
 
@@ -1665,7 +1666,6 @@ export function PdfEditor() {
         <div className="pdf-editor-actions">
           <button className="secondary-button" type="button" onClick={() => pdfInputRef.current?.click()} disabled={loadingFiles || pdfFiles.length >= MAX_PDF_COUNT}><Plus size={17} /> Add PDF</button>
           <button className="secondary-button" type="button" onClick={addBlankPage}><FilePlus2 size={17} /> Blank page</button>
-          <button className="secondary-button" type="button" onClick={addTextBox} disabled={!selectedPage} title={selectedPage ? "Add a text box to the selected page" : "Add a page first"}><Type size={17} /> Text box</button>
           <div ref={moreToolsRef} className="pdf-more-tools">
             <button className="icon-button pdf-more-tools-trigger" type="button" aria-label="Open other PDF tools" aria-haspopup="menu" aria-expanded={moreToolsOpen} title={selectedPage ? "Other tools" : canUndo || canRedo ? "Undo or redo document changes" : "Add a page to use other tools"} disabled={!selectedPage && !canUndo && !canRedo} onClick={() => setMoreToolsOpen((current) => !current)}><MoreHorizontal size={20} /></button>
             {moreToolsOpen && (selectedPage || canUndo || canRedo) && <div className="pdf-more-tools-menu" role="menu" aria-label="Other PDF tools">

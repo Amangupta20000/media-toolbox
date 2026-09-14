@@ -16,6 +16,39 @@ function clientUserAgent(request) {
   return String(request.headers["user-agent"] || "unknown").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 240) || "unknown";
 }
 
+function safeAuditValue(value, limit = 200) {
+  return String(value || "").replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim().slice(0, limit);
+}
+
+function auditOsLabel(value) {
+  const normalized = safeAuditValue(value).toLowerCase();
+  if (/win32|windows/.test(normalized)) return "Windows";
+  if (/darwin|macos|mac os|macintosh/.test(normalized)) return "macOS";
+  if (/android/.test(normalized)) return "Android";
+  if (/ios|iphone|ipad/.test(normalized)) return "iOS";
+  if (/linux/.test(normalized)) return "Linux";
+  if (/freebsd/.test(normalized)) return "FreeBSD";
+  return "";
+}
+
+function auditOsFromUserAgent(userAgent) {
+  return auditOsLabel(userAgent);
+}
+
+function requestDeviceDetails(request, body = {}) {
+  const headers = request.headers || {};
+  const payload = body && typeof body === "object" ? body : {};
+  const userAgent = clientUserAgent(request);
+  const deviceId = safeAuditValue(payload.deviceId || headers["x-media-toolbox-device-id"]);
+  const deviceName = safeAuditValue(payload.deviceName || headers["x-media-toolbox-device-name"]);
+  const os = auditOsLabel(payload.os || headers["x-media-toolbox-os"] || "") || auditOsFromUserAgent(userAgent);
+  return {
+    ...(deviceId ? { deviceId } : {}),
+    ...(deviceName ? { deviceName } : {}),
+    ...(os ? { os } : {}),
+  };
+}
+
 function normalizeOrigin(value) {
   try {
     const parsed = new URL(String(value || "").trim());
@@ -154,7 +187,7 @@ export class LicenseService {
       durationMs,
       now,
       expiresAt: now + this.config.requestTtlMs,
-      auditDetails: { clientIp: clientIp(request), userAgent: clientUserAgent(request) },
+      auditDetails: { ...requestDeviceDetails(request, body), clientIp: clientIp(request), userAgent: clientUserAgent(request) },
     });
     return { requestId: created.id, requestToken: created.requestToken, status: "pending", createdAt: now, expiresAt: now + this.config.requestTtlMs };
   }
@@ -192,7 +225,7 @@ export class LicenseService {
       codeHash: licenseCodeHash(code),
       encryptedCode,
       now: this.now(),
-      auditDetails: { clientIp: clientIp(request), userAgent: clientUserAgent(request) },
+      auditDetails: { ...requestDeviceDetails(request), clientIp: clientIp(request), userAgent: clientUserAgent(request) },
     });
     return publicRequest(this.store.getRequest(id));
   }
@@ -203,7 +236,7 @@ export class LicenseService {
     return publicRequest(this.store.decline(id, {
       reason,
       now: this.now(),
-      auditDetails: { clientIp: clientIp(request), userAgent: clientUserAgent(request) },
+      auditDetails: { ...requestDeviceDetails(request), clientIp: clientIp(request), userAgent: clientUserAgent(request) },
     }));
   }
 
@@ -226,7 +259,7 @@ export class LicenseService {
       deviceId,
       origin,
       now: this.now(),
-      auditDetails: { clientIp: clientIp(request), userAgent: clientUserAgent(request) },
+      auditDetails: { ...requestDeviceDetails(request, body), clientIp: clientIp(request), userAgent: clientUserAgent(request) },
     });
     const boundPayload = { ...payload, deviceId, boundAt: this.now() };
     const token = createSignedLicenseToken(boundPayload, privateKey);
@@ -236,7 +269,7 @@ export class LicenseService {
   async handle(request, response) {
     const url = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`);
     const origin = (() => { try { return this.allowedOrigin(request); } catch { return ""; } })();
-    response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-Token");
+    response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-Token, X-Media-Toolbox-Device-Id, X-Media-Toolbox-Device-Name, X-Media-Toolbox-OS");
     response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     response.setHeader("Access-Control-Max-Age", "600");
     if (request.method === "OPTIONS") return json(response, origin ? 204 : (request.headers.origin ? 403 : 204), {}, origin);
@@ -260,18 +293,18 @@ export class LicenseService {
         const body = await readJson(request, this.config.maxBodyBytes);
         const username = String(body.username || "");
         if (username !== this.config.adminUsername || !adminPasswordMatches(body.password, this)) {
-          this.store.audit("admin.login.failed", null, origin, { username: username.slice(0, 80), clientIp: clientIp(request), userAgent: clientUserAgent(request) }, this.now());
+          this.store.audit("admin.login.failed", null, origin, { ...requestDeviceDetails(request, body), username: username.slice(0, 80), clientIp: clientIp(request), userAgent: clientUserAgent(request) }, this.now());
           throw new Error("The Admin username or password is incorrect.");
         }
         const now = this.now();
         const session = this.store.createAdminSession({ now, expiresAt: now + this.config.adminSessionTtlMs });
-        this.store.audit("admin.login", null, origin, { username, clientIp: clientIp(request), userAgent: clientUserAgent(request), expiresAt: session.expiresAt }, now);
+        this.store.audit("admin.login", null, origin, { ...requestDeviceDetails(request, body), username, clientIp: clientIp(request), userAgent: clientUserAgent(request), expiresAt: session.expiresAt }, now);
         return json(response, 200, { ok: true, ...session }, origin);
       }
       if (url.pathname === "/v1/admin/logout" && request.method === "POST") {
         const token = this.requireAdmin(request);
         this.store.deleteAdminSession(token);
-        this.store.audit("admin.logout", null, origin, { clientIp: clientIp(request), userAgent: clientUserAgent(request) }, this.now());
+        this.store.audit("admin.logout", null, origin, { ...requestDeviceDetails(request), clientIp: clientIp(request), userAgent: clientUserAgent(request) }, this.now());
         return json(response, 200, { ok: true }, origin);
       }
       if (url.pathname === "/v1/admin/license-requests" && request.method === "GET") {

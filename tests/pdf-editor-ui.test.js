@@ -35,9 +35,11 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(styles, /\.pdf-text-box-overlay\.selected/);
   assert.match(styles, /\.pdf-object-transform-handles/);
   assert.match(shell, /Text box/);
+  assert.doesNotMatch(shell, /<button className="secondary-button" type="button" onClick=\{addTextBox\} disabled=\{!selectedPage\}/);
   assert.match(shell, /Text size for text box/);
   assert.match(shell, /Background color for text box/);
   assert.match(shell, /onChangeTextBoxes/);
+  assert.match(shell, /setSelectedObject\(\{ type: "textBox", id: textBox\.id, pageId: selectedPage\.id \}\)/);
   assert.match(shell, /History/);
   assert.match(shell, /undoDocument/);
   assert.match(shell, /redoDocument/);

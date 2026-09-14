@@ -123,7 +123,7 @@ export default async function handler(request, response) {
   }
 
   const headers = {};
-  for (const name of ["accept", "authorization", "content-type", "origin", "user-agent", "x-request-token"]) {
+  for (const name of ["accept", "authorization", "content-type", "origin", "user-agent", "x-request-token", "x-media-toolbox-device-id", "x-media-toolbox-device-name", "x-media-toolbox-os"]) {
     const value = request.headers[name];
     if (value) headers[name] = Array.isArray(value) ? value.join(", ") : String(value);
   }

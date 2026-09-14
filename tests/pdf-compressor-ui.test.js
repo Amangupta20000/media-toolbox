@@ -13,6 +13,7 @@ test("PDF compressor is registered as a beta tool and keeps signatures planned",
   const history = await read("components/tool-history.jsx");
   const intake = await read("lib/job-intake.js");
   const worker = await read("worker/index.js");
+  assert.match(history, /tool !== "pdf-compressor" && <button className="secondary-button" type="button" onClick=\{onEdit\}/);
   assert.match(navigation, /href: "\/pdf-compressor"[^\n]+beta: true/);
   assert.match(comingSoon, /\["PDF compressor"[^\n]+"Beta", "\/pdf-compressor"\]/);
   assert.match(comingSoon, /\["Sign images & PDFs"[^\n]+PenLine\]/);

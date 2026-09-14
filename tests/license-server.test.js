@@ -63,13 +63,14 @@ test("licensing server handles approval, online agent redemption, replay, and wr
       headers: {
         Origin: "http://localhost:3000",
         "Access-Control-Request-Method": "POST",
-        "Access-Control-Request-Headers": "content-type",
+        "Access-Control-Request-Headers": "content-type, x-media-toolbox-device-id, x-media-toolbox-device-name, x-media-toolbox-os",
       },
     });
     assert.equal(preflight.status, 204);
     assert.equal(preflight.headers.get("access-control-allow-origin"), "http://localhost:3000");
     assert.match(preflight.headers.get("access-control-allow-methods") || "", /POST/);
     assert.match(preflight.headers.get("access-control-allow-headers") || "", /Content-Type/i);
+    assert.match(preflight.headers.get("access-control-allow-headers") || "", /X-Media-Toolbox-Device-Id/i);
 
     const invalidOrigin = await jsonRequest("/v1/license-requests", { method: "POST", headers: { Origin: "https://evil.example" }, body: JSON.stringify({ origin: "https://evil.example" }) });
     assert.equal(invalidOrigin.status, 403);
@@ -89,7 +90,7 @@ test("licensing server handles approval, online agent redemption, replay, and wr
     const badLogin = await jsonRequest("/v1/admin/login", { method: "POST", headers: { Origin: "http://localhost:3000" }, body: JSON.stringify({ username: "Admin", password: "wrong" }) });
     assert.equal(badLogin.status, 401);
     assert.equal(badLogin.headers.get("access-control-allow-origin"), "http://localhost:3000");
-    const login = await jsonRequest("/v1/admin/login", { method: "POST", body: JSON.stringify({ username: "Admin", password: "Aman" }) });
+    const login = await jsonRequest("/v1/admin/login", { method: "POST", headers: { Origin: "http://localhost:3000", "X-Media-Toolbox-Device-Id": "owner-device", "X-Media-Toolbox-Device-Name": "Owner Mac", "X-Media-Toolbox-OS": "darwin" }, body: JSON.stringify({ username: "Admin", password: "Aman" }) });
     assert.equal(login.status, 200);
     const admin = await login.json();
     assert.ok(admin.token);
@@ -111,6 +112,10 @@ test("licensing server handles approval, online agent redemption, replay, and wr
     assert.equal(auditBeforeRedemption.storagePath, path.join(root, "licenses.sqlite3"));
     assert.ok(auditBeforeRedemption.items.some((item) => item.event === "request.created" && item.requestId === created.requestId));
     assert.ok(auditBeforeRedemption.items.some((item) => item.event === "admin.login"));
+    const ownerLoginAudit = auditBeforeRedemption.items.find((item) => item.event === "admin.login");
+    assert.equal(ownerLoginAudit.details.deviceId, "owner-device");
+    assert.equal(ownerLoginAudit.details.deviceName, "Owner Mac");
+    assert.equal(ownerLoginAudit.details.os, "macOS");
 
     const approvedResponse = await fetch(`${base}/v1/admin/license-requests/${created.requestId}/approve`, { method: "POST", headers: { Authorization: `Bearer ${admin.token}`, "Content-Type": "application/json" }, body: "{}" });
     assert.equal(approvedResponse.status, 200);

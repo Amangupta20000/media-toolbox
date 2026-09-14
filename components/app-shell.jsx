@@ -3,16 +3,19 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { Archive, Bot, Clock3, Film, FileText, Image as ImageIcon, Menu, Moon, PanelLeftClose, PanelLeftOpen, ShieldCheck, Sparkles, Sun } from "lucide-react";
+import { Archive, Bot, ChevronDown, Clock3, Film, FileText, Image as ImageIcon, Menu, Moon, PanelLeftClose, PanelLeftOpen, ShieldCheck, Sparkles, Sun } from "lucide-react";
 import { probeLocalAgent } from "./processing-client.js";
 
 const navigation = [
   { href: "/image-converter", label: "Image converter", detail: "Resize-free format conversion", icon: ImageIcon },
   { href: "/video-repair", label: "Video repair", detail: "Layered recovery workflow", icon: Film },
+  { href: "/local-agent", label: "Local agent", detail: "Process files on this device", icon: Bot },
+];
+
+const pdfNavigation = [
   { href: "/pdf-editor", label: "PDF editor", detail: "Merge and arrange pages", icon: FileText, beta: true },
   { href: "/pdf-text-editor", label: "PDF text editor", detail: "Edit existing PDF text", icon: FileText, beta: true },
   { href: "/pdf-compressor", label: "PDF compressor", detail: "Reduce PDF file size", icon: Archive, beta: true },
-  { href: "/local-agent", label: "Local agent", detail: "Process files on this device", icon: Bot },
 ];
 
 const moreNavigation = [
@@ -47,6 +50,9 @@ export function AppShell({ children }) {
   const [theme, setTheme] = useState("light");
   const [localAgentStatus, setLocalAgentStatus] = useState({ available: false, connected: false });
   const [timerNow, setTimerNow] = useState(() => Date.now());
+  const [pdfToolsOpen, setPdfToolsOpen] = useState(false);
+
+  const pdfToolActive = pdfNavigation.some((item) => pathname === item.href);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("media-toolbox-theme");
@@ -110,6 +116,24 @@ export function AppShell({ children }) {
             {active && <span className="active-dot" />}
           </Link>;
         })}
+        <div className="pdf-tools-group">
+          <button type="button" className={`tool-nav-item pdf-tools-trigger ${pdfToolActive ? "active" : ""}`} aria-expanded={pdfToolsOpen} aria-controls="pdf-tools-subnav" onClick={() => setPdfToolsOpen((value) => !value)} title="PDF tools">
+            <span className="nav-icon"><FileText size={19} /></span>
+            <span className="nav-copy"><span className="nav-label-row"><strong>PDF tools</strong></span><small>Edit, manage, and compress PDFs</small></span>
+            <ChevronDown className="pdf-tools-chevron" size={18} aria-hidden="true" />
+          </button>
+          {pdfToolsOpen && <div id="pdf-tools-subnav" className="pdf-tools-subnav" role="group" aria-label="PDF tools">
+            {pdfNavigation.map((item) => {
+              const Icon = item.icon;
+              const active = pathname === item.href;
+              return <Link key={item.href} href={item.href} className={`tool-nav-item pdf-tool-child ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}>
+                <span className="nav-icon"><Icon size={17} /></span>
+                <span className="nav-copy"><span className="nav-label-row"><strong>{item.label}</strong>{item.beta && <span className="nav-beta">Beta</span>}</span><small>{item.detail}</small></span>
+                {active && <span className="active-dot" />}
+              </Link>;
+            })}
+          </div>}
+        </div>
       </nav>
       <div className="sidebar-label coming-soon-nav-label">More tools</div>
       <nav className="tool-nav" aria-label="More tools">

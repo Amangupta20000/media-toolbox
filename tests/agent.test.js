@@ -331,9 +331,25 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardHtml, /id="license-owner-panel"/);
   assert.match(dashboardHtml, /id="license-audit-panel"/);
   assert.match(dashboardHtml, /id="refresh-license-audit"/);
+  assert.match(dashboardHtml, /id="license-audit-controls"/);
+  assert.match(dashboardHtml, /id="license-audit-search"/);
+  assert.match(dashboardHtml, /id="license-audit-os"/);
+  assert.match(dashboardHtml, /id="license-audit-sort"/);
+  assert.match(dashboardHtml, /id="license-audit-count"/);
   assert.match(dashboardPreload, /agent:get-license-audit/);
   assert.match(dashboardRenderer, /license-audit-events/);
   assert.match(dashboardRenderer, /api\.getLicenseAudit/);
+  assert.match(dashboardRenderer, /groupedAuditItems/);
+  assert.match(dashboardRenderer, /licenseAuditSearch/);
+  assert.match(dashboardRenderer, /licenseAuditOsFilter/);
+  assert.match(dashboardRenderer, /licenseAuditSort/);
+  assert.match(dashboardRenderer, /license-audit-group/);
+  assert.match(dashboardCss, /\.license-audit-controls/);
+  assert.match(dashboardCss, /\.license-audit-group/);
+  assert.match(agentAuth, /X-Media-Toolbox-Device-Id/);
+  assert.match(agentAuth, /X-Media-Toolbox-Device-Name/);
+  assert.match(agentAuth, /X-Media-Toolbox-OS/);
+  assert.match(releaseWorkflow, /AGENT_UPDATE_TYPE: full/);
   assert.doesNotMatch(dashboardHtml, /bottom-left/);
 });
 

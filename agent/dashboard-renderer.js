@@ -12,6 +12,11 @@
   let licenseServerNotice = "";
   let licenseServerNoticeKind = "";
   let updateDismissTimer = null;
+  let licenseAuditItems = [];
+  let licenseAuditStoragePath = "";
+  let licenseAuditSearch = "";
+  let licenseAuditOsFilter = "all";
+  let licenseAuditSort = "newest";
 
   function showNotice(message) {
     const notice = el("notice");
@@ -428,6 +433,61 @@
       .join(" · ");
   }
 
+  function auditOsLabel(item) {
+    const details = item.details || {};
+    const value = `${details.os || details.platform || ""} ${details.userAgent || ""}`.toLowerCase();
+    if (/win32|windows/.test(value)) return "Windows";
+    if (/darwin|macos|mac os|macintosh/.test(value)) return "macOS";
+    if (/android/.test(value)) return "Android";
+    if (/ios|iphone|ipad/.test(value)) return "iOS";
+    if (/linux/.test(value)) return "Linux";
+    if (/freebsd/.test(value)) return "FreeBSD";
+    return "Unknown";
+  }
+
+  function auditDeviceInfo(item) {
+    const details = item.details || {};
+    const deviceId = String(details.deviceId || "").trim();
+    const deviceName = String(details.deviceName || details.hostname || "").trim();
+    const os = auditOsLabel(item);
+    const fallback = String(item.origin || "unknown").trim() || "unknown";
+    const key = deviceId ? `id:${deviceId}` : deviceName ? `name:${deviceName}` : `os:${os}:${fallback}`;
+    const label = deviceName || (deviceId ? `Device ${deviceId.slice(0, 8)}` : os !== "Unknown" ? `${os} device` : "Unknown device");
+    return { key, label, deviceId, deviceName, os };
+  }
+
+  function auditTimestamp(item) {
+    const numeric = Number(item.createdAt);
+    if (Number.isFinite(numeric)) return numeric;
+    const parsed = Date.parse(item.createdAt || "");
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function groupedAuditItems(items, search, osFilter, sortBy) {
+    const query = String(search || "").trim().toLowerCase();
+    const groups = new Map();
+    for (const item of items) {
+      const info = auditDeviceInfo(item);
+      const searchable = [auditLabels[item.event] || item.event || "Audit event", item.origin, info.label, info.deviceId, info.deviceName, info.os, auditDetailText(item)].join(" ").toLowerCase();
+      if (query && !searchable.includes(query)) continue;
+      if (osFilter !== "all" && info.os !== osFilter) continue;
+      let group = groups.get(info.key);
+      if (!group) {
+        group = { ...info, items: [], latestAt: 0 };
+        groups.set(info.key, group);
+      }
+      group.items.push({ item, info });
+      group.latestAt = Math.max(group.latestAt, auditTimestamp(item));
+    }
+    for (const group of groups.values()) group.items.sort((left, right) => auditTimestamp(right.item) - auditTimestamp(left.item) || Number(right.item.id || 0) - Number(left.item.id || 0));
+    return [...groups.values()].sort((left, right) => {
+      if (sortBy === "oldest") return left.latestAt - right.latestAt;
+      if (sortBy === "events") return right.items.length - left.items.length || right.latestAt - left.latestAt;
+      if (sortBy === "device") return left.label.localeCompare(right.label) || right.latestAt - left.latestAt;
+      return right.latestAt - left.latestAt;
+    });
+  }
+
   function renderLicenseOwnerRequests(items = []) {
     const target = el("license-owner-requests");
     if (!target) return;
@@ -453,16 +513,25 @@
     renderLicenseAudit(state.licenseAudit || [], state.licenseAuditStoragePath || "");
   }
 
-  function renderLicenseAudit(items = [], storagePath = "") {
+  function renderLicenseAudit(items, storagePath) {
     const target = el("license-audit-events");
     const storage = el("license-audit-storage");
     if (!target) return;
-    if (!items.length) {
+    if (Array.isArray(items)) licenseAuditItems = items;
+    if (storagePath !== undefined) licenseAuditStoragePath = storagePath;
+    const groups = groupedAuditItems(licenseAuditItems, licenseAuditSearch, licenseAuditOsFilter, licenseAuditSort);
+    const controls = el("license-audit-controls");
+    const count = el("license-audit-count");
+    if (controls) controls.classList.toggle("hidden", !licenseAuditItems.length);
+    if (count) count.textContent = `${groups.reduce((total, group) => total + group.items.length, 0)} events · ${groups.length} devices`;
+    if (!licenseAuditItems.length) {
       target.innerHTML = '<div class="empty">No audit events yet.</div>';
+    } else if (!groups.length) {
+      target.innerHTML = '<div class="empty">No matching audit events.</div>';
     } else {
-      target.innerHTML = items.map((item) => `<div class="license-audit-row"><div><strong>${escapeHtml(auditLabels[item.event] || item.event || "Audit event")}</strong><small>${item.createdAt ? new Date(item.createdAt).toLocaleString() : "—"} · ${escapeHtml(item.origin || "No browser origin")}${item.requestId ? ` · Request ${escapeHtml(String(item.requestId).slice(0, 8))}` : ""}</small><small>${escapeHtml(auditDetailText(item) || "No additional details")}</small></div></div>`).join("");
+      target.innerHTML = groups.map((group) => `<details class="license-audit-group" open><summary><div class="license-audit-summary"><strong>${escapeHtml(group.label)}</strong><small>${escapeHtml(group.os)}${group.deviceName && group.deviceName !== group.label ? ` · ${escapeHtml(group.deviceName)}` : ""}${group.deviceId ? ` · ID ${escapeHtml(group.deviceId)}` : ""}</small></div><span>${group.items.length} event${group.items.length === 1 ? "" : "s"}</span></summary><div class="license-audit-group-events">${group.items.map(({ item }) => `<div class="license-audit-row"><div><strong>${escapeHtml(auditLabels[item.event] || item.event || "Audit event")}</strong><small>${item.createdAt ? new Date(item.createdAt).toLocaleString() : "—"} · ${escapeHtml(item.origin || "No browser origin")}${item.requestId ? ` · Request ${escapeHtml(String(item.requestId).slice(0, 8))}` : ""}</small><small>${escapeHtml(auditDetailText(item) || "No additional details")}</small></div></div>`).join("")}</div></details>`).join("");
     }
-    if (storage) storage.textContent = storagePath ? `Stored in ${storagePath}.` : "";
+    if (storage) storage.textContent = licenseAuditStoragePath ? `Stored in ${licenseAuditStoragePath}.` : "";
   }
 
   async function refreshLicenseOwnerRequests() {
@@ -733,6 +802,9 @@
   el("admin-control-button").addEventListener("click", openAdminModal);
   el("refresh-license-requests").addEventListener("click", refreshLicenseOwnerRequests);
   el("refresh-license-audit")?.addEventListener("click", refreshLicenseOwnerRequests);
+  el("license-audit-search")?.addEventListener("input", (event) => { licenseAuditSearch = event.target.value; renderLicenseAudit(); });
+  el("license-audit-os")?.addEventListener("change", (event) => { licenseAuditOsFilter = event.target.value; renderLicenseAudit(); });
+  el("license-audit-sort")?.addEventListener("change", (event) => { licenseAuditSort = event.target.value; renderLicenseAudit(); });
   el("close-admin-modal").addEventListener("click", closeAdminModal);
   el("admin-modal").addEventListener("click", (event) => { if (event.target.matches("[data-close-admin-modal]")) closeAdminModal(); });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !el("admin-modal").classList.contains("hidden")) closeAdminModal(); });

@@ -15,8 +15,18 @@ test("PDF text editor is exposed as a dedicated tool with history navigation", a
   const navigation = await read("components/app-shell.jsx");
   const history = await read("components/tool-history.jsx");
   const comingSoon = await read("pages/coming-soon.jsx");
+  const styles = await read("styles/globals.css");
   assert.match(route, /PdfTextEditor/);
   assert.match(navigation, /href: "\/pdf-text-editor"/);
+  assert.match(navigation, /const pdfNavigation = \[/);
+  assert.match(navigation, /PDF tools/);
+  assert.doesNotMatch(navigation, /<strong>PDF tools<\/strong><span className="nav-beta">Beta<\/span>/);
+  assert.match(navigation, /const \[pdfToolsOpen, setPdfToolsOpen\] = useState\(false\)/);
+  assert.match(navigation, /aria-expanded=\{pdfToolsOpen\}/);
+  assert.match(navigation, /pdf-tools-subnav/);
+  assert.match(styles, /\.pdf-tools-group \{[^}]*min-width: 0[^}]*max-width: 100%/);
+  assert.match(styles, /\.pdf-tools-subnav \{[^}]*min-width: 0[^}]*max-width: 100%/);
+  assert.match(styles, /\.pdf-tool-child \{[^}]*min-width: 0[^}]*max-width: 100%/);
   assert.match(shell, /ToolViewTabs/);
   assert.match(shell, /ToolHistory tool="pdf-text-editor"/);
   assert.match(history, /"pdf-text-editor"/);
