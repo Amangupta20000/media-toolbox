@@ -417,7 +417,7 @@ test("dashboard licensing server manager starts and stops the loopback service",
   assert.equal(stopped.managed, false);
 });
 
-test("licensing server manager clears a conflicting loopback port and retries", async () => {
+test("licensing server manager reclaims a stale loopback port before spawning", async () => {
   const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const mountPath = path.join(testRoot, "license-server-port-conflict");
@@ -449,8 +449,96 @@ test("licensing server manager clears a conflicting loopback port and retries", 
     spawnImpl: () => {
       spawnCount += 1;
       const child = createChild();
+      healthy = true;
+      return child;
+    },
+    execFileImpl: (file, args, callback) => {
+      if (String(file).includes("lsof")) return callback(null, portOccupied ? "4242\n" : "", "");
+      if (String(file).endsWith("/kill")) {
+        killedPids.push({ signal: args[0], pid: args[1] });
+        portOccupied = false;
+        return callback(null, "", "");
+      }
+      return callback(null, "", "");
+    },
+    logger: { log() {}, warn() {} },
+  });
+  try {
+    const started = await manager.start();
+    assert.equal(started.healthy, true);
+    assert.equal(started.started, true);
+    assert.equal(spawnCount, 1);
+    assert.deepEqual(killedPids, [{ signal: "-TERM", pid: "4242" }]);
+  } finally {
+    await manager.stop();
+  }
+});
+
+test("licensing server manager reuses a healthy loopback service already on the port", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const mountPath = path.join(testRoot, "license-server-healthy-port");
+  const dataDirectory = path.join(mountPath, "MediaToolboxLicensing");
+  let spawnCount = 0;
+  let killCount = 0;
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(root, "agent"),
+    dataDirectory,
+    mountPath,
+    nodeExecutable: "/node22/bin/node",
+    platform: "darwin",
+    existsSync: (value) => value === mountPath || value === dataDirectory || value.endsWith(path.join("license-server", "index.js")),
+    healthCheck: async () => true,
+    spawnImpl: () => { spawnCount += 1; throw new Error("The manager must not spawn over a healthy service."); },
+    execFileImpl: (file, _args, callback) => {
+      if (String(file).includes("lsof")) return callback(null, "4242\n", "");
+      if (String(file).endsWith("/kill")) killCount += 1;
+      return callback(null, "", "");
+    },
+    logger: { log() {}, warn() {} },
+  });
+  const state = await manager.start();
+  assert.equal(state.healthy, true);
+  assert.equal(state.started, false);
+  assert.equal(spawnCount, 0);
+  assert.equal(killCount, 0);
+});
+
+test("licensing server manager recovers when a port conflict races its preflight", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const mountPath = path.join(testRoot, "license-server-port-race");
+  const dataDirectory = path.join(mountPath, "MediaToolboxLicensing");
+  let healthy = false;
+  let portOccupied = false;
+  let spawnCount = 0;
+  const killedPids = [];
+  const createChild = () => {
+    const child = new EventEmitter();
+    child.exitCode = null;
+    child.killed = false;
+    child.kill = () => {
+      child.killed = true;
+      child.exitCode = 0;
+      healthy = false;
+      child.emit("exit", 0, "SIGTERM");
+    };
+    return child;
+  };
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(root, "agent"),
+    dataDirectory,
+    mountPath,
+    nodeExecutable: "/node22/bin/node",
+    platform: "darwin",
+    existsSync: (value) => value === mountPath || value === dataDirectory || value.endsWith(path.join("license-server", "index.js")),
+    healthCheck: async () => healthy,
+    spawnImpl: () => {
+      spawnCount += 1;
+      const child = createChild();
       if (spawnCount === 1) {
         process.nextTick(() => {
+          portOccupied = true;
           const error = Object.assign(new Error("listen EADDRINUSE: address already in use 127.0.0.1:4900"), { code: "EADDRINUSE" });
           child.emit("error", error);
           child.exitCode = 1;
@@ -478,6 +566,40 @@ test("licensing server manager clears a conflicting loopback port and retries", 
     assert.equal(started.started, true);
     assert.equal(spawnCount, 2);
     assert.deepEqual(killedPids, [{ signal: "-TERM", pid: "4242" }]);
+  } finally {
+    await manager.stop();
+  }
+});
+
+test("licensing server manager treats lsof no-match as a free port", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const mountPath = path.join(testRoot, "license-server-free-port");
+  const dataDirectory = path.join(mountPath, "MediaToolboxLicensing");
+  let healthy = false;
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.killed = false;
+  child.kill = () => { child.killed = true; child.exitCode = 0; healthy = false; child.emit("exit", 0, "SIGTERM"); };
+  const manager = createLicenseServerManager({
+    moduleDirectory: path.join(root, "agent"),
+    dataDirectory,
+    mountPath,
+    nodeExecutable: "/node22/bin/node",
+    platform: "darwin",
+    existsSync: (value) => value === mountPath || value === dataDirectory || value.endsWith(path.join("license-server", "index.js")),
+    healthCheck: async () => healthy,
+    spawnImpl: () => { healthy = true; return child; },
+    execFileImpl: (file, _args, callback) => {
+      if (String(file).includes("lsof")) return callback(Object.assign(new Error("exit 1"), { code: 1 }), "", "");
+      return callback(null, "", "");
+    },
+    logger: { log() {}, warn() {} },
+  });
+  try {
+    const started = await manager.start();
+    assert.equal(started.healthy, true);
+    assert.equal(started.started, true);
   } finally {
     await manager.stop();
   }

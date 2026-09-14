@@ -10,6 +10,8 @@ const DEFAULT_DATA_DIR = "/Volumes/Sandisk Exf/MediaToolboxLicensing";
 const DEFAULT_MOUNT_PATH = "/Volumes/Sandisk Exf";
 const HEALTH_TIMEOUT_MS = 1500;
 const START_TIMEOUT_MS = 15000;
+const PORT_RELEASE_TIMEOUT_MS = 4000;
+const PORT_CONFLICT_RETRY_LIMIT = 3;
 const AUTO_START_INTERVAL_MS = 5000;
 const DEFAULT_TAILSCALE_APP_PATH = "/Applications/Tailscale.app";
 const TAILSCALE_PROCESS_NAME = "Tailscale";
@@ -417,22 +419,23 @@ function createLicenseServerManager({
   async function listPortOwnerPids() {
     const command = portInspectionCommand();
     const result = await runExecFile(execFileImpl, command.file, command.args);
-    if (!result.ok) throw new Error(String(result.stderr || result.error?.message || `The process using ${host}:${port} could not be identified.`));
+    // lsof exits with status 1 when no process matches. That is a normal
+    // result for a free port, not a diagnostic failure.
+    const noUnixMatches = platform !== "win32"
+      && Number(result.error?.code) === 1
+      && !String(result.stdout || "").trim()
+      && !String(result.stderr || "").trim();
+    if (!result.ok && !noUnixMatches) {
+      throw new Error(String(result.stderr || result.error?.message || `The process using ${host}:${port} could not be identified.`));
+    }
     const pids = new Set();
     if (platform === "win32") {
-      const endpoint = `${host}:${port}`;
       for (const line of String(result.stdout || "").split(/\r?\n/)) {
-        if (!new RegExp(`TCP\\s+${host.replaceAll(".", "\\.")}:${port}\\s+\\S+\\s+LISTENING\\s+(\\d+)`, "i").test(line)) continue;
+        // netstat may show 127.0.0.1, 0.0.0.0, [::1], or [::] as the local
+        // address. The port is the ownership boundary for this service.
+        if (!new RegExp(`^\\s*TCP\\s+\\S+:${port}\\s+\\S+\\s+LISTENING\\s+(\\d+)\\s*$`, "i").test(line)) continue;
         const match = line.match(/\s(\d+)\s*$/);
         if (match) pids.add(Number(match[1]));
-      }
-      // Some Windows netstat versions print an IPv6 loopback listener instead
-      // of the IPv4 form even when the service was requested on localhost.
-      if (!pids.size && endpoint === "127.0.0.1:4900") {
-        for (const line of String(result.stdout || "").split(/\r?\n/)) {
-          const match = line.match(new RegExp(`TCP\\s+\\[::1\\]:${port}\\s+\\S+\\s+LISTENING\\s+(\\d+)`, "i"));
-          if (match) pids.add(Number(match[1]));
-        }
       }
     } else {
       for (const value of String(result.stdout || "").split(/\s+/)) {
@@ -441,6 +444,18 @@ function createLicenseServerManager({
       }
     }
     return [...pids].filter((pid) => pid !== process.pid);
+  }
+
+  async function waitForPortRelease() {
+    const deadline = Date.now() + PORT_RELEASE_TIMEOUT_MS;
+    let remaining = [];
+    while (Date.now() < deadline) {
+      remaining = await listPortOwnerPids();
+      if (!remaining.length) return;
+      await wait(100);
+    }
+    remaining = await listPortOwnerPids();
+    if (remaining.length) throw new Error(`The process using ${host}:${port} did not stop.`);
   }
 
   async function stopPortOwners() {
@@ -465,6 +480,7 @@ function createLicenseServerManager({
       }
       if (failures.length) throw new Error(`Could not stop the process using ${host}:${port} (${failures.join(", ")}).`);
     }
+    await waitForPortRelease();
     return true;
   }
 
@@ -582,7 +598,7 @@ function createLicenseServerManager({
     return startRun;
   }
 
-  async function startInternal({ recoverPortConflict = true } = {}) {
+  async function startInternal({ recoverPortConflict = true, conflictAttempt = 0 } = {}) {
     const current = await getState();
     if (manuallyStopped) throw new Error("The licensing server start was cancelled.");
     if (!current.ssdMounted) throw new Error("Connect the Sandisk Exf licensing SSD before starting the server.");
@@ -620,6 +636,20 @@ function createLicenseServerManager({
       const state = await getState();
       const waitedTailscale = waitedFunnel.skipped ? tailscale : { ...tailscale, funnel: waitedFunnel };
       return { ...state, ...(waitedFunnel.skipped ? (tailscale.opened || tailscale.error ? { tailscale } : {}) : { tailscale: waitedTailscale }), started: false, message: waitedFunnel.error ? `The licensing server is running locally, but ${waitedFunnel.error}` : startMessage };
+    }
+
+    // A previous agent process can survive an app crash or an unmount and
+    // remain bound to the loopback port without being tracked by this manager.
+    // Reclaim that exact port before spawning a replacement. Re-check health
+    // first so pressing Start while a healthy server is already listening is
+    // still idempotent and never kills the working service.
+    const portOwners = await listPortOwnerPids();
+    if (portOwners.length) {
+      if (await localHealthCheck(`${url}/v1/health`)) {
+        const state = await getState();
+        return { ...state, started: false, message: "The licensing server is already running." };
+      }
+      await stopPortOwners();
     }
 
     lastError = "";
@@ -661,7 +691,8 @@ function createLicenseServerManager({
       if (!recoverPortConflict || manuallyStopped || !isAddressInUseError(error)) throw error;
       await stopPortOwners();
       lastError = "";
-      return startInternal({ recoverPortConflict: false });
+      if (conflictAttempt >= PORT_CONFLICT_RETRY_LIMIT) throw new Error(`The licensing server port ${host}:${port} remained in use after ${PORT_CONFLICT_RETRY_LIMIT} recovery attempts.`);
+      return startInternal({ recoverPortConflict: true, conflictAttempt: conflictAttempt + 1 });
     }
     child = nextChild;
     let childError = null;
@@ -693,7 +724,8 @@ function createLicenseServerManager({
       if (recoverPortConflict && !manuallyStopped && isAddressInUseError(error)) {
         await stopPortOwners();
         lastError = "";
-        return startInternal({ recoverPortConflict: false });
+        if (conflictAttempt >= PORT_CONFLICT_RETRY_LIMIT) throw new Error(`The licensing server port ${host}:${port} remained in use after ${PORT_CONFLICT_RETRY_LIMIT} recovery attempts.`);
+        return startInternal({ recoverPortConflict: true, conflictAttempt: conflictAttempt + 1 });
       }
       throw error;
     }
