@@ -10,12 +10,12 @@ import { downloadFilename, downloadUrlWithFilename, filenameStem, ResultFilename
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
 import { deleteProcessingJob, getProcessingJob, inspectPdfWithOcr, isProcessingLocationReady, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
-import { applyRasterTextEdits } from "../lib/pdf-ocr-raster.js";
+import { applyRasterTextEdits, inferRasterTextAppearance } from "../lib/pdf-ocr-raster.js";
 import { MAX_PDF_BYTES } from "../lib/pdf-limits.js";
 import { mergeAdjacentTextRuns } from "../lib/pdf-text-runs.js";
 import { graphemeCount } from "../lib/text-metrics.js";
 import { takeHistoryEdit } from "./history-edit.js";
-import { hasTextFormat, normalizeTextFormat, textFormatDefaults } from "../lib/pdf-text-format.js";
+import { fontFamilyFromPdfName, hasTextFormat, normalizeTextFormat, scaleTextFormat, textFormatDefaults } from "../lib/pdf-text-format.js";
 import { PDF_TEXT_BOX_FONTS } from "../lib/pdf-text-box.js";
 
 async function loadPdfLibrary() {
@@ -231,6 +231,12 @@ async function inspectPage(pdfPage, pageIndex, pdfLibrary, sourceHash) {
     if (normalizeText(groupedText) !== normalizedText) continue;
     streamCursor = end;
     const sourceText = operator.text || text;
+    let sourceFont = null;
+    try {
+      if (item.fontName && pdfPage.commonObjs.has(item.fontName)) sourceFont = pdfPage.commonObjs.get(item.fontName);
+    } catch {
+      sourceFont = null;
+    }
     runs.push({
       ...operator,
       pageIndex,
@@ -245,6 +251,10 @@ async function inspectPage(pdfPage, pageIndex, pdfLibrary, sourceHash) {
       itemIndex,
       fontSize: Math.max(1, Number(item.height) || Math.hypot(Number(item.transform?.[2]) || 0, Number(item.transform?.[3]) || 0) || 18),
       color: operator.color,
+      // Keep the source font metadata with the run. Formatting one property
+      // (for example alignment) must not silently replace the other existing
+      // properties with the editor defaults.
+      baseFont: sourceFont?.name || "",
       editable: Boolean(text && !text.includes("\ufffd")),
       reason: text ? "This text run could not be mapped safely to the PDF text layer." : "This page does not expose selectable text.",
     });
@@ -495,7 +505,7 @@ function TextResizeHandle({ run, appearance, surfaceRef, handle, position, onPre
   return <button type="button" className={`pdf-text-resize-handle ${handle}`} style={position} aria-label={`Resize selected text ${run.text} from the ${handle} handle`} title="Drag to resize" onPointerDown={startResize} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={endResize} />;
 }
 
-function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms, textFormats, pdfLibrary, previewZoom, onSelectRun, onMoveRun, onMoveRunEnd, onAppearanceChange, pageRef }) {
+function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms, textFormats, pdfLibrary, previewZoom, onSelectRun, onMoveRun, onMoveRunEnd, onAppearanceChange, onInferredTextFormat, pageRef }) {
   const frameRef = useRef(null);
   const surfaceRef = useRef(null);
   const canvasRef = useRef(null);
@@ -556,13 +566,34 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
       try {
         await renderTask.promise;
         if (active && model.ocr) {
+          const rasterScale = canvas.width / Math.max(1, base.width);
+          const pageUnitScale = 1 / Math.max(1, rasterScale);
+          const selectedForInference = model.runs.find((run) => run.runId === selectedRunId && run.editable);
+          if (selectedForInference && edits[selectedForInference.runId] === undefined && !hasTextFormat(textFormats[selectedForInference.runId])) {
+            const selectedBox = {
+              x0: selectedForInference.bbox.x0 * canvas.width / Math.max(1, Number(model.imageWidth) || canvas.width),
+              y0: selectedForInference.bbox.y0 * canvas.height / Math.max(1, Number(model.imageHeight) || canvas.height),
+              x1: selectedForInference.bbox.x1 * canvas.width / Math.max(1, Number(model.imageWidth) || canvas.width),
+              y1: selectedForInference.bbox.y1 * canvas.height / Math.max(1, Number(model.imageHeight) || canvas.height),
+            };
+            const inferred = inferRasterTextAppearance(canvas, selectedBox, selectedForInference.originalText);
+            if (inferred) onInferredTextFormat?.(selectedForInference.runId, {
+              fontFamily: fontFamilyFromPdfName(inferred.fontFamily),
+              fontSize: inferred.fontSize * pageUnitScale,
+              bold: inferred.bold,
+              italic: inferred.italic,
+              color: inferred.color,
+            });
+          }
           const pageEdits = model.runs
             .filter((run) => edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(rasterPreviewTransforms[run.runId]) || hasTextFormat(textFormats[run.runId]))
             .map((run) => {
               const textChanged = edits[run.runId] !== undefined;
               const formatting = hasTextFormat(textFormats[run.runId]) ? textFormat(textFormats[run.runId], run) : null;
               const transform = textTransform(rasterPreviewTransforms[run.runId]);
+              const rasterFormatting = formatting ? scaleTextFormat(formatting, rasterScale) : null;
               return {
+                runId: run.runId,
                 originalText: run.originalText,
                 ...(textChanged || formatting ? { replacementText: edits[run.runId] ?? run.originalText } : { moveOnly: true }),
                 bbox: {
@@ -577,11 +608,22 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
                 scaleX: transform.scaleX,
                 scaleY: transform.scaleY,
                 rotation: transform.rotation,
-                ...(formatting ? { format: formatting } : {}),
+                ...(rasterFormatting ? { format: rasterFormatting } : {}),
                 confidence: run.confidence,
               };
             });
-          applyRasterTextEdits(canvas, pageEdits);
+          applyRasterTextEdits(canvas, pageEdits, {
+            onFontMatch: (match) => {
+              if (!match?.runId) return;
+              onInferredTextFormat?.(match.runId, {
+                fontFamily: fontFamilyFromPdfName(match.fontFamily),
+                fontSize: Number(match.fontSize) * pageUnitScale,
+                bold: Number(match.weight) >= 600,
+                italic: Boolean(match.italic),
+                color: match.color || undefined,
+              });
+            },
+          });
         }
         if (active) setViewport(nextViewport);
       } catch (error) {
@@ -598,7 +640,7 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(() => render().catch(() => undefined)) : null;
     if (frameRef.current) observer?.observe(frameRef.current);
     return () => { active = false; rerenderRef.current = false; renderTaskRef.current?.cancel(); renderTaskRef.current = null; observer?.disconnect(); };
-  }, [edits, model, pdfLibrary, previewZoom, rasterPreviewOffsets, rasterPreviewTransforms, textFormats]);
+  }, [edits, model, pdfLibrary, previewZoom, rasterPreviewOffsets, rasterPreviewTransforms, selectedRunId, textFormats]);
 
   const baseViewport = model.page.getViewport({ scale: 1 });
   const positions = useMemo(() => {
@@ -740,7 +782,7 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
   </article>;
 }
 
-const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview({ pages, selectedRunId, edits, textOffsets, textTransforms, textFormats, pdfLibrary, previewZoom, previewRevision, onSelectRun, onMoveRun, onMoveRunEnd, onAppearanceChange, onPinchZoom }, ref) {
+const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview({ pages, selectedRunId, edits, textOffsets, textTransforms, textFormats, pdfLibrary, previewZoom, previewRevision, onSelectRun, onMoveRun, onMoveRunEnd, onAppearanceChange, onInferredTextFormat, onPinchZoom }, ref) {
   const scrollRef = useRef(null);
   const previewZoomRef = useRef(previewZoom);
   const pageHeight = useEstimatedPreviewPageHeight(previewZoom);
@@ -802,7 +844,7 @@ const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview(
       {pages.slice(windowed.start, windowed.end).map((model, offset) => {
         const index = windowed.start + offset;
         return <div key={`${model.pageIndex}-${previewRevision}`} className="pdf-text-virtual-item" style={{ top: `${index * stride}px`, left: 0, width: "100%", height: `${pageHeight}px` }}>
-          <PdfTextPage model={model} selectedRunId={selectedRunId} edits={edits} textOffsets={textOffsets} textTransforms={textTransforms} textFormats={textFormats} pdfLibrary={pdfLibrary} previewZoom={previewZoom} onSelectRun={onSelectRun} onMoveRun={onMoveRun} onMoveRunEnd={onMoveRunEnd} onAppearanceChange={onAppearanceChange} />
+          <PdfTextPage model={model} selectedRunId={selectedRunId} edits={edits} textOffsets={textOffsets} textTransforms={textTransforms} textFormats={textFormats} pdfLibrary={pdfLibrary} previewZoom={previewZoom} onSelectRun={onSelectRun} onMoveRun={onMoveRun} onMoveRunEnd={onMoveRunEnd} onAppearanceChange={onAppearanceChange} onInferredTextFormat={onInferredTextFormat} />
         </div>;
       })}
     </div>
@@ -941,6 +983,10 @@ export function PdfTextEditor() {
   const [textOffsets, setTextOffsets] = useState({});
   const [textTransforms, setTextTransforms] = useState({});
   const [textFormats, setTextFormats] = useState({});
+  // OCR appearance is inferred from the original pixels and is used only as
+  // the starting value in the formatting popover. It is deliberately kept
+  // outside the undo/export state until the user changes a control.
+  const [inferredTextFormats, setInferredTextFormats] = useState({});
   const [historyVersion, setHistoryVersion] = useState(0);
   const textEditorStateRef = useRef({ edits: {}, textOffsets: {}, textTransforms: {}, textFormats: {} });
   const committedTextStateRef = useRef(textEditorStateRef.current);
@@ -1001,6 +1047,7 @@ export function PdfTextEditor() {
     textHistoryRef.current = { past: [], future: [] };
     committedTextStateRef.current = empty;
     syncTextEditorState(empty);
+    setInferredTextFormats({});
     setHistoryVersion((value) => value + 1);
   };
   const undoTextEdit = () => {
@@ -1287,10 +1334,19 @@ export function PdfTextEditor() {
   const updateTextFormat = (runId, changes) => {
     const run = pages.flatMap((page) => page.runs).find((item) => item.runId === runId);
     if (!run) return;
-    const current = textFormat(textEditorStateRef.current.textFormats[runId], run);
+    const current = textFormat(textEditorStateRef.current.textFormats[runId] || inferredTextFormats[runId], run);
     const next = { ...textEditorStateRef.current, textFormats: { ...textEditorStateRef.current.textFormats, [runId]: textFormat({ ...current, ...changes }, run) } };
     commitTextEditorState(next);
     refreshEditedPreview(next.edits, next.textOffsets, next.textTransforms, next.textFormats).catch(() => undefined);
+  };
+  const updateInferredTextFormat = (runId, changes) => {
+    const run = pages.flatMap((page) => page.runs).find((item) => item.runId === runId);
+    if (!run || textEditorStateRef.current.textFormats[runId]) return;
+    setInferredTextFormats((currentFormats) => {
+      const next = textFormat({ ...textFormat(currentFormats[runId], run), ...changes }, run);
+      if (JSON.stringify(currentFormats[runId]) === JSON.stringify(next)) return currentFormats;
+      return { ...currentFormats, [runId]: next };
+    });
   };
   const saveEdit = () => {
     if (!selectedRun) return;
@@ -1432,10 +1488,10 @@ export function PdfTextEditor() {
                 <div className="pdf-text-editor-layout">
                   <VirtualizedPdfTextRail pages={pages} onSelect={scrollToPage} />
                   <section className="pdf-text-workspace">
-                    {source && !loading && <TextEditPopover run={selectedRun} value={editorValue} onChange={setEditorValue} onSave={saveEdit} onCancel={() => setSelectedRun(null)} onRestore={restoreEdit} format={selectedRun ? textFormats[selectedRun.runId] : undefined} onFormatChange={(value) => selectedRun && updateTextFormat(selectedRun.runId, value)} appearance={selectedRun ? textTransforms[selectedRun.runId] : undefined} onAppearanceChange={(value) => selectedRun && updateTextTransform(selectedRun.runId, value)} />}
+                    {source && !loading && <TextEditPopover run={selectedRun} value={editorValue} onChange={setEditorValue} onSave={saveEdit} onCancel={() => setSelectedRun(null)} onRestore={restoreEdit} format={selectedRun ? { ...inferredTextFormats[selectedRun.runId], ...textFormats[selectedRun.runId] } : undefined} onFormatChange={(value) => selectedRun && updateTextFormat(selectedRun.runId, value)} appearance={selectedRun ? textTransforms[selectedRun.runId] : undefined} onAppearanceChange={(value) => selectedRun && updateTextTransform(selectedRun.runId, value)} />}
                     {loading && <div className="pdf-text-loading"><LoaderCircle className="spin" size={23} /><strong>{loadingMessage}</strong>{ocrProgress > 0 && <span>OCR progress: {ocrProgress}%</span>}</div>}
                     {!loading && !pages.length && <div className="pdf-text-empty"><UploadCloud size={27} /><strong>Upload a PDF to start editing</strong><span>Click a detected text run in the page preview to replace it.</span></div>}
-                    {pages.length > 0 && <VirtualizedPdfTextPreview ref={previewVirtualizerRef} pages={pages} selectedRunId={selectedRun?.runId} edits={edits} textOffsets={textOffsets} textTransforms={textTransforms} textFormats={textFormats} pdfLibrary={pdfLibrary} previewZoom={previewZoom} previewRevision={previewRevision} onSelectRun={chooseRun} onMoveRun={moveRun} onMoveRunEnd={finishMovingRun} onAppearanceChange={updateTextTransform} onPinchZoom={setPreviewZoom} />}
+                    {pages.length > 0 && <VirtualizedPdfTextPreview ref={previewVirtualizerRef} pages={pages} selectedRunId={selectedRun?.runId} edits={edits} textOffsets={textOffsets} textTransforms={textTransforms} textFormats={textFormats} pdfLibrary={pdfLibrary} previewZoom={previewZoom} previewRevision={previewRevision} onSelectRun={chooseRun} onMoveRun={moveRun} onMoveRunEnd={finishMovingRun} onAppearanceChange={updateTextTransform} onInferredTextFormat={updateInferredTextFormat} onPinchZoom={setPreviewZoom} />}
                   </section>
                 </div>
               </div>

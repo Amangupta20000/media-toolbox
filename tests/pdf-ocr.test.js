@@ -4,7 +4,7 @@ import test from "node:test";
 import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
 import { PDFDocument } from "pdf-lib";
 import { applyPdfOcrEdits, mergeCurrencyWords, recognizePdfText, sha256Hex, wordsFromBlocks } from "../lib/pdf-ocr.js";
-import { applyRasterTextEdits } from "../lib/pdf-ocr-raster.js";
+import { applyRasterTextEdits, inferRasterTextAppearance } from "../lib/pdf-ocr-raster.js";
 
 async function rasterPdf(pageCount = 1) {
   const canvas = createCanvas(1200, 360);
@@ -54,6 +54,7 @@ test("OCR detects image-only PDF text and exports a verified visual edit", async
   const run = detected.pages[0].runs.find((item) => /OCR/i.test(item.text));
   assert.ok(run, "the OCR engine should detect the large English heading");
   assert.match(run.text, /OCR/);
+  assert.ok(run.fontSize > 0, "OCR runs should expose their detected page-unit font size to the editor");
   assert.equal(run.mode, "ocr");
   assert.deepEqual(Buffer.from(source), snapshot);
 
@@ -71,6 +72,27 @@ test("OCR detects image-only PDF text and exports a verified visual edit", async
   assert.equal(output.getPageCount(), 1);
   assert.ok(edited.warnings.some((warning) => /OCR edits reconstruct/i.test(warning)));
   assert.notEqual(crypto.createHash("sha256").update(edited.bytes).digest("hex"), sha256Hex(source));
+});
+
+test("OCR appearance inference reads source colour without modifying the page", () => {
+  const canvas = createCanvas(520, 180);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#f2ead8";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#27648a";
+  context.font = "700 52px Arial";
+  context.fillText("Inherited", 30, 110);
+  const before = Buffer.from(canvas.toBuffer("image/png"));
+  const metrics = context.measureText("Inherited");
+  const appearance = inferRasterTextAppearance(canvas, {
+    x0: 30,
+    y0: 110 - metrics.actualBoundingBoxAscent,
+    x1: 30 + metrics.width,
+    y1: 110 + metrics.actualBoundingBoxDescent,
+  }, "Inherited");
+  assert.match(appearance.color, /^#[0-9a-f]{6}$/i);
+  assert.ok(appearance.fontSize > 0);
+  assert.deepEqual(Buffer.from(canvas.toBuffer("image/png")), before, "appearance inference must not repaint the source canvas");
 });
 
 test("OCR can scan only the pages identified as visually text-bearing", async () => {

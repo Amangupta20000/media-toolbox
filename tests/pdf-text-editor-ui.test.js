@@ -31,6 +31,7 @@ test("PDF text editor is exposed as a dedicated tool with history navigation", a
 
 test("PDF text editor keeps browser mode disabled and submits identity-checked edits", async () => {
   const shell = await read("components/pdf-text-editor.jsx");
+  const ocr = await read("lib/pdf-ocr.js");
   const intake = await read("lib/job-intake.js");
   const worker = await read("worker/index.js");
   assert.match(shell, /Browser mode disabled/);
@@ -56,6 +57,11 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.doesNotMatch(shell, /if \(!item && textContent\.items\[itemCursor\]\) item =/);
   assert.match(shell, /Rebuilding the real PDF preview/);
   assert.match(shell, /applyRasterTextEdits/);
+  assert.match(shell, /baseFont: sourceFont\?\.name/);
+  assert.match(shell, /inferRasterTextAppearance/);
+  assert.match(shell, /scaleTextFormat/);
+  assert.match(shell, /inferredTextFormats/);
+  assert.match(ocr, /fontSize: Math\.max\(1, \(word\.bbox\.y1 - word\.bbox\.y0\) \* pageUnitScale\)/);
   assert.doesNotMatch(shell, /pdf-text-edit-preview/);
   assert.match(shell, /Continue editing/);
   assert.match(shell, /Keep final result on this device/);

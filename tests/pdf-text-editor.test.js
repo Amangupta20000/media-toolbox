@@ -5,8 +5,38 @@ import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { applyPdfTextEdits, extractPdfTextRuns } from "../lib/pdf-text-editor.js";
 import { createPdfTextPreview } from "../lib/pdf-text-preview.js";
 import { mergeAdjacentTextRuns } from "../lib/pdf-text-runs.js";
+import { normalizeTextFormat, scaleTextFormat, textFormatDefaults } from "../lib/pdf-text-format.js";
 
 const samplePng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+
+test("text formatting defaults inherit the selected PDF run instead of editor defaults", () => {
+  const source = {
+    baseFont: "Times-BoldItalic",
+    fontSize: 22,
+    color: "#27648a",
+    alignment: "right",
+  };
+  const defaults = textFormatDefaults(source);
+  assert.equal(defaults.fontFamily, "Times-Roman");
+  assert.equal(defaults.fontSize, 22);
+  assert.equal(defaults.bold, true);
+  assert.equal(defaults.italic, true);
+  assert.equal(defaults.color, "#27648a");
+  assert.equal(defaults.alignment, "right");
+
+  const centered = normalizeTextFormat({ alignment: "center" }, source);
+  assert.equal(centered.fontFamily, "Times-Roman");
+  assert.equal(centered.fontSize, 22);
+  assert.equal(centered.bold, true);
+  assert.equal(centered.italic, true);
+  assert.equal(centered.color, "#27648a");
+  assert.equal(centered.alignment, "center");
+  assert.equal(textFormatDefaults({ bbox: { x0: 0, y0: 0, x1: 40, y1: 31 } }).fontSize, 31);
+
+  const raster = scaleTextFormat(centered, 2);
+  assert.equal(raster.fontSize, 44);
+  assert.equal(raster.characterSpacing, 0);
+});
 
 async function createFixture() {
   const document = await PDFDocument.create();
