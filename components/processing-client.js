@@ -11,7 +11,7 @@ const AGENT_BASE_KEY = "media-toolbox-agent-base";
 export function agentBaseUrl() {
   if (typeof window !== "undefined") {
     const remembered = window.localStorage.getItem(AGENT_BASE_KEY);
-    if (remembered && (!isSecurePage() || remembered.startsWith("https://"))) return remembered;
+    if (remembered && (!isSecurePage() || remembered.startsWith("https://") || securePageSupportsPlainLoopback())) return remembered;
   }
   return configuredAgentBaseUrl();
 }
@@ -20,13 +20,23 @@ function isSecurePage() {
   return typeof window !== "undefined" && window.location.protocol === "https:";
 }
 
+function securePageSupportsPlainLoopback() {
+  if (!isSecurePage() || typeof navigator === "undefined") return false;
+  const platform = String(navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
+  // Windows/Linux browsers commonly reject the installation-specific
+  // self-signed certificate used by the desktop agent. Their browsers treat
+  // loopback as a trustworthy local origin, so packaged agents use HTTP there.
+  // macOS intentionally stays HTTPS for Safari compatibility.
+  return /win|linux/.test(platform) && !/mac/.test(platform);
+}
+
 function configuredAgentBaseUrl() {
   const configured = String(process.env.NEXT_PUBLIC_AGENT_URL || "").replace(/\/$/, "");
   // HTTPS pages cannot fetch the agent's HTTP endpoint in Safari (mixed
-  // content). The Electron agent uses HTTPS on the same loopback port. Local
-  // HTTP development may use the lightweight HTTP agent, but must also be
-  // able to reach an installed Electron agent, which is HTTPS-only.
-  if (isSecurePage() && (!configured || configured.startsWith("http://"))) return SECURE_AGENT_URL;
+  // content). The installed macOS agent therefore uses HTTPS, while the
+  // installed Windows/Linux agents use the browser-compatible HTTP loopback
+  // transport. Local HTTP development remains supported on every platform.
+  if (isSecurePage() && (!configured || configured.startsWith("http://"))) return securePageSupportsPlainLoopback() ? DEFAULT_AGENT_URL : SECURE_AGENT_URL;
   return configured || DEFAULT_AGENT_URL;
 }
 
@@ -44,10 +54,17 @@ export function agentBaseCandidates({ secure = isSecurePage(), configured = conf
     ? [remembered?.startsWith("https://") ? remembered : "", configured]
     : [remembered, configured];
 
-  // The packaged desktop agent uses HTTPS so production HTTPS pages do not
-  // trigger mixed-content blocking. Keep HTTP as the first local-development
-  // candidate for `npm run agent:dev`, then try the secure loopback endpoint
-  // used by the installed Electron agent on the same port.
+  if (secure && securePageSupportsPlainLoopback()) {
+    // Keep HTTPS candidates first for a remembered/custom endpoint, then
+    // discover the HTTP transport used by packaged Windows/Linux agents.
+    if (remembered?.startsWith("http://")) candidates.push(remembered);
+    candidates.push(DEFAULT_AGENT_URL);
+  }
+
+  // macOS uses HTTPS so Safari production pages do not trigger mixed-content
+  // blocking. Keep HTTP as the first local-development candidate for
+  // `npm run agent:dev`; Windows/Linux secure pages also discover the
+  // packaged HTTP loopback transport added above.
   for (const base of [...candidates]) {
     if (!base || !isLoopbackAgentBase(base)) continue;
     try {

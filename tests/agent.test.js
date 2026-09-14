@@ -241,6 +241,9 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardRenderer, /Update manually from GitHub Releases/);
   assert.match(electronMain, /hasDeveloperIdSignature/);
   assert.match(electronMain, /net\.fetch/);
+  assert.match(electronMain, /const desktopAgentProtocol = process\.platform === "darwin" \? "https" : "http"/);
+  assert.match(electronMain, /if \(desktopAgentProtocol === "https"\)/);
+  assert.match(electronMain, /process\.env\.AGENT_PROTOCOL = desktopAgentProtocol/);
   assert.match(electronMain, /checkPublicLicenseServer/);
   assert.match(electronMain, /globalThis\.fetch = net\.fetch\.bind\(net\)/);
   assert.match(electronMain, /setLicenseServerFetchImplementation/);
@@ -1288,6 +1291,20 @@ test("agent reports health, rejects unauthenticated jobs, and pairs with a one-t
   });
   assert.equal(ocrRoute.status, 400);
   assert.match((await ocrRoute.json()).error, /exactly one PDF/i);
+});
+
+test("secure website preflight is allowed for the Windows/Linux HTTP loopback transport", async () => {
+  const response = await fetch(url("/v1/health"), {
+    method: "OPTIONS",
+    headers: {
+      Origin: "https://media-toolbox-woad.vercel.app",
+      "Access-Control-Request-Method": "GET",
+      "Access-Control-Request-Private-Network": "true",
+    },
+  });
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get("access-control-allow-origin"), "https://media-toolbox-woad.vercel.app");
+  assert.equal(response.headers.get("access-control-allow-private-network"), "true");
 });
 
 test("agent rejects a different origin after pairing", async () => {

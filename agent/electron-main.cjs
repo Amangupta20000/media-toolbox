@@ -472,12 +472,19 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform === "darwin") app.dock?.show();
     app.setLoginItemSettings({ openAtLogin: true, args: ["--hidden"] });
     app.setAsDefaultProtocolClient("mediatoolbox");
-    const { ensureAgentCertificate } = await import("./tls.js");
-    const certificate = await ensureAgentCertificate(path.join(app.getPath("userData"), "tls"));
-    trustLocalCertificate(certificate.certPath);
-    process.env.AGENT_PROTOCOL = "https";
-    process.env.AGENT_TLS_CERT = certificate.certPath;
-    process.env.AGENT_TLS_KEY = certificate.keyPath;
+    // Safari on macOS requires the existing trusted HTTPS loopback endpoint.
+    // Windows/Linux browsers can reject the per-install self-signed
+    // certificate, so their packaged agents use plain HTTP on loopback, which
+    // those browsers treat as a trustworthy local origin.
+    const desktopAgentProtocol = process.platform === "darwin" ? "https" : "http";
+    if (desktopAgentProtocol === "https") {
+      const { ensureAgentCertificate } = await import("./tls.js");
+      const certificate = await ensureAgentCertificate(path.join(app.getPath("userData"), "tls"));
+      trustLocalCertificate(certificate.certPath);
+      process.env.AGENT_TLS_CERT = certificate.certPath;
+      process.env.AGENT_TLS_KEY = certificate.keyPath;
+    }
+    process.env.AGENT_PROTOCOL = desktopAgentProtocol;
     runtimeUpdater = createRuntimeUpdater({
       userDataPath: app.getPath("userData"),
       moduleDirectory: __dirname,

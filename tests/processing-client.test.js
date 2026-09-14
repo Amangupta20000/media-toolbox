@@ -30,6 +30,35 @@ test("HTTPS website does not fall back to an HTTP agent endpoint", () => {
   ]);
 });
 
+test("secure Windows/Linux pages discover HTTP loopback while macOS stays HTTPS-only", () => {
+  const originalWindow = globalThis.window;
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  globalThis.window = { location: { protocol: "https:", origin: "https://media-toolbox-woad.vercel.app" } };
+  try {
+    Object.defineProperty(globalThis, "navigator", { value: { platform: "Win32" }, configurable: true, writable: true });
+    assert.deepEqual(agentBaseCandidates({ secure: true, configured: "http://127.0.0.1:4789", remembered: "" }), [
+      "http://127.0.0.1:4789",
+      "http://localhost:4789",
+    ]);
+
+    Object.defineProperty(globalThis, "navigator", { value: { platform: "Linux x86_64" }, configurable: true, writable: true });
+    assert.deepEqual(agentBaseCandidates({ secure: true, configured: "http://127.0.0.1:4789", remembered: "" }), [
+      "http://127.0.0.1:4789",
+      "http://localhost:4789",
+    ]);
+
+    Object.defineProperty(globalThis, "navigator", { value: { platform: "MacIntel" }, configurable: true, writable: true });
+    assert.deepEqual(agentBaseCandidates({ secure: true, configured: "https://127.0.0.1:4789", remembered: "" }), [
+      "https://127.0.0.1:4789",
+      "https://localhost:4789",
+    ]);
+  } finally {
+    globalThis.window = originalWindow;
+    if (navigatorDescriptor) Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
+    else delete globalThis.navigator;
+  }
+});
+
 test("an authorized localhost browser creates its session during discovery", async () => {
   const values = new Map();
   const calls = [];
