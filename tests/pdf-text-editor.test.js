@@ -225,6 +225,52 @@ test("native text replacement keeps the original bold font resource and point si
   assert.match((await searchableText(output.bytes))[0], /Bold replacement/);
 });
 
+test("existing native PDF text supports format-only and replacement formatting in preview and export", async () => {
+  const source = await createFixture();
+  const extracted = await extractPdfTextRuns(source);
+  const run = extracted.pages[0].runs.find((item) => item.text === "First occurrence");
+  const format = {
+    fontFamily: "Courier",
+    fontSize: 24,
+    bold: true,
+    italic: true,
+    underline: true,
+    color: "#d12a2a",
+    alignment: "center",
+    characterSpacing: 1.5,
+    lineSpacing: 1.4,
+  };
+  const edit = {
+    pageIndex: run.pageIndex,
+    operatorOrdinal: run.ordinal,
+    runId: run.runId,
+    originalText: run.text,
+    originalTextHash: run.originalTextHash,
+    replacementText: "Formatted text",
+    format,
+    boxWidth: Number(run.item?.width) || 180,
+  };
+  const output = await applyPdfTextEdits(source, [edit]);
+  const outputDocument = await PDFDocument.load(output.bytes);
+  const content = decodedPageContent(outputDocument, outputDocument.getPages()[0]);
+  assert.match(content, /Tf/);
+  assert.match(content, /Tc/);
+  assert.match(content, /TL/);
+  assert.match(content, /0\.82[\s\S]*0\.165[\s\S]*0\.165 rg/);
+  assert.match((await searchableText(output.bytes))[0], /Formatted\s+text/);
+
+  const preview = await createPdfTextPreview(source, [{ ...edit, mode: "native" }]);
+  const previewDocument = await PDFDocument.load(preview);
+  const previewContent = decodedPageContent(previewDocument, previewDocument.getPages()[0]);
+  assert.match(previewContent, /Tf/);
+  assert.match(previewContent, /Tc/);
+  assert.match(previewContent, /TL/);
+  assert.match((await searchableText(preview))[0], /Formatted\s+text/);
+
+  const formatOnly = await applyPdfTextEdits(source, [{ ...edit, replacementText: undefined }]);
+  assert.match((await searchableText(formatOnly.bytes))[0], /First\s+occurrence/);
+});
+
 test("fallback text keeps bold styling when the original bold font cannot encode it", async () => {
   const source = await type0Fixture("Tj", "Arial-BoldMT");
   const extracted = await extractPdfTextRuns(source);

@@ -638,7 +638,7 @@ test("PDF editor exports styled text boxes on blank pages", async () => {
     jobDir,
     fields: {
       tool: "pdf-editor",
-      operations: JSON.stringify([{ kind: "blank", width: 420, height: 560, rotation: 0, images: [], textBoxes: [{ id: "title", text: "Hello PDF", x: 40, y: 80, width: 220, height: 48, fontSize: 18, fontFamily: "Helvetica", bold: true, italic: true, underline: true, color: "#ff0000", backgroundColor: "#00ff00" }] }]),
+      operations: JSON.stringify([{ kind: "blank", width: 420, height: 560, rotation: 0, images: [], textBoxes: [{ id: "title", text: "Hello PDF", x: 40, y: 80, width: 220, height: 48, rotation: 37, fontSize: 18, fontFamily: "Helvetica", bold: true, italic: true, underline: true, color: "#ff0000", backgroundColor: "#00ff00" }] }]),
     },
     files: [],
   });
@@ -656,6 +656,7 @@ test("PDF editor exports styled text boxes on blank pages", async () => {
   assert.match(content, /<504446>/);
   assert.match(content, /1 0 0 rg/);
   assert.match(content, /0 1 0 rg/);
+  assert.match(content, /0\.7986/);
   assert.match(content, /m\n/);
 });
 

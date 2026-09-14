@@ -283,6 +283,48 @@ test("OCR raster edits apply size and rotation around the moved text region", ()
   assert.ok(!warnings.some((warning) => /wider than the original/i.test(warning)), "moving existing pixels should not report replacement-text overflow");
 });
 
+test("OCR raster edits apply existing-text formatting without changing the source identity", () => {
+  const canvas = createCanvas(560, 220);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#1c2d3d";
+  context.font = "400 42px Arial";
+  const text = "Format me";
+  const baseline = 120;
+  const metrics = context.measureText(text);
+  context.fillText(text, 80, baseline);
+  applyRasterTextEdits(canvas, [{
+    originalText: text,
+    replacementText: text,
+    bbox: { x0: 80, y0: baseline - metrics.actualBoundingBoxAscent, x1: 80 + metrics.width, y1: baseline + metrics.actualBoundingBoxDescent },
+    format: {
+      fontFamily: "Courier",
+      fontSize: 50,
+      bold: true,
+      italic: true,
+      underline: true,
+      color: "#d12a2a",
+      alignment: "center",
+      characterSpacing: 2,
+      lineSpacing: 1.4,
+    },
+  }]);
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  let redPixels = 0;
+  for (let y = 45; y < 170; y += 1) for (let x = 60; x < 500; x += 1) {
+    const offset = (y * canvas.width + x) * 4;
+    if (pixels[offset] > 150 && pixels[offset] > pixels[offset + 1] * 1.5 && pixels[offset] > pixels[offset + 2] * 1.5) redPixels += 1;
+  }
+  assert.ok(redPixels > 100, "formatted OCR text should use the selected colour");
+  let underlinePixels = 0;
+  for (let y = 121; y <= 130; y += 1) for (let x = 70; x < 500; x += 1) {
+    const offset = (y * canvas.width + x) * 4;
+    if (pixels[offset] > 150 && pixels[offset] > pixels[offset + 1] * 1.5 && pixels[offset] > pixels[offset + 2] * 1.5) underlinePixels += 1;
+  }
+  assert.ok(underlinePixels > 10, "formatted OCR text should render its underline");
+});
+
 test("OCR move-only edits preserve the original glyph pixels without font matching", () => {
   const canvas = createCanvas(520, 180);
   const context = canvas.getContext("2d");

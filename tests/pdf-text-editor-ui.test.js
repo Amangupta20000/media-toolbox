@@ -68,6 +68,18 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /PdfTextJobLog logs=\{job\.logs \|\| \[\]\}/);
   assert.match(shell, /error\?\.code === "request_timeout"/);
   assert.match(shell, /takeHistoryEdit\("pdf-text-editor"\)/);
+  assert.match(shell, /undoTextEdit/);
+  assert.match(shell, /redoTextEdit/);
+  assert.match(shell, /textFormats/);
+  assert.match(shell, /Format existing PDF text/);
+  assert.match(shell, /Font family for selected PDF text/);
+  assert.match(shell, /Font size for selected PDF text/);
+  assert.match(shell, /styleButton\("bold"/);
+  assert.match(shell, /styleButton\("italic"/);
+  assert.match(shell, /styleButton\("underline"/);
+  assert.match(shell, /Alignment for selected PDF text/);
+  assert.match(shell, /Character spacing for selected PDF text/);
+  assert.match(shell, /Line spacing for selected PDF text/);
   assert.match(shell, /saved PDF could not be reopened/);
   assert.match(shell, /graphemeCount\(value\) > graphemeCount\(run\.text\)/);
   assert.match(await read("lib/pdf-text-preview.js"), /document.context.flateStream/);

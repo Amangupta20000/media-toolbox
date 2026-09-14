@@ -2,7 +2,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { PDFDocument, degrees, rgb } from "pdf-lib";
+import { PDFDocument, concatTransformationMatrix, degrees, popGraphicsState, pushGraphicsState, rgb } from "pdf-lib";
 import * as fontkit from "fontkit";
 import { config, paths, untruncCandidates } from "../lib/config.js";
 import { appendJobLog, claimNextJob, deleteJob, getJob, listExpiredJobs, updateJob } from "../lib/db.js";
@@ -628,40 +628,51 @@ async function drawPdfTextBoxes(pdf, outputPage, operation) {
   for (const [index, textBox] of textBoxes.entries()) {
     try {
       const placement = textBoxDrawPlacement(textBox, pageHeight);
+      const rotation = Number(textBox.rotation) || 0;
+      const radians = rotation * Math.PI / 180;
+      const a = Math.cos(radians);
+      const b = Math.sin(radians);
+      const c = -Math.sin(radians);
+      const d = Math.cos(radians);
+      const centerX = placement.x + placement.width / 2;
+      const centerY = placement.y + placement.height / 2;
+      outputPage.pushOperators(pushGraphicsState(), concatTransformationMatrix(a, b, c, d, centerX - a * centerX - c * centerY, centerY - b * centerX - d * centerY));
       if (textBox.backgroundColor !== "transparent") {
         const background = textBoxColor(textBox.backgroundColor, "#ffffff");
         outputPage.drawRectangle({ x: placement.x, y: placement.y, width: placement.width, height: placement.height, color: rgb(background.r, background.g, background.b), borderWidth: 0 });
       }
-      if (!String(textBox.text ?? "")) continue;
-      const fontCacheForBox = new Map();
-      const fontForRun = (run) => fontCacheForBox.get(textBoxFontName(run));
-      for (const run of textBoxTextRuns(textBox)) {
-        const fontName = textBoxFontName(run);
-        if (!fontCacheForBox.has(fontName)) {
-          let font = fontCache.get(fontName);
-          if (!font) {
-            font = await embedTextBoxFont(pdf, run);
-            fontCache.set(fontName, font);
+      if (String(textBox.text ?? "")) {
+        const fontCacheForBox = new Map();
+        const fontForRun = (run) => fontCacheForBox.get(textBoxFontName(run));
+        for (const run of textBoxTextRuns(textBox)) {
+          const fontName = textBoxFontName(run);
+          if (!fontCacheForBox.has(fontName)) {
+            let font = fontCache.get(fontName);
+            if (!font) {
+              font = await embedTextBoxFont(pdf, run);
+              fontCache.set(fontName, font);
+            }
+            fontCacheForBox.set(fontName, font);
           }
-          fontCacheForBox.set(fontName, font);
+        }
+        const lines = layoutPdfTextRuns(textBoxTextRuns(textBox), fontForRun, Math.max(1, placement.width - 8));
+        let baseline = placement.y + placement.height - (lines[0]?.height || 21.6) - 4;
+        for (const line of lines) {
+          let textX = placement.x + 4;
+          for (const run of line.items) {
+            const color = textBoxColor(run.color);
+            if (run.backgroundColor !== "transparent") {
+              const background = textBoxColor(run.backgroundColor, "#ffffff");
+              outputPage.drawRectangle({ x: textX, y: baseline - run.fontSize * 0.22, width: run.width, height: run.fontSize * 1.2, color: rgb(background.r, background.g, background.b), borderWidth: 0 });
+            }
+            outputPage.drawText(run.text, { x: textX, y: baseline, size: run.fontSize, font: run.font, color: rgb(color.r, color.g, color.b) });
+            if (run.underline) outputPage.drawLine({ start: { x: textX, y: baseline - run.fontSize * 0.08 }, end: { x: textX + run.width, y: baseline - run.fontSize * 0.08 }, thickness: Math.max(0.5, run.fontSize * 0.06), color: rgb(color.r, color.g, color.b) });
+            textX += run.width;
+          }
+          baseline -= line.height;
         }
       }
-      const lines = layoutPdfTextRuns(textBoxTextRuns(textBox), fontForRun, Math.max(1, placement.width - 8));
-      let baseline = placement.y + placement.height - (lines[0]?.height || 21.6) - 4;
-      for (const line of lines) {
-        let textX = placement.x + 4;
-        for (const run of line.items) {
-          const color = textBoxColor(run.color);
-          if (run.backgroundColor !== "transparent") {
-            const background = textBoxColor(run.backgroundColor, "#ffffff");
-            outputPage.drawRectangle({ x: textX, y: baseline - run.fontSize * 0.22, width: run.width, height: run.fontSize * 1.2, color: rgb(background.r, background.g, background.b), borderWidth: 0 });
-          }
-          outputPage.drawText(run.text, { x: textX, y: baseline, size: run.fontSize, font: run.font, color: rgb(color.r, color.g, color.b) });
-          if (run.underline) outputPage.drawLine({ start: { x: textX, y: baseline - run.fontSize * 0.08 }, end: { x: textX + run.width, y: baseline - run.fontSize * 0.08 }, thickness: Math.max(0.5, run.fontSize * 0.06), color: rgb(color.r, color.g, color.b) });
-          textX += run.width;
-        }
-        baseline -= line.height;
-      }
+      outputPage.pushOperators(popGraphicsState());
     } catch (error) {
       throw new Error(`Text box ${index + 1} could not be exported with the selected font. Use a supported PDF font and text.`);
     }

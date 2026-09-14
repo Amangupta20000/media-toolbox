@@ -15,6 +15,7 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   const workerRoute = await read("pages/api/pdf/worker.js");
   const licenseClient = await read("components/license-client.js");
   const licenseProxy = await read("pages/api/license/[...path].js");
+  const styles = await read("styles/globals.css");
   assert.match(shell, /const pixelRatio = Math\.min\(3, Math\.max\(2,/);
   assert.match(shell, /const renderViewport = pageInfo\.pdfPage\.getViewport\(\{ scale: scale \* pixelRatio, rotation \}\)/);
   assert.match(shell, /canvas\.style\.width = "100%"/);
@@ -23,8 +24,16 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /const scale = .*previewZoom/);
   assert.match(shell, /surfaceSize/);
   assert.match(shell, /imagePreviewStyle\(page, image, placement\)/);
-  assert.match(shell, /Set rotation for image/);
   assert.match(shell, /rotation: normalizeImageRotation\(image\.rotation\)/);
+  assert.match(shell, /ObjectTransformHandles/);
+  assert.match(shell, /selectedImageId/);
+  assert.match(shell, /selectedTextBoxId/);
+  assert.match(shell, /selectedObject\?\.pageId === page\.id/);
+  assert.match(shell, /pdf-object-resize-handle/);
+  assert.match(shell, /pdf-object-rotation-handle/);
+  assert.match(styles, /\.pdf-image-overlay\.selected/);
+  assert.match(styles, /\.pdf-text-box-overlay\.selected/);
+  assert.match(styles, /\.pdf-object-transform-handles/);
   assert.match(shell, /Text box/);
   assert.match(shell, /Text size for text box/);
   assert.match(shell, /Background color for text box/);
@@ -58,7 +67,6 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /Exported PDFs are temporary unless you choose Save to device/);
   assert.match(await read("lib/job-intake.js"), /safePdfOutputFilename/);
   assert.match(await read("worker/index.js"), /manifest\.outputFilename/);
-  const styles = await read("styles/globals.css");
   assert.match(styles, /\.pdf-editor-shell \{[^}]*overflow: hidden/);
   assert.match(styles, /\.pdf-retention-check \{[^}]*font-size: 13px/);
   assert.match(styles, /\.pdf-retention-row \{/);

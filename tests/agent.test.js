@@ -262,8 +262,8 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(releaseWorkflow, /Cache Electron packaging downloads/);
   assert.match(releaseWorkflow, /electron-builder-\$\{\{ runner\.os \}\}-\$\{\{ runner\.arch \}\}-node22-/);
   assert.match(releaseWorkflow, /~\/\.cache\/electron-builder/);
-  assert.match(releaseWorkflow, /cache-dependency-path: agent\/package-lock\.json/);
-  assert.match(releaseWorkflow, /hashFiles\('agent\/package-lock\.json', 'electron-builder\.yml'\)/);
+  assert.match(releaseWorkflow, /cache-dependency-path: \.agent-dependency-cache\.json/);
+  assert.match(releaseWorkflow, /hashFiles\('\.agent-dependency-cache\.json', 'electron-builder\.yml'\)/);
   assert.match(releaseWorkflow, /Stage agent-only packaging directory/);
   assert.match(releaseWorkflow, /node scripts\/stage-agent-package\.mjs/);
   assert.match(releaseWorkflow, /Verify embedded licensing configuration/);
@@ -929,8 +929,8 @@ test("website local-agent setup exposes installers for all supported desktop pla
   assert.match(source, /href=\{releasesUrl\}[^>]*>[\s\S]*Windows installer/);
   assert.match(source, /href=\{releasesUrl\}[^>]*>[\s\S]*Linux installer/);
   assert.doesNotMatch(source, /agent-platform-disabled|Coming soon/);
-  assert.match(workflow, /- os: windows-latest\n\s+platform: win\n\s+artifact: win/);
-  assert.match(workflow, /- os: ubuntu-latest\n\s+platform: linux\n\s+artifact: linux/);
+  assert.match(workflow, /"os":"windows-latest","platform":"win","artifact":"win"/);
+  assert.match(workflow, /"os":"ubuntu-latest","platform":"linux","artifact":"linux"/);
 });
 
 test("macOS first-launch guidance is included on the website, in releases, and in the DMG", async () => {
