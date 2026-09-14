@@ -33,10 +33,16 @@ function securePageSupportsPlainLoopback() {
     navigator.platform,
     navigator.userAgent,
   ].filter(Boolean).join(" ")).toLowerCase();
+  const userAgent = String(navigator.userAgent || "").toLowerCase();
   // Windows/Linux browsers commonly reject the installation-specific
   // self-signed certificate used by the desktop agent. Their browsers treat
   // loopback as a trustworthy local origin, so packaged agents use HTTP there.
   // macOS intentionally stays HTTPS for Safari compatibility.
+  // Prefer explicit OS markers from the user agent over a conflicting
+  // userAgentData/platform hint. Some Chromium privacy settings can expose a
+  // reduced or inconsistent platform hint, which otherwise sends Windows to
+  // HTTPS and produces ERR_SSL_PROTOCOL_ERROR against its HTTP agent.
+  if (/windows|win32|win64|linux|x11|cros/.test(userAgent)) return true;
   if (/mac|iphone|ipad|ipod/.test(platform)) return false;
   // Released non-macOS desktop agents listen on HTTP. Fall back to HTTP when
   // a browser hides its platform hint (for example because of reduced UA
