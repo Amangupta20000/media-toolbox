@@ -1,0 +1,93 @@
+name: Prime local agent packaging caches
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - agent/package.json
+      - agent/package-lock.json
+      - electron-builder.yml
+      - scripts/prepare-untrunc.sh
+      - scripts/prepare-untrunc-windows.ps1
+      - scripts/create-agent-dependency-cache-key.mjs
+      - .github/workflows/agent-release.yml
+      - .github/workflows/agent-cache-prime.yml
+
+jobs:
+  prime:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+          - os: windows-latest
+            platform: win
+          - os: ubuntu-latest
+            platform: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create dependency cache fingerprint
+        run: node scripts/create-agent-dependency-cache-key.mjs agent/package-lock.json .agent-dependency-cache.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: .agent-dependency-cache.json
+      - name: Cache Electron packaging downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-builder-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('.agent-dependency-cache.json', 'electron-builder.yml') }}
+          restore-keys: |
+            electron-builder-${{ runner.os }}-${{ runner.arch }}-node22-
+      - name: Cache bundled Untrunc
+        if: matrix.platform != 'win'
+        id: untrunc-cache
+        uses: actions/cache@v4
+        with:
+          path: vendor/untrunc
+          key: untrunc-${{ matrix.platform }}-${{ runner.arch }}-9d86ec9ef2ffed1bf8131abe80742c0574db52b6
+          restore-keys: |
+            untrunc-${{ matrix.platform }}-${{ runner.arch }}-
+      - name: Install macOS Untrunc build dependency
+        if: matrix.platform == 'mac' && steps.untrunc-cache.outputs.cache-hit != 'true'
+        run: brew install yasm
+      - name: Install Linux Untrunc build dependencies
+        if: matrix.platform == 'linux' && steps.untrunc-cache.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ca-certificates g++ git make wget xz-utils yasm
+      - name: Prepare bundled Untrunc on macOS or Linux
+        if: matrix.platform != 'win'
+        shell: bash
+        run: bash scripts/prepare-untrunc.sh
+      - name: Prepare dependency workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .agent-build
+          cp agent/package.json agent/package-lock.json .agent-build/
+      - name: Cache rebuilt agent-only dependencies
+        id: agent-deps-cache
+        uses: actions/cache@v4
+        with:
+          path: .agent-build/node_modules
+          key: agent-deps-${{ runner.os }}-${{ runner.arch }}-node22-electron37.10.3-abi136-${{ hashFiles('.agent-dependency-cache.json') }}
+          restore-keys: |
+            agent-deps-${{ runner.os }}-${{ runner.arch }}-node22-electron37.10.3-abi136-
+      - name: Install agent-only packaging dependencies
+        if: steps.agent-deps-cache.outputs.cache-hit != 'true'
+        working-directory: .agent-build
+        run: npm ci --prefer-offline --no-audit --no-fund
+      - name: Rebuild native agent dependencies
+        if: steps.agent-deps-cache.outputs.cache-hit != 'true'
+        working-directory: .agent-build
+        run: npx --no-install electron-rebuild --version 37.10.3 --parallel
