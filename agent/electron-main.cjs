@@ -55,6 +55,10 @@ if (!app.requestSingleInstanceLock()) {
     return `This release${version ? ` (v${version})` : ""} requires a full agent installer update. Download and install the latest release from GitHub Releases.`;
   }
 
+  function withDesktopMetadata(value = {}) {
+    return { ...value, appVersion: app.getVersion() };
+  }
+
   function isUnsignedMacPackage() {
     return process.platform === "darwin" && app.isPackaged && !hasDeveloperIdSignature();
   }
@@ -246,7 +250,7 @@ if (!app.requestSingleInstanceLock()) {
       if (state.authorization?.mode === "admin" && agent?.hasOnlineLicenseServerConfigured?.()) {
         state.licenseAdmin = agent.getLicenseAdminState?.() || { authenticated: false };
       }
-      return state;
+      return withDesktopMetadata(state);
     });
     ipcMain.handle("agent:get-update-state", () => ({ ...updateState }));
     ipcMain.handle("agent:check-for-updates", () => checkForUpdates());
@@ -294,19 +298,19 @@ if (!app.requestSingleInstanceLock()) {
         }
       }
       const state = await agent.getManagementState();
-      return { ...state, authorization: value, licenseAdmin, licenseRequests, licenseAudit, licenseAuditStoragePath, licenseAdminError };
+      return withDesktopMetadata({ ...state, authorization: value, licenseAdmin, licenseRequests, licenseAudit, licenseAuditStoragePath, licenseAdminError });
     });
     ipcMain.handle("agent:accept-legal", () => {
       const value = agent.acceptLegal();
-      return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
+      return agent.getManagementState().then((state) => withDesktopMetadata({ ...state, authorization: value }));
     });
     ipcMain.handle("agent:start-trial", () => {
       const value = agent.startTrial();
-      return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
+      return agent.getManagementState().then((state) => withDesktopMetadata({ ...state, authorization: value }));
     });
     ipcMain.handle("agent:login-activation", () => {
       const value = agent.loginActivation();
-      return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
+      return agent.getManagementState().then((state) => withDesktopMetadata({ ...state, authorization: value }));
     });
     ipcMain.handle("agent:get-license-request-config", () => agent.getLicenseRequestConfig());
     ipcMain.handle("agent:request-activation-code", (_event, origin, durationMs) => agent.requestActivationCode(String(origin || ""), `Local agent dashboard · ${process.platform}`, Number(durationMs)));
@@ -318,23 +322,23 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle("agent:logout", async () => {
       await agent.logoutLicenseAdmin();
       agent.logoutAdmin();
-      return agent.getManagementState();
+      return withDesktopMetadata(agent.getManagementState());
     });
     ipcMain.handle("agent:logout-activation", () => {
       const value = agent.logoutActivation();
-      return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
+      return agent.getManagementState().then((state) => withDesktopMetadata({ ...state, authorization: value }));
     });
     ipcMain.handle("agent:activate", async (_event, code) => {
       const value = await agent.activateLicense(String(code || ""));
-      return agent.getManagementState().then((state) => ({ ...state, authorization: value }));
+      return agent.getManagementState().then((state) => withDesktopMetadata({ ...state, authorization: value }));
     });
     ipcMain.handle("agent:end-session", (_event, sessionId) => {
       const value = agent.endSession(String(sessionId || ""));
-      return agent.getManagementState().then((state) => ({ ...state, sessionAction: value }));
+      return agent.getManagementState().then((state) => withDesktopMetadata({ ...state, sessionAction: value }));
     });
     ipcMain.handle("agent:end-all-sessions", () => {
       const value = agent.revokeAllSessions();
-      return agent.getManagementState().then((state) => ({ ...state, revokedCount: value }));
+      return agent.getManagementState().then((state) => withDesktopMetadata({ ...state, revokedCount: value }));
     });
     ipcMain.handle("agent:get-license-requests", async () => { await ensureOwnerLicenseServer(); return agent.getLicenseAdminRequests(); });
     ipcMain.handle("agent:get-license-audit", async () => { await ensureOwnerLicenseServer(); return agent.getLicenseAdminAudit(); });

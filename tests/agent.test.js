@@ -172,9 +172,9 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardHtml, /id="authorization-panel" class="panel authorization-panel"/);
   assert.doesNotMatch(dashboardHtml, /Authorize processing/);
   assert.doesNotMatch(dashboardHtml, /class="divider"/);
-  assert.doesNotMatch(dashboardHtml, /Device details/);
-  assert.doesNotMatch(dashboardHtml, /class="panel device-panel"|id="trusted-origins"|id="agent-version"|id="protocol"/);
-  assert.doesNotMatch(dashboardHtml, /id="device-id"/);
+  assert.match(dashboardHtml, /id="device-info"/);
+  assert.match(dashboardHtml, /id="device-id"/);
+  assert.match(dashboardHtml, /id="agent-version"/);
   assert.match(dashboardHtml, /id="locked-help" class="locked-help hidden"/);
   assert.match(dashboardHtml, /id="admin-control-button"/);
   assert.match(dashboardHtml, /id="check-updates-bottom"/);
@@ -208,6 +208,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(electronMain, /licenseServerManager\.watchForStorage/);
   assert.match(electronMain, /agent:recover-license-database/);
   assert.match(electronMain, /ensureOwnerLicenseServer/);
+  assert.match(electronMain, /withDesktopMetadata/);
   assert.match(electronMain, /publicHealthStatusCheck: checkPublicLicenseServerStatus/);
   assert.match(electronMain, /publicProxyHealthStatusCheck: checkPublicLicenseServerStatus/);
   assert.match(electronMain, /state\.ownerConfigured && !state\.healthy/);
@@ -222,6 +223,8 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardPreload, /agent:install-update/);
   assert.match(dashboardPreload, /agent:open-release-page/);
   assert.match(dashboardRenderer, /currentState\?\.authorization\?\.mode === "admin"/);
+  assert.match(dashboardRenderer, /authorization\.deviceId/);
+  assert.match(dashboardRenderer, /currentState\.appVersion/);
   assert.match(dashboardRenderer, /el\("locked-help"\)\.classList\.toggle\("hidden"/);
   assert.doesNotMatch(dashboardRenderer, /copyDeviceId/);
   assert.doesNotMatch(dashboardPreload, /copy-device-id/);

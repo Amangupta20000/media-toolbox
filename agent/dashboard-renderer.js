@@ -110,14 +110,23 @@
 
   function render(state) {
     currentState = state || {};
-    const authorization = state.authorization || {};
+    const authorization = currentState.authorization || {};
     const mode = authorization.mode || "locked";
     const labels = { admin: "Admin access", activation: "Activated license", trial: "Trial active", locked: "Locked" };
     const pill = el("connection-pill");
-    pill.textContent = state.running ? "Agent running" : "Agent stopped";
-    pill.classList.toggle("ready", Boolean(state.running));
-    pill.classList.toggle("status-running", Boolean(state.running));
-    pill.classList.toggle("status-stopped", !state.running);
+    const deviceId = authorization.deviceId || currentState.deviceId || "Unavailable";
+    const appVersion = currentState.appVersion || currentState.currentVersion || currentState.agentVersion || "Unavailable";
+    const deviceIdElement = el("device-id");
+    const versionElement = el("agent-version");
+    if (deviceIdElement) {
+      deviceIdElement.textContent = deviceId;
+      deviceIdElement.title = deviceId;
+    }
+    if (versionElement) versionElement.textContent = appVersion === "Unavailable" ? appVersion : `v${appVersion.replace(/^v/i, "")}`;
+    pill.textContent = currentState.running ? "Agent running" : "Agent stopped";
+    pill.classList.toggle("ready", Boolean(currentState.running));
+    pill.classList.toggle("status-running", Boolean(currentState.running));
+    pill.classList.toggle("status-stopped", !currentState.running);
     el("authorization-title").textContent = labels[mode] || "Locked";
     el("authorization-message").textContent = !authorization.legalAccepted ? "Accept the Privacy Policy and Terms & Conditions below before starting processing or logging in." : mode === "locked" ? (authorization.activationReloginAvailable ? "The activation session is logged out. Log in again to continue; its original expiry time is unchanged." : authorization.activationSessionLimitReached ? "The real activation time is exhausted by the active browser sessions. End a session to restore the real remaining time." : authorization.trialAvailable ? "A five-minute trial is available and starts on the first local processing session." : "Admin login or a valid activation code is required for processing.") : mode === "trial" ? "Your one-time trial is active on this installation." : mode === "activation" ? "This installation is authorized by a signed license." : "Unlimited local processing is unlocked until logout.";
     el("countdown").textContent = mode === "admin" ? "Unlimited" : formatRemaining(authorization.remainingMs);
@@ -160,9 +169,9 @@
     el("admin-control-button").textContent = mode === "admin" ? "Admin access" : "Admin login";
     el("admin-control-button").classList.toggle("active", mode === "admin");
     renderLicenseRequest();
-    renderLicenseOwnerPanel(state);
-    renderSessions(state.sessions || []);
-    renderCapabilities(state.capabilities || {});
+    renderLicenseOwnerPanel(currentState);
+    renderSessions(currentState.sessions || []);
+    renderCapabilities(currentState.capabilities || {});
     renderLicenseServer(licenseServerState, currentState?.authorization?.mode === "admin");
   }
 
