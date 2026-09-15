@@ -20,6 +20,8 @@ if (!app.requestSingleInstanceLock()) {
   let licenseServerManager;
   let runtimeUpdater;
   let installedRuntimeDirectory = "";
+  let appReplacementWatcher;
+  let appReplacementRestarting = false;
   const latestReleaseUrl = "https://github.com/Amangupta20000/media-toolbox/releases/latest";
   const websiteHomeUrl = "https://native-media-agent.vercel.app/";
   const updateState = {
@@ -60,6 +62,38 @@ if (!app.requestSingleInstanceLock()) {
 
   function withDesktopMetadata(value = {}) {
     return { ...value, appVersion: app.getVersion() };
+  }
+
+  function executableIdentity(filename) {
+    try {
+      const stat = fs.statSync(filename);
+      return [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs].join(":");
+    } catch {
+      return "";
+    }
+  }
+
+  function watchForInstalledBundleReplacement() {
+    if (process.platform !== "darwin" || !app.isPackaged) return;
+    const originalIdentity = executableIdentity(process.execPath);
+    if (!originalIdentity) return;
+
+    appReplacementWatcher = setInterval(() => {
+      if (appReplacementRestarting) return;
+      const currentIdentity = executableIdentity(process.execPath);
+      if (!currentIdentity || currentIdentity === originalIdentity) return;
+
+      // Finder can replace the .app bundle while the menu-bar agent is still
+      // running. Relaunch through the replaced executable so opening the app
+      // after an upgrade cannot keep showing the old in-memory process.
+      appReplacementRestarting = true;
+      clearInterval(appReplacementWatcher);
+      appReplacementWatcher = null;
+      console.log("The installed app bundle changed; restarting NativeMedia Agent.");
+      app.relaunch({ execPath: process.execPath, args: process.argv.slice(1) });
+      app.quit();
+    }, 1000);
+    appReplacementWatcher.unref?.();
   }
 
   function isUnsignedMacPackage() {
@@ -459,6 +493,7 @@ if (!app.requestSingleInstanceLock()) {
   async function start() {
     loadLocalEnvironment();
     app.setName?.(PRODUCT_NAME);
+    watchForInstalledBundleReplacement();
     // Use Chromium's trusted network stack for all licensing requests in the
     // desktop process. This also keeps an older verified runtime compatible
     // if it does not yet expose the explicit auth fetch adapter below.
@@ -574,6 +609,10 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.whenReady().then(start).catch((error) => { dialog.showErrorBox(`${PRODUCT_NAME} could not start`, error.message); app.quit(); });
   app.on("before-quit", async (event) => {
+    if (appReplacementWatcher) {
+      clearInterval(appReplacementWatcher);
+      appReplacementWatcher = null;
+    }
     if (!agent?.stopAgentServer && !licenseServerManager?.stop) return;
     event.preventDefault();
     licenseServerManager?.stopWatching?.();

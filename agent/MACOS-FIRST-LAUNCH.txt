@@ -9,3 +9,9 @@ The current macOS release is not Apple-notarized. macOS may show a warning that 
 5. Confirm Open.
 
 This approval is normally needed only once for a fresh full installation. Future launches and in-app updates use the existing update flow.
+
+UPGRADING FROM AN OLDER VERSION
+
+NativeMedia Agent stays running in the menu bar after its dashboard closes. Before replacing an existing app from a DMG, choose Quit NativeMedia Agent from the menu-bar menu. Then drag the new app into Applications, choose Replace, and launch it from Applications. This prevents macOS from reopening the older process that was still running during the copy.
+
+Newer releases also detect an app-bundle replacement and restart after the copy, but quitting first is recommended for unsigned DMG upgrades.

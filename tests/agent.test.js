@@ -164,6 +164,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   const agentAuth = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "auth.js"), "utf8");
   const electronMain = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "electron-main.cjs"), "utf8");
   const agentPackage = JSON.parse(await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "package.json"), "utf8"));
+  const agentLock = JSON.parse(await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "package-lock.json"), "utf8"));
   const rootPackage = JSON.parse(await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8"));
   const builderConfig = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "electron-builder.yml"), "utf8");
   const updateConfig = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "build", "app-update.yml"), "utf8");
@@ -214,6 +215,9 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(electronMain, /agent:recover-license-database/);
   assert.match(electronMain, /ensureOwnerLicenseServer/);
   assert.match(electronMain, /withDesktopMetadata/);
+  assert.match(electronMain, /watchForInstalledBundleReplacement/);
+  assert.match(electronMain, /app\.relaunch\(\{ execPath: process\.execPath/);
+  assert.match(electronMain, /The installed app bundle changed; restarting NativeMedia Agent/);
   assert.match(electronMain, /publicHealthStatusCheck: checkPublicLicenseServerStatus/);
   assert.match(electronMain, /publicProxyHealthStatusCheck: checkPublicLicenseServerStatus/);
   assert.match(electronMain, /state\.ownerConfigured && !state\.healthy/);
@@ -280,6 +284,9 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(releaseWorkflow, /hashFiles\('\.agent-dependency-cache\.json', 'electron-builder\.yml'\)/);
   assert.match(releaseWorkflow, /Stage agent-only packaging directory/);
   assert.match(releaseWorkflow, /node scripts\/stage-agent-package\.mjs/);
+  assert.match(releaseWorkflow, /Verify packaged app version/);
+  assert.match(releaseWorkflow, /expected_version="\$\{RELEASE_TAG#agent-v\}"/);
+  assert.match(releaseWorkflow, /without a release tag/);
   assert.match(releaseWorkflow, /Verify embedded licensing configuration/);
   assert.match(builderConfig, /agent\/license-server-url\.txt/);
   assert.match(builderConfig, /- agent\/free-access\.js/);
@@ -309,6 +316,8 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.equal(agentPackage.dependencies.next, undefined);
   assert.equal(agentPackage.dependencies.react, undefined);
   assert.equal(agentPackage.dependencies["pdfjs-dist"], "^6.3.289");
+  assert.equal(agentLock.version, agentPackage.version);
+  assert.equal(agentLock.packages[""].version, agentPackage.version);
   assert.match(dashboardRenderer, /setLicenseServerNotice/);
   assert.match(dashboardRenderer, /LICENSE_DATA_DIR=\$\{shellQuote\(dataDir\)\} npm run license-server/);
   assert.match(dashboardRenderer, /copy-license-server-command/);
@@ -1207,6 +1216,8 @@ test("macOS first-launch guidance is included on the website, in releases, and i
     assert.match(source, /Open Anyway/);
     assert.match(source, /Applications/);
   }
+  assert.match(releaseGuide, /Quit NativeMedia Agent/);
+  assert.match(releaseGuide, /app-bundle replacement/);
   assert.match(releaseWorkflow, /cat docs\/macos-first-launch\.md/);
   assert.match(releaseWorkflow, /--notes "\$release_notes"/);
   assert.match(builderConfig, /path: agent\/MACOS-FIRST-LAUNCH\.txt/);

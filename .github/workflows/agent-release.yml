@@ -175,6 +175,19 @@ jobs:
           fi
       - name: Stage agent-only packaging directory
         run: node scripts/stage-agent-package.mjs
+      - name: Verify packaged app version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          packaged_version="$(node -p 'require("./.agent-build/package.json").version')"
+          if [[ "$RELEASE_TAG" == agent-v* ]]; then
+            expected_version="${RELEASE_TAG#agent-v}"
+            test "$packaged_version" = "$expected_version"
+          else
+            echo "Packaging ${packaged_version} without a release tag; version equality will be checked when a release tag is pushed."
+          fi
       - name: Verify embedded licensing configuration
         shell: bash
         run: |
