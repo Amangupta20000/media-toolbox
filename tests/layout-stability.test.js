@@ -14,7 +14,7 @@ test("initial tool layout reserves async processing and capability geometry", as
   const toolPage = await read("components/tool-page.jsx");
   const styles = await read("styles/globals.css");
 
-  assert.match(processingMode, /const modes = \["local"\];/);
+  assert.match(processingMode, /const modes = \["local", \.\.\.\(serverAvailable \? \["server"\] : \[\]\)\];/);
   assert.match(processingMode, /className="processing-mode-help" aria-live="polite"/);
   assert.match(toolPage, /className=\{`keep-result-slot \$\{processingMode === "local" \? "visible" : ""\}`\}/);
   assert.match(styles, /\.capability-strip \{[^}]*height: 39px[^}]*overflow: hidden/);

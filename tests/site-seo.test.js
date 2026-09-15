@@ -99,8 +99,9 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(shell, /Mobile support is currently in progress/);
   assert.match(shell, /role="alert"/);
   assert.match(shell, /window\.matchMedia\("\(max-width: 680px\)"\)/);
-  assert.match(processingMode, /const modes = \["local"\];/);
-  assert.doesNotMatch(processingMode, /Server/);
+  assert.match(processingMode, /const serverAvailable = Boolean\(locations\?\.server\?\.available && \(locations\?\.server\?\.connected \|\| locations\?\.server\?\.ready\)\);/);
+  assert.match(processingMode, /const modes = \["local", \.\.\.\(serverAvailable \? \["server"\] : \[\]\)\];/);
+  assert.match(processingMode, /Local agent \+ server/);
   assert.doesNotMatch(history, /server/i);
   assert.match(toolSeo, /Frequently asked questions/);
   assert.match(toolSeo, /export function ToolFaqContent/);
@@ -121,6 +122,8 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(home, /Private PDF and media tools for your desktop/);
   assert.match(home, /href="\/pdf-editor"/);
   assert.match(home, /href="\/image-converter"/);
+  assert.match(home, /href: "\/svg-to-png", label: "SVG to PNG"/);
+  assert.match(home, /Rasterize SVG files at 1×, 2×, 3×, 4×, or custom dimensions/);
   assert.doesNotMatch(home, /category: "Private processing"/);
   assert.doesNotMatch(home, /label: "Local agent"/);
   assert.match(home, /Process files on your computer/);

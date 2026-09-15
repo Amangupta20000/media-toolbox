@@ -20,6 +20,9 @@ files:
   # Keep this shared runtime module explicit because agent/auth.js imports it
   # from inside app.asar at startup.
   - lib/token.js
+  # Keep the agent-local promotional-access policy explicit as well; it is
+  # loaded by agent/auth.js from inside app.asar at startup.
+  - agent/free-access.js
   - worker/**/*
   - vendor/untrunc/**/*
   # Bundled fonts are used for text boxes and as the PDF text editor's

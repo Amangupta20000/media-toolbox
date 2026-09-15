@@ -231,6 +231,7 @@ jobs:
           test -n "$app_asar"
           npx --no-install asar list "$app_asar" | grep -Fx '/agent/auth.js'
           npx --no-install asar list "$app_asar" | grep -Fx '/agent/token.js'
+          npx --no-install asar list "$app_asar" | grep -Fx '/agent/free-access.js'
       - name: Package Linux installer target
         if: matrix.platform == 'linux'
         working-directory: .agent-build
@@ -245,7 +246,10 @@ jobs:
           # Keep the signed runtime manifest aligned with the release kind.
           # Set AGENT_UPDATE_TYPE=full for Electron/app changes; use runtime
           # only when the installed desktop app itself does not need updating.
-          AGENT_UPDATE_TYPE: ${{ vars.AGENT_UPDATE_TYPE || 'runtime' }}
+          # Default to a full installer when the release kind is not explicitly
+          # configured. A runtime update must never replace code that is loaded
+          # from the bundled Electron app before the updater can start.
+          AGENT_UPDATE_TYPE: ${{ vars.AGENT_UPDATE_TYPE || 'full' }}
         shell: bash
         run: |
           set -euo pipefail

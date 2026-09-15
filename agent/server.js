@@ -19,7 +19,7 @@ const AGENT_VERSION = process.env.AGENT_VERSION || "0.2.1";
 const PROTOCOL_VERSION = 1;
 const DEFAULT_PORT = 4789;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const HISTORY_TOOLS = new Set(["image-converter", "video-repair", "pdf-editor", "pdf-text-editor", "pdf-compressor"]);
+const HISTORY_TOOLS = new Set(["image-converter", "svg-to-png", "video-repair", "pdf-editor", "pdf-text-editor", "pdf-compressor"]);
 const state = {
   server: null,
   port: DEFAULT_PORT,

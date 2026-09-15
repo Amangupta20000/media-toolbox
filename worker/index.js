@@ -574,6 +574,50 @@ async function processImage(job) {
   updateJob(job.id, { status: "completed", progress: 100, stage: "Complete", message: "The image is ready to download.", warnings, result });
 }
 
+function svgBackground(value) {
+  return value === "color" ? value : "transparent";
+}
+
+async function processSvgToPng(job) {
+  const options = JSON.parse(job.options_json || "{}");
+  const sharp = await loadSharp();
+  if (!sharp) throw new Error("The bundled image engine is unavailable for SVG conversion.");
+  const source = await fsp.readFile(job.source_path);
+  const metadata = await sharp(source).metadata();
+  const intrinsicWidth = Number(metadata.width) || 300;
+  const intrinsicHeight = Number(metadata.height) || 150;
+  const scale = options.scale === "custom" ? 1 : Number(options.scale) || 1;
+  const width = options.scale === "custom" ? Number(options.width) : Math.max(1, Math.round(intrinsicWidth * scale));
+  const height = options.scale === "custom" ? Number(options.height) : Math.max(1, Math.round(intrinsicHeight * scale));
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 8192 || height > 8192 || width * height > 8192 * 8192) throw new Error("The requested SVG output dimensions are not supported.");
+  const outputName = `${stem(job.source_name)}.png`;
+  const outputPath = path.join(path.dirname(job.source_path), outputName);
+  const background = svgBackground(options.background) === "color" ? options.backgroundColor : { r: 0, g: 0, b: 0, alpha: 0 };
+  update(job.id, 20, "Reading SVG", `${intrinsicWidth} × ${intrinsicHeight} vector dimensions detected.`);
+  await sharp(source, { density: 72 })
+    .resize({ width, height, fit: "contain", background })
+    .png({ compressionLevel: 9 })
+    .toFile(outputPath);
+  const outputMetadata = await sharp(outputPath).metadata();
+  const outputBytes = await bytes(outputPath);
+  const result = {
+    path: outputPath,
+    filename: outputName,
+    bytes: outputBytes,
+    inputBytes: source.length,
+    durationMs: null,
+    width: outputMetadata.width || width,
+    height: outputMetadata.height || height,
+    inputFormat: "svg",
+    outputFormat: "png",
+    scale: options.scale,
+    background: options.background,
+    method: "Bundled image engine · local SVG rasterization",
+  };
+  appendJobLog(job.id, `Created ${outputName} successfully.`, "complete");
+  updateJob(job.id, { status: "completed", progress: 100, stage: "Complete", message: "The PNG is ready to download.", warnings: [], result });
+}
+
 function isJpegImage(filename, mime = "") {
   return [".jpg", ".jpeg"].includes(path.extname(filename).toLowerCase()) || mime === "image/jpeg";
 }
@@ -1200,9 +1244,10 @@ async function processVideo(job) {
 }
 
 async function processJob(job) {
-  appendJobLog(job.id, `Worker started ${job.tool === "image-converter" ? "image conversion" : job.tool === "pdf-editor" ? "PDF editing" : job.tool === "pdf-text-editor" ? "PDF text editing" : job.tool === "pdf-compressor" ? "PDF compression" : "video repair"}.`, "info");
+  appendJobLog(job.id, `Worker started ${job.tool === "image-converter" ? "image conversion" : job.tool === "svg-to-png" ? "SVG to PNG conversion" : job.tool === "pdf-editor" ? "PDF editing" : job.tool === "pdf-text-editor" ? "PDF text editing" : job.tool === "pdf-compressor" ? "PDF compression" : "video repair"}.`, "info");
   try {
     if (job.tool === "image-converter") await processImage(job);
+    else if (job.tool === "svg-to-png") await processSvgToPng(job);
     else if (job.tool === "pdf-editor") await processPdfEditor(job);
     else if (job.tool === "pdf-text-editor") await processPdfTextEditor(job);
     else if (job.tool === "pdf-compressor") await processPdfCompressor(job);

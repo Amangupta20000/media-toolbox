@@ -12,6 +12,7 @@ import { metadataForPathname, normalizeSitePath, PRODUCT_TAGLINE } from "../lib/
 const navigation = [
   { href: "/local-agent", label: "Local agent", detail: "Process files on this device", icon: Bot },
   { href: "/image-converter", label: "Image converter", detail: "Resize-free format conversion", icon: ImageIcon },
+  { href: "/svg-to-png", label: "SVG to PNG", detail: "Rasterize SVG at any scale", icon: ImageIcon, beta: true },
   { href: "/video-repair", label: "Video repair", detail: "Layered recovery workflow", icon: Film },
 ];
 

@@ -11,7 +11,7 @@ import { ResultDownloadNote } from "./result-download-note.jsx";
 import { downloadFilename, downloadUrlWithFilename, filenameStem, ResultFilenameField } from "./result-filename.jsx";
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { ToolFaqContent, ToolSeoContent } from "./tool-seo-content.jsx";
-import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
+import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, preferredProcessingMode, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 import { MAX_PDF_COUNT, MAX_PDF_TOTAL_BYTES } from "../lib/pdf-limits.js";
 import { normalizeImageRotation, rotatedImageDrawPlacement } from "../lib/pdf-image-placement.js";
 import { PDF_TEXT_BOX_FONTS, layoutPdfTextRuns, textBoxColor, textBoxCssFontFamily, textBoxDrawPlacement, textBoxFontDefinition, textBoxFontName, textBoxTextRuns, wrapPdfTextLines } from "../lib/pdf-text-box.js";
@@ -760,7 +760,7 @@ export function PdfEditor() {
     return () => { active = false; };
   }, []);
 
-  useEffect(() => { probeProcessingLocations().then(setLocations).catch(() => undefined); }, []);
+  useEffect(() => { probeProcessingLocations().then((value) => { setLocations(value); setProcessingMode(preferredProcessingMode(value)); }).catch(() => undefined); }, []);
 
   // Saving to the device is a background persistence action. It still uses
   // the local worker to produce the PDF, but it must not replace the editor

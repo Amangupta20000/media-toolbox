@@ -345,12 +345,13 @@ export async function probeServer() {
 }
 
 export async function probeProcessingLocations() {
-  const [local] = await Promise.allSettled([probeLocalAgent()]);
+  const [local, server] = await Promise.allSettled([probeLocalAgent(), probeServer()]);
   return {
     local: local.status === "fulfilled" ? local.value : { available: false, connected: false, error: local.reason?.message || "Local agent is not running." },
-    // Reserved for a future deployment that enables online processing. The
-    // current website must never advertise or probe that unavailable path.
-    server: { available: false, connected: false, error: "Online processing is not available in this deployment." },
+    // The website's own API and worker provide Server mode when both health
+    // checks succeed. If either endpoint is unavailable, keep the mode hidden
+    // rather than showing a disabled option that cannot process files.
+    server: server.status === "fulfilled" ? server.value : { available: false, connected: false, error: server.reason?.message || "Online processing is not available in this deployment." },
   };
 }
 
@@ -520,7 +521,11 @@ export function processingCapabilities(locations, mode) {
 }
 
 export function isProcessingLocationReady(locations, mode) {
-  return Boolean(locations?.[mode]?.connected || locations?.[mode]?.ready);
+  return Boolean(locations?.[mode]?.available && (locations?.[mode]?.connected || locations?.[mode]?.ready));
+}
+
+export function preferredProcessingMode(locations) {
+  return ["local", "server"].find((mode) => isProcessingLocationReady(locations, mode)) || "";
 }
 
 export function resultUrlForMode(mode, result, kind = "download") {

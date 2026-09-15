@@ -267,6 +267,8 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(electronMain, /pathToFileURL/);
   assert.match(dashboardRenderer, /check-updates-bottom/);
   assert.match(builderConfig, /provider: github/);
+  assert.match(agentAuth, /from "\.\/free-access\.js"/);
+  assert.doesNotMatch(agentAuth, /from "\.\.\/lib\/free-access\.js"/);
   assert.match(builderConfig, /to: app-update\.yml/);
   assert.match(updateConfig, /repo: media-toolbox/);
   assert.match(releaseWorkflow, /-name 'latest\*\.yml'/);
@@ -280,6 +282,8 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(releaseWorkflow, /node scripts\/stage-agent-package\.mjs/);
   assert.match(releaseWorkflow, /Verify embedded licensing configuration/);
   assert.match(builderConfig, /agent\/license-server-url\.txt/);
+  assert.match(builderConfig, /- agent\/free-access\.js/);
+  assert.match(releaseWorkflow, /grep -Fx '\/agent\/free-access\.js'/);
   assert.match(releaseWorkflow, /working-directory: \.agent-build/);
   assert.match(releaseWorkflow, /npm ci --prefer-offline --no-audit --no-fund/);
   assert.doesNotMatch(releaseWorkflow, /npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund/);
@@ -296,7 +300,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(releaseWorkflow, /Package signed agent runtime update/);
   assert.match(releaseWorkflow, /AGENT_RUNTIME_UPDATE_PUBLIC_KEY/);
   assert.match(releaseWorkflow, /AGENT_RUNTIME_UPDATE_PRIVATE_KEY/);
-  assert.match(releaseWorkflow, /AGENT_UPDATE_TYPE: \$\{\{ vars\.AGENT_UPDATE_TYPE \|\| 'runtime' \}\}/);
+  assert.match(releaseWorkflow, /AGENT_UPDATE_TYPE: \$\{\{ vars\.AGENT_UPDATE_TYPE \|\| 'full' \}\}/);
   assert.match(releaseWorkflow, /agent-runtime-manifest-\*\.json/);
   assert.match(releaseWorkflow, /name: nativemedia-agent-\$\{\{ matrix\.artifact \}\}/);
   assert.match(await fs.readFile(path.join(projectDirectory, "scripts/package-agent-runtime.mjs"), "utf8"), /public\/fonts/);
@@ -362,7 +366,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(agentAuth, /X-Media-Toolbox-Device-Id/);
   assert.match(agentAuth, /X-Media-Toolbox-Device-Name/);
   assert.match(agentAuth, /X-Media-Toolbox-OS/);
-  assert.match(releaseWorkflow, /AGENT_UPDATE_TYPE: \$\{\{ vars\.AGENT_UPDATE_TYPE \|\| 'runtime' \}\}/);
+  assert.match(releaseWorkflow, /AGENT_UPDATE_TYPE: \$\{\{ vars\.AGENT_UPDATE_TYPE \|\| 'full' \}\}/);
   assert.doesNotMatch(dashboardHtml, /bottom-left/);
 });
 

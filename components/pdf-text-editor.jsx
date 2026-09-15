@@ -10,7 +10,7 @@ import { downloadFilename, downloadUrlWithFilename, filenameStem, ResultFilename
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { ToolFaqContent, ToolSeoContent } from "./tool-seo-content.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
-import { deleteProcessingJob, getProcessingJob, inspectPdfWithOcr, isProcessingLocationReady, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
+import { deleteProcessingJob, getProcessingJob, inspectPdfWithOcr, isProcessingLocationReady, preferredProcessingMode, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 import { applyRasterTextEdits, inferRasterTextAppearance } from "../lib/pdf-ocr-raster.js";
 import { MAX_PDF_BYTES } from "../lib/pdf-limits.js";
 import { mergeAdjacentTextRuns } from "../lib/pdf-text-runs.js";
@@ -1075,7 +1075,7 @@ export function PdfTextEditor() {
   };
 
   useEffect(() => { loadPdfLibrary().then(setPdfLibrary).catch(() => setError("PDF preview support could not be loaded. Refresh and try again.")); }, []);
-  useEffect(() => { probeProcessingLocations().then((value) => { setLocations(value); const preferred = "local"; setProcessingMode(preferred); setCapabilities(processingCapabilities(value, preferred)); }).catch(() => undefined); }, []);
+  useEffect(() => { probeProcessingLocations().then((value) => { setLocations(value); const preferred = preferredProcessingMode(value); setProcessingMode(preferred); setCapabilities(processingCapabilities(value, preferred)); }).catch(() => undefined); }, []);
   const defaultResultFilename = useMemo(() => source?.name ? `${filenameStem(source.name)}_edited.pdf` : "edited.pdf", [source?.name]);
   useEffect(() => {
     if (!resultFilenameTouchedRef.current) setResultFilenameStem(filenameStem(defaultResultFilename));

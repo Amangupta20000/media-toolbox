@@ -10,7 +10,9 @@ const outputDirectory = path.resolve(process.argv[3] || path.join(sourceDirector
 const platform = String(process.argv[4] || process.platform);
 const arch = String(process.argv[5] || process.arch);
 const privateKey = String(process.env.AGENT_RUNTIME_UPDATE_PRIVATE_KEY || "").trim();
-const updateType = String(process.env.AGENT_UPDATE_TYPE || "runtime").trim().toLowerCase();
+// A full installer is the safe default because Electron application code can
+// be required before the runtime updater is able to start.
+const updateType = String(process.env.AGENT_UPDATE_TYPE || "full").trim().toLowerCase();
 if (!privateKey.includes("BEGIN PRIVATE KEY")) throw new Error("Set AGENT_RUNTIME_UPDATE_PRIVATE_KEY before creating a signed runtime update.");
 if (!new Set(["runtime", "full"]).has(updateType)) throw new Error("AGENT_UPDATE_TYPE must be either runtime or full.");
 
@@ -33,6 +35,7 @@ for (const file of [
   "agent/index.js",
   "agent/server.js",
   "agent/auth.js",
+  "agent/free-access.js",
   "agent/license-proxy.cjs",
   "agent/token.js",
   "agent/tls.js",

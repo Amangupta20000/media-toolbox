@@ -12,7 +12,7 @@ import { downloadFilename, downloadUrlWithFilename, filenameStem, ResultFilename
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { ToolFaqContent, ToolSeoContent } from "./tool-seo-content.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
-import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
+import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, preferredProcessingMode, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 
 const imageFormats = [
   ["original", "Original", "Keep encoded format"],
@@ -258,7 +258,7 @@ export function ToolPage({ tool }) {
       // create the short-lived session when the user submits the job. This
       // keeps the trial from starting during a passive health probe while
       // avoiding a dead-end where Local is never selectable in a new browser.
-      const preferred = "local";
+      const preferred = preferredProcessingMode(value);
       setProcessingMode(preferred);
       setCapabilities(processingCapabilities(value, preferred));
     }).catch(() => undefined);
@@ -635,7 +635,7 @@ function VideoRecoverySummary({ hasMatchingReference, hasUntrunc }) {
   </section>;
 }
 
-function JobStatusCard({ job, isImage, isPdfCompressor, mode, keepResult, onReset }) {
+export function JobStatusCard({ job, isImage, isPdfCompressor, mode, keepResult, onReset }) {
   const [filenameStemValue, setFilenameStemValue] = useState("");
   const done = job.status === "completed";
   const failed = job.status === "failed";

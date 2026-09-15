@@ -7,7 +7,7 @@ import { config, paths } from "../lib/config.js";
 import { createAgentAuth, getAgentAuth, hasUsedAgentLicense, recordUsedAgentLicense, updateAgentAuth } from "../lib/db.js";
 import { activationDurationOptions, isAllowedActivationDuration, verifyLicenseToken } from "./token.js";
 import { DEFAULT_LICENSE_PROXY_URL } from "./license-proxy.cjs";
-import { FREE_ACCESS_CODE, FREE_ACCESS_DURATION_MS } from "../lib/free-access.js";
+import { FREE_ACCESS_CODE, FREE_ACCESS_DURATION_MS } from "./free-access.js";
 
 export const ADMIN_USERNAME = "Admin";
 export const ADMIN_PASSWORD = "Aman";

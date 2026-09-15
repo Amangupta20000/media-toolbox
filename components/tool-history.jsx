@@ -10,6 +10,7 @@ import { deleteLocalHistory, getLocalHistory, openLocalResultsFolder } from "./p
 
 const toolNames = {
   "image-converter": "Image conversion",
+  "svg-to-png": "SVG to PNG conversion",
   "video-repair": "Video repair",
   "pdf-editor": "PDF editing",
   "pdf-text-editor": "PDF text editing",
@@ -18,6 +19,7 @@ const toolNames = {
 
 const toolIcons = {
   "image-converter": ImageIcon,
+  "svg-to-png": ImageIcon,
   "video-repair": Film,
   "pdf-editor": FileText,
   "pdf-text-editor": FileText,
@@ -142,12 +144,16 @@ export function ToolHistory({ tool }) {
 
   const editItem = (item) => {
     const result = item.result || {};
+    if (tool === "svg-to-png") {
+      setMessage("SVG to PNG history results are download-only. Upload the original SVG to start a new conversion.");
+      return;
+    }
     if (!result.downloadUrl) {
       setMessage("This saved result is no longer available for editing.");
       return;
     }
     rememberHistoryEdit({ tool, downloadUrl: result.downloadUrl, filename: result.filename, mime: result.mime });
-    window.location.assign(tool === "pdf-editor" ? "/pdf-editor" : tool === "pdf-text-editor" ? "/pdf-text-editor" : tool === "pdf-compressor" ? "/pdf-compressor" : tool === "video-repair" ? "/video-repair" : "/image-converter");
+    window.location.assign(tool === "pdf-editor" ? "/pdf-editor" : tool === "pdf-text-editor" ? "/pdf-text-editor" : tool === "pdf-compressor" ? "/pdf-compressor" : tool === "video-repair" ? "/video-repair" : tool === "svg-to-png" ? "/svg-to-png" : "/image-converter");
   };
 
   return <section className="history-panel" aria-labelledby={`${tool}-history-title`}>
@@ -207,7 +213,7 @@ function HistoryPreviewModal({ item, onClose, onDelete, onEdit, deleting }) {
       <div className="history-preview-header"><div><span>Saved result preview</span><strong id="history-preview-title" title={result.filename}>{result.filename || "Saved result"}</strong><small>{item.storage === "local" ? "Local agent result" : "Saved result"} · {formatBytes(result.bytes || 0)}</small></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close preview" title="Close preview"><X size={20} /></button></div>
       <div className="history-preview-body">
         {!previewUrl && <DismissibleMessage className="preview-unavailable" resetKey="missing-preview"><AlertTriangle size={18} /><span>This saved result is no longer available for preview.</span></DismissibleMessage>}
-        {previewUrl && tool === "image-converter" && (previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${result.filename}-image-preview`}><AlertTriangle size={18} /><span>This image cannot be previewed in this browser, but it can still be downloaded.</span></DismissibleMessage> : <img className="history-preview-image" src={previewUrl} alt={`Preview of ${result.filename || "saved image"}`} onError={() => setPreviewError(true)} />)}
+        {previewUrl && (tool === "image-converter" || tool === "svg-to-png") && (previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${result.filename}-image-preview`}><AlertTriangle size={18} /><span>This image cannot be previewed in this browser, but it can still be downloaded.</span></DismissibleMessage> : <img className="history-preview-image" src={previewUrl} alt={`Preview of ${result.filename || "saved image"}`} onError={() => setPreviewError(true)} />)}
         {previewUrl && tool === "video-repair" && (previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${result.filename}-video-preview`}><AlertTriangle size={18} /><span>This video cannot be previewed in this browser, but it can still be downloaded.</span></DismissibleMessage> : <video className="history-preview-video" controls autoPlay={false} preload="metadata" playsInline onError={() => setPreviewError(true)} aria-label={`Preview of ${result.filename || "saved video"}`}><source src={previewUrl} /></video>)}
         {(previewUrl && (tool === "pdf-editor" || tool === "pdf-text-editor" || tool === "pdf-compressor")) && <iframe className="history-preview-pdf" src={previewUrl} title={`Preview of ${result.filename || "saved PDF"}`} />}
       </div>

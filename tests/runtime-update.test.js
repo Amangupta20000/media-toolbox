@@ -305,6 +305,7 @@ test("runtime package includes the verified dashboard shell used after an unsign
   const source = await fs.readFile(new URL("../scripts/package-agent-runtime.mjs", import.meta.url), "utf8");
   for (const file of [
     "agent/preload.cjs",
+    "agent/free-access.js",
     "agent/license-proxy.cjs",
     "agent/token.js",
     "agent/dashboard.html",
@@ -320,6 +321,7 @@ test("runtime package includes the verified dashboard shell used after an unsign
 test("runtime packaging declares the update type and validates its value", async () => {
   const source = await fs.readFile(new URL("../scripts/package-agent-runtime.mjs", import.meta.url), "utf8");
   assert.match(source, /AGENT_UPDATE_TYPE/);
+  assert.match(source, /process\.env\.AGENT_UPDATE_TYPE \|\| "full"/);
   assert.match(source, /updateType/);
   assert.match(source, /either runtime or full/);
 });

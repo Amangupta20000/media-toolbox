@@ -5,7 +5,7 @@ import { AppShell } from "../components/app-shell.jsx";
 const plannedTools = [
   ["PDF editor", "Merge PDFs, reorder pages, and add or remove pages in one document.", FileText, "Beta", "/pdf-editor"],
   ["PDF text editor", "Edit text inside PDFs and save a clean, shareable copy.", PenLine, "Beta", "/pdf-text-editor"],
-  ["SVG to PNG converter", "Upload an SVG or paste SVG code, then export at 1×, 2×, 3×, 4×, or a custom size with a transparent or color-picked background.", ImagePlus],
+  ["SVG to PNG converter", "Upload an SVG or paste SVG code, then export at 1×, 2×, 3×, 4×, or a custom size with a transparent or color-picked background.", ImagePlus, "Beta", "/svg-to-png"],
   ["Sign images & PDFs", "Create or upload a signature, then place it on an image or PDF page.", PenLine],
   ["Audio converter", "Convert music and audio between MP3, WAV, AAC, FLAC, and more.", AudioLines],
   ["Video compressor", "Reduce video file size while keeping the best practical quality.", FileVideo],

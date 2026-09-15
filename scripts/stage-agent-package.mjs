@@ -41,4 +41,13 @@ for (const filename of ["license-public-key.pem", "license-server-url.txt"]) {
   }
 }
 
+for (const filename of ["token.js", "free-access.js"]) {
+  const stagedFile = path.join(stagingDirectory, "agent", filename);
+  try {
+    await fs.access(stagedFile);
+  } catch {
+    throw new Error(`The staged agent is missing agent/${filename}; agent startup imports this runtime module.`);
+  }
+}
+
 console.log(`Staged the agent-only package at ${stagingDirectory}`);
