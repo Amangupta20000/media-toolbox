@@ -69,11 +69,16 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /The completed PDF is temporary and is cleaned up after download/);
   assert.match(shell, /import.*Info/);
   assert.match(shell, /className="pdf-retention-info"/);
-  assert.match(shell, /aria-expanded=\{retentionInfoOpen\}/);
+  assert.match(shell, /aria-describedby="pdf-retention-info-copy"/);
+  assert.match(shell, /role="tooltip"/);
+  assert.doesNotMatch(shell, /retentionInfoOpen/);
   assert.match(shell, /Result retention/);
   assert.match(shell, /cleaned up after download/);
   assert.match(styles, /\.pdf-retention-info/);
-  assert.match(styles, /\.pdf-retention-info-popover/);
+  assert.match(styles, /\.pdf-retention-info \{[^}]*z-index: 90/);
+  assert.match(styles, /\.pdf-retention-info-popover \{[^}]*z-index: 1000/);
+  assert.match(styles, /\.pdf-retention-info-control:hover \.pdf-retention-info-popover/);
+  assert.match(styles, /\.pdf-more-tools-menu \{[^}]*z-index: 1000/);
   assert.match(await read("lib/job-intake.js"), /safePdfOutputFilename/);
   assert.match(await read("worker/index.js"), /manifest\.outputFilename/);
   assert.match(styles, /\.pdf-editor-shell \{[^}]*overflow: hidden/);

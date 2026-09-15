@@ -416,11 +416,11 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .pdf-zoom-controls .icon-button { width: 32px; height: 32px; margin-left: 0; }
 .pdf-zoom-value { min-width: 54px; height: 32px; padding: 0 7px; color: #47657a; background: transparent; border: 1px solid transparent; border-radius: 7px; font-size: 11px; font-weight: 800; cursor: pointer; }
 .pdf-zoom-value:hover { color: var(--navy); background: #e9f5f5; border-color: #b9dfe0; }
-.pdf-more-tools { position: relative; flex: 0 0 auto; }
+.pdf-more-tools { position: relative; z-index: 80; flex: 0 0 auto; }
 .pdf-more-tools-trigger { width: 40px; height: 40px; margin-left: 0; color: #5e778c; background: #f2f7f9; border-color: #dbe7ec; }
 .pdf-more-tools-trigger:hover { color: var(--navy); background: #e9f5f5; border-color: #b9dfe0; }
 .pdf-more-tools-trigger:disabled { opacity: .55; cursor: not-allowed; }
-.pdf-more-tools-menu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; min-width: 235px; max-width: min(280px, calc(100vw - 32px)); padding: 7px; display: grid; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 15px 34px rgba(24, 49, 70, .18); }
+.pdf-more-tools-menu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 1000; min-width: 235px; max-width: min(280px, calc(100vw - 32px)); padding: 7px; display: grid; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 15px 34px rgba(24, 49, 70, .18); }
 .pdf-more-tools-heading { padding: 5px 9px 7px; color: #8a9ba9; font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .pdf-more-tools-menu button { width: 100%; min-height: 35px; display: flex; align-items: center; gap: 9px; padding: 0 9px; color: #47657a; background: transparent; border: 0; border-radius: 8px; font-size: 11px; font-weight: 700; text-align: left; }
 .pdf-more-tools-menu button:hover { color: var(--navy); background: #f1f8f9; }
@@ -1034,13 +1034,14 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .keep-result-check input { accent-color: var(--teal); }
 .pdf-retention-check { box-sizing: border-box; min-height: 56px; margin: 0; padding: 15px 20px; gap: 10px; border-bottom: 1px solid var(--line); color: #5f7585; font-size: 13px; font-weight: 700; line-height: 1.4; }
 .pdf-retention-check input { width: 18px; height: 18px; margin: 0; flex: 0 0 auto; }
-.pdf-retention-row { display: flex; align-items: center; gap: 24px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+.pdf-retention-row { position: relative; z-index: 40; display: flex; align-items: center; gap: 24px; padding: 0 20px; border-bottom: 1px solid var(--line); }
 .pdf-retention-row .pdf-retention-check { flex: 0 0 auto; border-bottom: 0; padding-left: 0; padding-right: 0; }
 .pdf-retention-status { flex: 1 1 220px; color: #8097a5; font-size: 11px; line-height: 1.45; }
-.pdf-retention-info-control { position: relative; display: flex; flex: 0 0 auto; align-items: center; }
-.pdf-retention-info { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 24px; height: 24px; margin-top: 1px; padding: 0; color: #7d98a8; background: transparent; border: 1px solid #7893a2; border-radius: 50%; cursor: pointer; }
+.pdf-retention-info-control { position: relative; z-index: 80; display: flex; flex: 0 0 auto; align-items: center; }
+.pdf-retention-info { position: relative; z-index: 90; display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 24px; height: 24px; margin-top: 1px; padding: 0; color: #7d98a8; background: transparent; border: 1px solid #7893a2; border-radius: 50%; cursor: pointer; }
 .pdf-retention-info:hover, .pdf-retention-info:focus-visible { color: var(--teal); border-color: var(--teal); outline: 0; box-shadow: 0 0 0 3px rgba(60,174,176,.13); }
-.pdf-retention-info-popover { position: absolute; z-index: 5; top: calc(100% + 8px); right: 0; display: grid; width: min(320px, calc(100vw - 48px)); gap: 4px; margin: 0; padding: 11px 13px; color: #60788a; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 12px 26px rgba(26, 52, 77, .14); font-size: 11px; font-weight: 500; line-height: 1.45; }
+.pdf-retention-info-popover { position: absolute; z-index: 1000; top: calc(100% + 8px); right: 0; display: grid; visibility: hidden; width: min(320px, calc(100vw - 48px)); gap: 4px; margin: 0; padding: 11px 13px; color: #60788a; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 12px 26px rgba(26, 52, 77, .14); font-size: 11px; font-weight: 500; line-height: 1.45; opacity: 0; pointer-events: none; transform: translateY(-4px); transition: opacity .15s ease, transform .15s ease, visibility 0s linear .15s; }
+.pdf-retention-info-control:hover .pdf-retention-info-popover, .pdf-retention-info-control:focus-within .pdf-retention-info-popover { visibility: visible; opacity: 1; pointer-events: auto; transform: translateY(0); transition-delay: 0s; }
 .pdf-retention-info-popover strong { color: var(--navy); font-size: 11px; }
 .pdf-retention-row .result-filename-field { flex: 1 1 320px; margin: 12px 0; }
 .agent-status-card, .agent-pair-card, .agent-capabilities-card, .agent-install-card, .agent-sessions-card { display: flex; gap: 18px; margin-bottom: 16px; padding: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 10px 24px rgba(26, 52, 77, .04); }
