@@ -73,12 +73,11 @@ a { color: inherit; text-decoration: none; }
 .version-label { display: block; padding: 0 11px; color: #aab5c0; font-size: 10px; }
 .main-area { min-width: 0; flex: 1; }
 .topbar { position: sticky; top: 0; z-index: 15; height: 77px; display: flex; align-items: center; justify-content: flex-start; padding: 0 5.3vw; background: rgba(255,255,255,.86); border-bottom: 1px solid var(--line); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
-.topbar-brand { position: absolute; left: 50%; display: flex; flex-direction: column; align-items: stretch; gap: 5px; min-width: 194px; transform: translateX(-50%); }
-.topbar-brand-main { display: flex; align-items: stretch; justify-content: flex-start; width: 100%; gap: 12px; }
-.topbar-brand .brand-mark { width: 58px; height: auto; min-height: 58px; align-self: stretch; border-radius: 13px; }
-.topbar-brand .brand-copy { font-size: 28px; letter-spacing: .005em; }
-.topbar-brand .brand-copy { align-self: center; }
-.topbar-brand-subtitle { align-self: stretch; width: 100%; color: #8c9bab; font-size: 14px; letter-spacing: .025em; line-height: 1.2; text-align: center; white-space: nowrap; }
+.topbar-brand { position: absolute; left: 50%; display: grid; grid-template-columns: 58px minmax(0, 1fr); grid-template-rows: auto auto; align-items: stretch; column-gap: 12px; row-gap: 5px; min-width: 194px; transform: translateX(-50%); }
+.topbar-brand-main { display: contents; }
+.topbar-brand .brand-mark { grid-column: 1; grid-row: 1 / span 2; width: 58px; height: auto; min-height: 0; align-self: stretch; overflow: visible; border-radius: 0; }
+.topbar-brand .brand-copy { grid-column: 2; grid-row: 1; align-self: center; font-size: 19px; letter-spacing: .005em; }
+.topbar-brand-subtitle { grid-column: 2; grid-row: 2; align-self: stretch; width: 100%; color: #8c9bab; font-size: 10px; letter-spacing: .025em; line-height: 1.2; text-align: left; white-space: nowrap; }
 .eyebrow { color: #9ba8b7; text-transform: uppercase; letter-spacing: .15em; font-size: 9px; font-weight: 800; }
 .topbar-title { color: var(--navy); font-size: 13px; font-weight: 700; }
 .topbar-status { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; color: #8190a2; background: #fff; border: 1px solid var(--line); border-radius: 9px; font-size: 11px; font-weight: 700; transition: color .16s ease, background .16s ease, border-color .16s ease, box-shadow .16s ease; }
@@ -784,11 +783,11 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
   .mobile-menu-open .topbar-menu-button { display: none; }
   .mobile-scrim.visible { display: block; position: fixed; inset: 0; z-index: 19; background: rgba(16,32,52,.28); backdrop-filter: blur(2px); }
   .topbar { height: 72px; justify-content: flex-start; padding-inline: 18px; }
-  .topbar-brand { gap: 5px; min-width: 0; }
+  .topbar-brand { display: flex; gap: 5px; min-width: 0; }
   .topbar-brand-main { width: auto; align-items: center; }
   .topbar-brand .brand-mark { width: 34px; height: 34px; border-radius: 10px; }
   .topbar-brand .brand-copy { display: none; }
-  .topbar-brand-subtitle { font-size: 10px; }
+  .topbar-brand-subtitle { grid-column: auto; grid-row: auto; width: auto; text-align: center; font-size: 10px; }
   .topbar-status { margin-left: auto; font-size: 11px; }
   .topbar-actions { gap: 8px; }
   .agent-access-timer { padding-inline: 9px; }

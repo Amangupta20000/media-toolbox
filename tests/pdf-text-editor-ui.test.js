@@ -54,12 +54,11 @@ test("PDF text editor is exposed as a dedicated tool with history navigation", a
   assert.match(styles, /\.sidebar-hidden \.sidebar > \* \{[^}]*opacity: 0[^}]*transform: translateX\(-12px\)/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(styles, /\.topbar-brand \{[^}]*position: absolute[^}]*left: 50%/);
-  assert.match(styles, /\.topbar-brand \{[^}]*align-items: stretch[^}]*min-width: 194px/);
-  assert.match(styles, /\.topbar-brand-main \{[^}]*align-items: stretch[^}]*justify-content: flex-start[^}]*width: 100%[^}]*gap: 12px/);
-  assert.match(styles, /\.topbar-brand \.brand-mark \{[^}]*width: 58px[^}]*height: auto[^}]*min-height: 58px[^}]*align-self: stretch/);
-  assert.match(styles, /\.topbar-brand \.brand-copy \{ font-size: 28px[^}]*letter-spacing: \.005em; \}/);
-  assert.match(styles, /\.topbar-brand \.brand-copy \{ align-self: center; \}/);
-  assert.match(styles, /\.topbar-brand-subtitle \{[^}]*align-self: stretch[^}]*width: 100%[^}]*font-size: 14px[^}]*text-align: center/);
+  assert.match(styles, /\.topbar-brand \{[^}]*display: grid[^}]*grid-template-columns: 58px minmax\(0, 1fr\)[^}]*grid-template-rows: auto auto[^}]*min-width: 194px/);
+  assert.match(styles, /\.topbar-brand-main \{ display: contents; \}/);
+  assert.match(styles, /\.topbar-brand \.brand-mark \{[^}]*grid-column: 1[^}]*grid-row: 1 \/ span 2[^}]*width: 58px[^}]*height: auto[^}]*align-self: stretch[^}]*overflow: visible/);
+  assert.match(styles, /\.topbar-brand \.brand-copy \{[^}]*grid-column: 2[^}]*grid-row: 1[^}]*align-self: center[^}]*font-size: 19px[^}]*letter-spacing: \.005em; \}/);
+  assert.match(styles, /\.topbar-brand-subtitle \{[^}]*grid-column: 2[^}]*grid-row: 2[^}]*align-self: stretch[^}]*width: 100%[^}]*font-size: 10px[^}]*text-align: left/);
   assert.match(styles, /\.topbar-actions \{[^}]*margin-left: auto[^}]*position: relative/);
   assert.match(styles, /\.topbar-brand-subtitle \{/);
   assert.match(styles, /\.topbar-menu-button \{[^}]*display: grid/);
