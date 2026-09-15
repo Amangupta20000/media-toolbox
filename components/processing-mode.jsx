@@ -9,8 +9,13 @@ const labels = {
 };
 
 export function ProcessingMode({ value, onChange, locations, compact = false }) {
-  const modes = ["local", "server"].filter((mode) => mode !== "server" || locations?.server?.available);
+  // Keep both controls in the DOM before the health probe completes. Hiding
+  // the server option until then changes the panel height/column layout and
+  // shifts all content below it during the first render.
+  const modes = ["local", "server"];
   const ready = (mode) => Boolean(locations?.[mode]?.connected || locations?.[mode]?.ready);
+  const localUnavailable = !locations?.local?.connected;
+  const serverUnavailable = !locations?.server?.connected;
   return <div className={`processing-mode ${compact ? "compact" : ""}`}>
     <div className="processing-mode-heading"><span><Settings2 size={16} /> Processing location</span><small>Choose where this job runs</small></div>
     <div className="processing-mode-options">
@@ -22,6 +27,11 @@ export function ProcessingMode({ value, onChange, locations, compact = false }) 
         </button>;
       })}
     </div>
-    {(!locations?.local?.connected || !locations?.server?.connected) && <div className="processing-mode-help"><span>{locations?.local?.connected ? "" : "Local agent requires Admin login or activation. "}</span>{!locations?.local?.connected && <Link href="/local-agent">Open Local agent setup</Link>}<span>{!locations?.local?.connected && !locations?.server?.connected ? " · " : ""}</span>{!locations?.server?.connected && <span>Server processing is unavailable.</span>}</div>}
+    <div className="processing-mode-help" aria-live="polite">
+      {localUnavailable && <><span>Local agent requires Admin login or activation. </span><Link href="/local-agent">Open Local agent setup</Link></>}
+      {localUnavailable && serverUnavailable && <span> · </span>}
+      {serverUnavailable && <span>Server processing is unavailable.</span>}
+      {!localUnavailable && !serverUnavailable && <span aria-hidden="true">&nbsp;</span>}
+    </div>
   </div>;
 }

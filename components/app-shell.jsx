@@ -46,7 +46,7 @@ function accessTimerFor(authorization, now, trialAvailable = false) {
 
 export function AppShell({ children }) {
   const { pathname } = useRouter();
-  const [collapsed, setCollapsed] = useState(false);
+  const [sidebarHidden, setSidebarHidden] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [theme, setTheme] = useState("light");
   const [localAgentStatus, setLocalAgentStatus] = useState({ available: false, connected: false });
@@ -98,22 +98,17 @@ export function AppShell({ children }) {
     });
   };
 
-  return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
+  const toggleSidebar = () => {
+    if (window.matchMedia("(max-width: 680px)").matches) {
+      setMobileOpen(true);
+      return;
+    }
+    setSidebarHidden((value) => !value);
+  };
+
+  return <div className={`app-shell ${sidebarHidden ? "sidebar-hidden" : ""}`}>
     <div className={`mobile-scrim ${mobileOpen ? "visible" : ""}`} onClick={() => setMobileOpen(false)} />
     <aside id="app-sidebar" className={`sidebar ${mobileOpen ? "mobile-open" : ""}`}>
-      <div className="sidebar-header">
-        <button
-          type="button"
-          className="icon-button sidebar-collapse"
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          aria-expanded={!collapsed}
-          aria-controls="app-sidebar"
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          onClick={() => setCollapsed((value) => !value)}
-        >
-          <Menu size={18} strokeWidth={2.25} aria-hidden="true" />
-        </button>
-      </div>
       <nav className="tool-nav" aria-label="Tools">
         {navigation.map((item) => {
           const Icon = item.icon;
@@ -154,7 +149,7 @@ export function AppShell({ children }) {
     </aside>
     <main className="main-area">
       <header className="topbar">
-        <button className="mobile-menu-button" aria-label="Open tools" onClick={() => setMobileOpen(true)}><Menu size={21} /></button>
+        <button className="topbar-menu-button" aria-label={sidebarHidden ? "Show tools" : "Hide tools"} title={sidebarHidden ? "Show tools" : "Hide tools"} aria-controls="app-sidebar" aria-expanded={!sidebarHidden} onClick={toggleSidebar}><Menu size={21} aria-hidden="true" /></button>
         <div className="topbar-brand" aria-label="Media Toolbox">
           <div className="topbar-brand-main">
             <div className="brand-mark"><Sparkles size={17} strokeWidth={2.4} /></div>
