@@ -36,12 +36,15 @@ test("PDF text editor is exposed as a dedicated tool with history navigation", a
   assert.match(navigation, /pdf-tools-subnav/);
   assert.match(styles, /\.pdf-tools-group \{[^}]*min-width: 0[^}]*max-width: 100%/);
   assert.match(styles, /\.pdf-tools-trigger \{[^}]*appearance: none[^}]*background: transparent/);
+  assert.match(styles, /\.pdf-tools-trigger:focus-visible \{[^}]*outline: 2px solid var\(--teal\)/);
   assert.match(styles, /\.pdf-tools-chevron \{[^}]*border-radius: 50%/);
   assert.match(styles, /\.sidebar-collapsed \.sidebar-collapse \{[^}]*display: grid/);
   assert.match(styles, /\.sidebar-collapsed \.pdf-tools-chevron \{[^}]*display: grid/);
   assert.doesNotMatch(styles, /\.sidebar-collapsed \.pdf-tools-subnav \{[^}]*display: none/);
   assert.match(styles, /\.sidebar-collapsed \.pdf-tools-subnav \{[^}]*position: absolute/);
+  assert.match(styles, /\.sidebar-collapsed \.pdf-tools-subnav \{[^}]*width: 280px[^}]*overflow: hidden/);
   assert.match(styles, /\.sidebar-collapsed \.pdf-tools-subnav \.nav-copy \{[^}]*display: flex/);
+  assert.match(styles, /\.sidebar-collapsed \.pdf-tools-subnav \.nav-copy strong[^}]*text-overflow: ellipsis/);
   assert.match(styles, /\.sidebar-collapse \{[^}]*border-radius: 50%[^}]*outline: 0/);
   assert.match(styles, /\.sidebar-collapse:focus-visible \{[^}]*outline: 2px solid var\(--teal\)/);
   assert.match(styles, /\.topbar-context \{[^}]*position: absolute[^}]*left: 50%/);
