@@ -67,6 +67,9 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /Saved PDF name/);
   assert.match(shell, /Save to device/);
   assert.match(shell, /Exported PDFs are temporary unless you choose Save to device/);
+  assert.match(shell, /import.*Info/);
+  assert.match(shell, /className="pdf-retention-info"/);
+  assert.match(styles, /\.pdf-retention-info/);
   assert.match(await read("lib/job-intake.js"), /safePdfOutputFilename/);
   assert.match(await read("worker/index.js"), /manifest\.outputFilename/);
   assert.match(styles, /\.pdf-editor-shell \{[^}]*overflow: hidden/);

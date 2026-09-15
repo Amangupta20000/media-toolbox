@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Bold, CheckCircle2, Copy, Download, FilePlus2, FileText, GripVertical, ImagePlus, Italic, Keyboard, LoaderCircle, Lock, MoreHorizontal, Plus, Printer, Redo2, RotateCcw, RotateCw, Save, Trash2, Type, Underline, Undo2, Unlock, UploadCloud, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertTriangle, Bold, CheckCircle2, Copy, Download, FilePlus2, FileText, GripVertical, ImagePlus, Info, Italic, Keyboard, LoaderCircle, Lock, MoreHorizontal, Plus, Printer, Redo2, RotateCcw, RotateCw, Save, Trash2, Type, Underline, Undo2, Unlock, UploadCloud, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
 import { formatBytes } from "./file-dropzone.jsx";
@@ -1676,7 +1676,7 @@ export function PdfEditor() {
       <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { addPdfFiles(event.target.files); event.target.value = ""; }} />
       <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/heic,image/heif,image/tiff,image/gif,image/bmp,.png,.jpg,.jpeg,.heic,.heif,.tif,.tiff,.gif,.bmp" multiple hidden onChange={(event) => { const targetPageId = imageTargetPageIdRef.current; imageTargetPageIdRef.current = null; addImages(event.target.files, targetPageId || undefined); event.target.value = ""; }} />
       <div className={`pdf-retention-row ${processingMode !== "local" ? "pdf-retention-row-tools-only" : ""}`}>
-        {processingMode === "local" && <><label className="keep-result-check pdf-retention-check"><input type="checkbox" checked={keepResult} onChange={(event) => { keepResultTouchedRef.current = true; setKeepResult(event.target.checked); }} /><span>Keep final result on this device</span></label><span className="pdf-retention-status" aria-live="polite">{keepResult ? "The completed PDF will be saved to the Local agent Results folder." : "Exported PDFs are temporary unless you choose Save to device."}</span></>}
+        {processingMode === "local" && <><label className="keep-result-check pdf-retention-check"><input type="checkbox" checked={keepResult} onChange={(event) => { keepResultTouchedRef.current = true; setKeepResult(event.target.checked); }} /><span>Keep final result on this device</span></label><button className="pdf-retention-info" type="button" aria-label={keepResult ? "The completed PDF will be saved to the Local agent Results folder." : "Exported PDFs are temporary unless you choose Save to device."} title={keepResult ? "The completed PDF will be saved to the Local agent Results folder." : "Exported PDFs are temporary unless you choose Save to device."}><Info size={15} /></button></>}
         <div ref={moreToolsRef} className="pdf-more-tools pdf-more-tools-bottom">
           <button className="icon-button pdf-more-tools-trigger" type="button" aria-label="Open other PDF tools" aria-haspopup="menu" aria-expanded={moreToolsOpen} title={selectedPage ? "Other tools" : canUndo || canRedo ? "Undo or redo document changes" : "Add a page to use other tools"} disabled={!selectedPage && !canUndo && !canRedo} onClick={() => setMoreToolsOpen((current) => !current)}><MoreHorizontal size={20} /></button>
           {moreToolsOpen && (selectedPage || canUndo || canRedo) && <div className="pdf-more-tools-menu" role="menu" aria-label="Other PDF tools">

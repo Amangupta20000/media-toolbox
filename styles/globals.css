@@ -922,6 +922,8 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .pdf-retention-row { display: flex; align-items: center; gap: 24px; padding: 0 20px; border-bottom: 1px solid var(--line); }
 .pdf-retention-row .pdf-retention-check { flex: 0 0 auto; border-bottom: 0; padding-left: 0; padding-right: 0; }
 .pdf-retention-status { flex: 1 1 220px; color: #8097a5; font-size: 11px; line-height: 1.45; }
+.pdf-retention-info { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 24px; height: 24px; margin-top: 1px; padding: 0; color: #7d98a8; background: transparent; border: 1px solid #7893a2; border-radius: 50%; cursor: help; }
+.pdf-retention-info:hover, .pdf-retention-info:focus-visible { color: var(--teal); border-color: var(--teal); outline: 0; box-shadow: 0 0 0 3px rgba(60,174,176,.13); }
 .pdf-retention-row .result-filename-field { flex: 1 1 320px; margin: 12px 0; }
 .agent-status-card, .agent-pair-card, .agent-capabilities-card, .agent-install-card, .agent-sessions-card { display: flex; gap: 18px; margin-bottom: 16px; padding: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 10px 24px rgba(26, 52, 77, .04); }
 .agent-status-card { align-items: center; }
@@ -1021,6 +1023,7 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
   .pdf-retention-row { align-items: stretch; flex-direction: column; gap: 0; padding: 0 20px 12px; }
   .pdf-retention-row .pdf-retention-check { min-height: 48px; }
   .pdf-retention-row .pdf-retention-status { flex: 0 0 auto; padding: 0 0 10px; }
+  .pdf-retention-row .pdf-retention-info { align-self: flex-start; margin: 0 0 10px; }
   .pdf-retention-row .result-filename-field { margin: 0; }
   .processing-mode-options, .agent-download-grid { grid-template-columns: 1fr; }
   .history-panel-heading { flex-direction: column; }
