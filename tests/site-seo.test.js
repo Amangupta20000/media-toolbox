@@ -30,6 +30,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(document, /name="theme-color"/);
   assert.match(shell, /AppFooter/);
   assert.match(shell, /<Link href="\/" title="Home">Home<\/Link>/);
+  assert.match(shell, /<Link href="\/" className="topbar-brand" aria-label="Media Toolbox home">/);
   assert.match(shell, /<img className="brand-logo" src="\/media-toolbox-logo\.png" alt="Media Toolbox logo" title="Media Toolbox" \/>/);
   assert.match(footer, /href="\/privacy" title="Privacy Policy"/);
   assert.match(footer, /href="\/terms" title="Terms and Conditions"/);

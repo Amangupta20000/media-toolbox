@@ -169,6 +169,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   const updateConfig = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "build", "app-update.yml"), "utf8");
   const releaseWorkflow = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".github", "workflows", "agent-release.yml"), "utf8");
   assert.match(dashboardHtml, /id="start-trial-button"/);
+  assert.match(dashboardHtml, /<a class="brand" href="https:\/\/media-toolbox-woad\.vercel\.app\/" target="_blank" rel="noreferrer" aria-label="Open Media Toolbox home page">/);
   assert.match(dashboardHtml, /id="authorization-panel" class="panel authorization-panel"/);
   assert.doesNotMatch(dashboardHtml, /Authorize processing/);
   assert.doesNotMatch(dashboardHtml, /class="divider"/);
@@ -202,6 +203,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardCss, /@keyframes agent-status-alert/);
   assert.match(dashboardCss, /prefers-reduced-motion:reduce/);
   assert.match(dashboardCss, /\.admin-action\{background:#102c3d;border:1px solid/);
+  assert.match(dashboardCss, /\.brand\{[^}]*color:inherit;text-decoration:none/);
   assert.match(dashboardPreload, /agent:start-license-server/);
   assert.match(dashboardPreload, /agent:get-license-server-state/);
   assert.match(dashboardPreload, /agent:recover-license-database/);
@@ -222,6 +224,10 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardPreload, /agent:download-update/);
   assert.match(dashboardPreload, /agent:install-update/);
   assert.match(dashboardPreload, /agent:open-release-page/);
+  assert.match(dashboardPreload, /agent:open-website-home/);
+  assert.match(dashboardRenderer, /api\.openWebsiteHome/);
+  assert.match(electronMain, /const websiteHomeUrl = "https:\/\/media-toolbox-woad\.vercel\.app\/"/);
+  assert.match(electronMain, /agent:open-website-home/);
   assert.match(dashboardRenderer, /currentState\?\.authorization\?\.mode === "admin"/);
   assert.match(dashboardRenderer, /authorization\.deviceId/);
   assert.match(dashboardRenderer, /currentState\.appVersion/);

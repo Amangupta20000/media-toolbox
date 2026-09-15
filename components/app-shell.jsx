@@ -168,13 +168,13 @@ export function AppShell({ children }) {
     <main className="main-area">
       <header className="topbar">
         <button className="topbar-menu-button" type="button" aria-label={sidebarHidden || !mobileOpen ? "Show tools" : "Hide tools"} title={sidebarHidden || !mobileOpen ? "Show tools" : "Hide tools"} aria-controls="app-sidebar" aria-expanded={!sidebarHidden && mobileOpen} onClick={toggleSidebar}><Menu size={21} aria-hidden="true" /></button>
-        <div className="topbar-brand" aria-label="Media Toolbox">
+        <Link href="/" className="topbar-brand" aria-label="Media Toolbox home">
           <div className="topbar-brand-main">
             <div className="brand-mark"><img className="brand-logo" src="/media-toolbox-logo.png" alt="Media Toolbox logo" title="Media Toolbox" /></div>
             <div className="brand-copy"><span>Media</span><strong>Toolbox</strong></div>
           </div>
           <span className="topbar-brand-subtitle">Secure media utilities</span>
-        </div>
+        </Link>
         <div className="topbar-actions"><button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}<span>{theme === "dark" ? "Light mode" : "Dark mode"}</span></button><Link href="/local-agent" className={`topbar-status ${localAgentStatus.connected ? "connected" : ""}`} aria-label={localAgentStatus.connected ? "Open connected local agent" : "Open local agent setup"}><span className={`status-pulse ${localAgentStatus.connected ? "connected" : ""}`} /><span>{localAgentStatus.connected ? "Agent connected" : "Agent setup"}</span></Link>{accessTimer && <div className={`agent-access-timer ${accessTimer.state}`} title={`${accessTimer.label}: ${accessTimer.value}`} aria-label={`${accessTimer.label} ${accessTimer.value}`}><Clock3 size={15} /><span className="timer-label">{accessTimer.label}</span><strong>{accessTimer.value}</strong></div>}</div>
       </header>
       <div className="content-wrap">{children}</div>

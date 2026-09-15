@@ -19,6 +19,7 @@ if (!app.requestSingleInstanceLock()) {
   let runtimeUpdater;
   let installedRuntimeDirectory = "";
   const latestReleaseUrl = "https://github.com/Amangupta20000/media-toolbox/releases/latest";
+  const websiteHomeUrl = "https://media-toolbox-woad.vercel.app/";
   const updateState = {
     kind: "electron",
     platform: process.platform,
@@ -259,6 +260,10 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle("agent:open-release-page", async () => {
       await shell.openExternal(latestReleaseUrl);
       return { ok: true, url: latestReleaseUrl };
+    });
+    ipcMain.handle("agent:open-website-home", async () => {
+      await shell.openExternal(websiteHomeUrl);
+      return { ok: true, url: websiteHomeUrl };
     });
     ipcMain.handle("agent:open-macos-security-settings", async () => {
       if (process.platform !== "darwin") throw new Error("macOS Privacy & Security is only available on macOS.");

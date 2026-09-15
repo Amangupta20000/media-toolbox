@@ -2,6 +2,7 @@
   "use strict";
   const api = window.mediaToolboxAgent;
   const el = (id) => document.getElementById(id);
+  const brand = document.querySelector(".brand");
   let currentState;
   let licenseRequestConfig = null;
   let licenseRequest = null;
@@ -23,6 +24,12 @@
     notice.textContent = message || "";
     notice.classList.toggle("hidden", !message);
   }
+
+  brand?.addEventListener("click", (event) => {
+    if (typeof api?.openWebsiteHome !== "function") return;
+    event.preventDefault();
+    api.openWebsiteHome().catch((error) => showNotice(error.message || "The Media Toolbox website could not be opened."));
+  });
 
   function renderUpdate(value = {}) {
     const panel = el("agent-update-panel");
