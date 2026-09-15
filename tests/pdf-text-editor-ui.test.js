@@ -26,6 +26,7 @@ test("PDF text editor is exposed as a dedicated tool with history navigation", a
   assert.match(navigation, /pdf-tools-subnav/);
   assert.match(styles, /\.pdf-tools-group \{[^}]*min-width: 0[^}]*max-width: 100%/);
   assert.match(styles, /\.pdf-tools-trigger \{[^}]*appearance: none[^}]*background: transparent/);
+  assert.match(styles, /\.sidebar-collapsed \.sidebar-collapse \{[^}]*display: grid/);
   assert.match(styles, /\.pdf-tools-subnav \{[^}]*min-width: 0[^}]*max-width: 100%/);
   assert.match(styles, /\.pdf-tool-child \{[^}]*min-width: 0[^}]*max-width: 100%/);
   assert.match(shell, /ToolViewTabs/);

@@ -29,8 +29,8 @@ a { color: inherit; text-decoration: none; }
 .sidebar { position: sticky; top: 0; width: 280px; height: 100vh; height: 100dvh; max-height: 100dvh; flex: 0 0 280px; align-self: flex-start; overflow-y: auto; padding: 28px 18px 20px; display: flex; flex-direction: column; background: #fff; border-right: 1px solid var(--line); transition: width .22s ease, flex-basis .22s ease, padding .22s ease; z-index: 20; }
 .sidebar-collapsed .sidebar { width: 86px; flex-basis: 86px; padding-inline: 14px; }
 .sidebar-collapsed .brand-copy, .sidebar-collapsed .sidebar-label, .sidebar-collapsed .nav-copy, .sidebar-collapsed .active-dot, .sidebar-collapsed .privacy-card div, .sidebar-collapsed .version-label { display: none; }
-.sidebar-collapsed .brand-lockup { justify-content: center; }
-.sidebar-collapsed .sidebar-collapse { display: none; }
+.sidebar-collapsed .brand-lockup { justify-content: center; position: relative; }
+.sidebar-collapsed .sidebar-collapse { display: grid; position: absolute; right: 0; width: 24px; height: 24px; margin-left: 0; z-index: 1; }
 .sidebar-collapsed .tool-nav-item { justify-content: center; padding-inline: 0; }
 .brand-lockup { height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px; }
 .brand-mark { width: 31px; height: 31px; border-radius: 10px; display: grid; place-items: center; color: white; background: linear-gradient(135deg, #173c61, #22a6a8); box-shadow: 0 7px 16px rgba(22, 120, 139, .18); }
@@ -759,7 +759,8 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
   .sidebar-collapsed .nav-copy { display: flex; }
   .sidebar-collapsed .active-dot { display: inline-block; }
   .sidebar-collapsed .brand-lockup { justify-content: initial; }
-  .sidebar-collapsed .sidebar-collapse { display: grid; }
+  .sidebar-collapsed .brand-lockup { position: static; }
+  .sidebar-collapsed .sidebar-collapse { display: grid; position: static; width: 35px; height: 35px; margin-left: auto; }
   .sidebar-collapsed .tool-nav-item { justify-content: initial; padding-inline: 13px; }
   .mobile-scrim.visible { display: block; position: fixed; inset: 0; z-index: 19; background: rgba(16,32,52,.28); backdrop-filter: blur(2px); }
   .mobile-menu-button { display: grid; }
