@@ -45,7 +45,7 @@ a { color: inherit; text-decoration: none; }
 .tool-nav-item:hover { color: var(--navy); background: #f8fafc; }
 .tool-nav-item.active { color: var(--navy); background: #f0fafb; border-color: #d5f0ef; }
 .pdf-tools-group { min-width: 0; max-width: 100%; display: grid; gap: 5px; }
-.pdf-tools-trigger { width: 100%; min-width: 0; max-width: 100%; font: inherit; text-align: left; cursor: pointer; }
+.pdf-tools-trigger { width: 100%; min-width: 0; max-width: 100%; font: inherit; text-align: left; cursor: pointer; appearance: none; -webkit-appearance: none; color: inherit; background: transparent; border: 1px solid transparent; }
 .pdf-tools-trigger .nav-copy { flex: 1; }
 .pdf-tools-chevron { flex: 0 0 auto; margin-left: auto; color: #8b9baa; transition: transform .18s ease; }
 .pdf-tools-trigger[aria-expanded="true"] .pdf-tools-chevron { transform: rotate(180deg); }
