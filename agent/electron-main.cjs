@@ -281,6 +281,7 @@ if (!app.requestSingleInstanceLock()) {
     });
     ipcMain.handle("agent:get-license-server-state", () => licenseServerManager?.getState?.() || { available: false, healthy: false, running: false, error: "The licensing server manager is not ready." });
     ipcMain.handle("agent:start-license-server", () => licenseServerManager?.start?.() || Promise.reject(new Error("The licensing server manager is not ready.")));
+    ipcMain.handle("agent:repair-license-proxy", () => licenseServerManager?.repairPublicConnection?.() || Promise.reject(new Error("The licensing server manager is not ready.")));
     ipcMain.handle("agent:stop-license-server", () => licenseServerManager?.stop?.() || Promise.reject(new Error("The licensing server manager is not ready.")));
     ipcMain.handle("agent:recover-license-database", () => licenseServerManager?.recoverLicenseDatabase?.() || Promise.reject(new Error("The licensing server manager is not ready.")));
     ipcMain.handle("agent:login", async (_event, username, password) => {

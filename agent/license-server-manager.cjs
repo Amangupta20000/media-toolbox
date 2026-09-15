@@ -405,6 +405,38 @@ function createLicenseServerManager({
     };
   }
 
+  async function repairPublicConnection() {
+    const current = await getState();
+    if (!current.ownerConfigured || !current.ssdMounted) throw new Error("Connect the Sandisk Exf licensing SSD before repairing the public connection.");
+    if (!current.available) throw new Error("This agent release does not include the licensing server runtime.");
+    if (platform !== "darwin" || typeof tailscaleFunnelConfigure !== "function") throw new Error("Funnel repair is available only on the owner Mac.");
+
+    if (!current.healthy) await start();
+    const tailscale = await ensureTailscaleRunning();
+    if (tailscale.installed === false) throw new Error("Tailscale is not installed. Install and sign in to Tailscale before repairing the public connection.");
+    if (tailscale.error) throw new Error(tailscale.error);
+    // Opening Tailscale is asynchronous. Give it a short window to bring its
+    // control connection up before reapplying Funnel; the user can retry if
+    // the app still needs more time.
+    if (tailscale.opened) await wait(1500);
+    const funnel = await ensureTailscaleFunnel();
+    const state = await getState();
+    const proxyHealthy = state.publicProxyHealthy === true;
+    const publicHealthy = state.publicHealthy === true;
+    const message = funnel.error
+      ? `The local server is running, but the Tailscale Funnel route could not be repaired: ${funnel.error}`
+      : proxyHealthy
+        ? "The Tailscale Funnel route was repaired and the website proxy is connected."
+        : publicHealthy
+          ? "The Tailscale Funnel route was reapplied, but the website proxy is still unavailable. Check the Vercel deployment and NEXT_PUBLIC_LICENSE_SERVER_URL."
+          : "The Tailscale Funnel route was reapplied, but the public endpoint is still unavailable. Wait for Tailscale to reconnect, then try again.";
+    return {
+      ...state,
+      tailscale: { ...state.tailscale, ...tailscale, funnel },
+      repair: { status: funnel.error || (!proxyHealthy && !publicHealthy) ? "failed" : proxyHealthy ? "connected" : "route-reapplied", message },
+    };
+  }
+
   function portInspectionCommand() {
     if (platform === "win32") return { file: "netstat", args: ["-ano", "-p", "tcp"] };
     return { file: platform === "darwin" ? "/usr/sbin/lsof" : "lsof", args: ["-nP", "-t", `-iTCP:${port}`, "-sTCP:LISTEN"] };
@@ -795,6 +827,7 @@ function createLicenseServerManager({
     getState,
     start,
     stop,
+    repairPublicConnection,
     watchForStorage,
     stopWatching,
     recoverLicenseDatabase,

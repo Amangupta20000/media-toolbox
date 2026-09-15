@@ -1,6 +1,6 @@
 {
   "name": "media-toolbox-agent-runtime",
-  "version": "1.5.6",
+  "version": "1.5.7",
   "private": true,
   "description": "Runtime and packaging dependencies for the Media Toolbox desktop agent.",
   "homepage": "https://media-toolbox-woad.vercel.app",

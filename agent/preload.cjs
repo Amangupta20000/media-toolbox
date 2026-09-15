@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("mediaToolboxAgent", {
   openResultsFolder: () => ipcRenderer.invoke("agent:open-results-folder"),
   getLicenseServerState: () => ipcRenderer.invoke("agent:get-license-server-state"),
   startLicenseServer: () => ipcRenderer.invoke("agent:start-license-server"),
+  repairLicenseProxy: () => ipcRenderer.invoke("agent:repair-license-proxy"),
   stopLicenseServer: () => ipcRenderer.invoke("agent:stop-license-server"),
   recoverLicenseDatabase: () => ipcRenderer.invoke("agent:recover-license-database"),
   login: (username, password) => ipcRenderer.invoke("agent:login", username, password),

@@ -181,6 +181,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardHtml, /id="check-updates-bottom"/);
   assert.match(dashboardHtml, /id="start-license-server"/);
   assert.match(dashboardHtml, /id="check-license-server"/);
+  assert.match(dashboardHtml, /id="repair-license-proxy"/);
   assert.match(dashboardHtml, /id="license-server-panel" class="panel license-server-panel hidden"/);
   assert.match(dashboardHtml, /id="license-server-notice"/);
   assert.match(dashboardHtml, /id="license-server-command"/);
@@ -207,6 +208,8 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardPreload, /agent:start-license-server/);
   assert.match(dashboardPreload, /agent:get-license-server-state/);
   assert.match(dashboardPreload, /agent:recover-license-database/);
+  assert.match(dashboardPreload, /agent:repair-license-proxy/);
+  assert.match(electronMain, /agent:repair-license-proxy/);
   assert.match(electronMain, /licenseServerManager\.watchForStorage/);
   assert.match(electronMain, /agent:recover-license-database/);
   assert.match(electronMain, /ensureOwnerLicenseServer/);
@@ -1040,6 +1043,47 @@ test("client licensing status can use the website fallback when direct HTTPS is 
     assert.equal(state.publicProxyHealthy, true);
     assert.equal(state.publicDatabase.healthy, true);
     assert.equal(state.publicHealthSource, "website-proxy");
+  } finally {
+    if (previousPublicUrl === undefined) delete process.env.LICENSE_SERVER_PUBLIC_URL;
+    else process.env.LICENSE_SERVER_PUBLIC_URL = previousPublicUrl;
+  }
+});
+
+test("owner repair reapplies Funnel and confirms the website proxy", async () => {
+  const { createLicenseServerManager } = require("../agent/license-server-manager.cjs");
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const temporaryMount = path.join(testRoot, "license-server-proxy-repair");
+  const dataDirectory = path.join(temporaryMount, "MediaToolboxLicensing");
+  const previousPublicUrl = process.env.LICENSE_SERVER_PUBLIC_URL;
+  process.env.LICENSE_SERVER_PUBLIC_URL = "https://license.example.test";
+  let proxyHealthy = false;
+  let funnelCalls = 0;
+  try {
+    const manager = createLicenseServerManager({
+      moduleDirectory: path.join(root, "agent"),
+      dataDirectory,
+      mountPath: temporaryMount,
+      platform: "darwin",
+      tailscaleAppPath: "/Applications/Tailscale.app",
+      tailscaleRunningCheck: async () => true,
+      tailscaleFunnelConfigure: async ({ host, port }) => {
+        assert.equal(host, "127.0.0.1");
+        assert.equal(port, 4900);
+        funnelCalls += 1;
+        proxyHealthy = true;
+      },
+      existsSync: (value) => value === temporaryMount || value === dataDirectory || value === "/Applications/Tailscale.app" || value.endsWith(path.join("license-server", "index.js")),
+      healthCheck: async () => true,
+      publicHealthCheck: async () => false,
+      healthStatusCheck: async () => ({ reachable: true, healthy: true, statusCode: 200, database: { status: "healthy", healthy: true, error: "" }, error: "" }),
+      publicHealthStatusCheck: async () => ({ reachable: false, healthy: false, statusCode: 0, database: null, error: "The public licensing endpoint could not be reached." }),
+      publicProxyHealthStatusCheck: async () => ({ reachable: proxyHealthy, healthy: proxyHealthy, statusCode: proxyHealthy ? 200 : 0, database: proxyHealthy ? { status: "healthy", healthy: true, error: "" } : null, error: proxyHealthy ? "" : "The website proxy could not be reached." }),
+    });
+    const state = await manager.repairPublicConnection();
+    assert.equal(funnelCalls, 1);
+    assert.equal(state.publicProxyHealthy, true);
+    assert.equal(state.publicHealthSource, "website-proxy");
+    assert.equal(state.repair.status, "connected");
   } finally {
     if (previousPublicUrl === undefined) delete process.env.LICENSE_SERVER_PUBLIC_URL;
     else process.env.LICENSE_SERVER_PUBLIC_URL = previousPublicUrl;

@@ -212,6 +212,7 @@
     const startButton = el("start-license-server");
     const stopButton = el("stop-license-server");
     const recoverButton = el("recover-license-database");
+    const repairButton = el("repair-license-proxy");
     if (!badge || !message || !startButton || !stopButton) return;
     const healthy = Boolean(value.healthy);
     const publicConfigured = Boolean(value.publicUrl);
@@ -324,6 +325,11 @@
       const recoverable = ownerMachine && database.status === "malformed" && database.recoverable !== false;
       recoverButton.classList.toggle("hidden", !recoverable);
       recoverButton.disabled = !recoverable;
+    }
+    if (repairButton) {
+      repairButton.classList.toggle("hidden", !ownerMachine);
+      repairButton.disabled = !ownerMachine || starting || database.status === "malformed" || !mounted || value.available === false;
+      repairButton.title = "Reapply the owner Mac's Tailscale Funnel route and recheck the website proxy.";
     }
   }
 
@@ -766,6 +772,19 @@
       setLicenseServerNotice(error.message || "The licensing server could not be started.", "error");
       await refreshLicenseServer();
     }
+  });
+  el("repair-license-proxy")?.addEventListener("click", async () => {
+    const button = el("repair-license-proxy");
+    button.disabled = true;
+    setLicenseServerNotice("Repairing the Tailscale Funnel route and checking the website proxy…", "");
+    try {
+      const value = await api.repairLicenseProxy();
+      renderLicenseServer(value, true);
+      setLicenseServerNotice(value.repair?.message || "The public connection repair finished.", value.repair?.status === "connected" ? "success" : "error");
+    } catch (error) {
+      setLicenseServerNotice(error.message || "The public connection could not be repaired.", "error");
+      await refreshLicenseServer();
+    } finally { button.disabled = false; }
   });
   el("copy-license-server-command").addEventListener("click", async () => {
     const command = el("license-server-command")?.textContent || "";
