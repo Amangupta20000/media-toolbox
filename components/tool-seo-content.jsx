@@ -7,7 +7,6 @@ import { TOOL_SEO_CONTENT } from "../lib/tool-seo-content.js";
 
 export function ToolSeoContent({ pathname }) {
   const content = TOOL_SEO_CONTENT[normalizeSitePath(pathname)];
-  const [openFaqIndex, setOpenFaqIndex] = useState(0);
   if (!content) return null;
 
   return <section className="tool-seo-content" aria-labelledby="tool-seo-title">
@@ -26,17 +25,30 @@ export function ToolSeoContent({ pathname }) {
         <ul>{content.trust.map((item) => <li key={item}>{item}</li>)}</ul>
       </article>
     </div>
-    <article className="tool-seo-faq" aria-labelledby="tool-seo-faq-title">
-      <h2 id="tool-seo-faq-title">Frequently asked questions</h2>
-      <div className="tool-seo-faq-list">
-        {content.faqs.map(([question, answer], index) => <article className="tool-seo-faq-item" key={question}>
-          <button className="tool-seo-faq-question" type="button" aria-expanded={openFaqIndex === index} aria-controls={`tool-seo-faq-answer-${index}`} onClick={() => setOpenFaqIndex((current) => current === index ? null : index)}>
-            <span>{question}</span>
-            <ChevronDown size={17} aria-hidden="true" />
-          </button>
-          {openFaqIndex === index && <p id={`tool-seo-faq-answer-${index}`} className="tool-seo-faq-answer">{answer}</p>}
-        </article>)}
-      </div>
-    </article>
+  </section>;
+}
+
+function FaqSection({ content, openFaqIndex, setOpenFaqIndex }) {
+  return <article className="tool-seo-faq" aria-labelledby="tool-seo-faq-title">
+    <h2 id="tool-seo-faq-title">Frequently asked questions</h2>
+    <div className="tool-seo-faq-list">
+      {content.faqs.map(([question, answer], index) => <article className="tool-seo-faq-item" key={question}>
+        <button className="tool-seo-faq-question" type="button" aria-expanded={openFaqIndex === index} aria-controls={`tool-seo-faq-answer-${index}`} onClick={() => setOpenFaqIndex((current) => current === index ? null : index)}>
+          <span>{question}</span>
+          <ChevronDown size={17} aria-hidden="true" />
+        </button>
+        {openFaqIndex === index && <p id={`tool-seo-faq-answer-${index}`} className="tool-seo-faq-answer">{answer}</p>}
+      </article>)}
+    </div>
+  </article>;
+}
+
+export function ToolFaqContent({ pathname }) {
+  const content = TOOL_SEO_CONTENT[normalizeSitePath(pathname)];
+  const [openFaqIndex, setOpenFaqIndex] = useState(0);
+  if (!content?.faqs?.length) return null;
+
+  return <section className="tool-seo-content tool-faq-content" aria-label={`${content.name} frequently asked questions`}>
+    <FaqSection content={content} openFaqIndex={openFaqIndex} setOpenFaqIndex={setOpenFaqIndex} />
   </section>;
 }

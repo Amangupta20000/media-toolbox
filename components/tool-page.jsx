@@ -10,7 +10,7 @@ import { ProcessingMode } from "./processing-mode.jsx";
 import { ResultDownloadNote } from "./result-download-note.jsx";
 import { downloadFilename, downloadUrlWithFilename, filenameStem, ResultFilenameField } from "./result-filename.jsx";
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
-import { ToolSeoContent } from "./tool-seo-content.jsx";
+import { ToolFaqContent, ToolSeoContent } from "./tool-seo-content.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
 import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 
@@ -503,6 +503,7 @@ export function ToolPage({ tool }) {
     {!job && !isImage && !isPdfCompressor && <VideoRecoverySummary hasMatchingReference={matchingReferenceReady} hasUntrunc={capabilities?.video?.untrunc} />}
     {error && <DismissibleMessage className="error-banner" resetKey={error}><AlertTriangle size={18} /><span>{error}</span></DismissibleMessage>}
     {!job && !batchJobs && <div className="trust-row"><div><CheckCircle2 size={16} /> No resizing by default</div><div><Clock3 size={16} /> Temporary processing only</div><div><ShieldCheck size={16} /> Private worker pipeline</div></div>}
+    <ToolFaqContent pathname={`/${tool}`} />
     </>}
   </AppShell>;
 }

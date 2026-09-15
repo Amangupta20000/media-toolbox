@@ -18,6 +18,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   const toolPage = await read("components/tool-page.jsx");
   const pdfEditor = await read("components/pdf-editor.jsx");
   const pdfTextEditor = await read("components/pdf-text-editor.jsx");
+  const localAgent = await read("components/local-agent-setup.jsx");
   const toolSeo = await read("components/tool-seo-content.jsx");
   const toolSeoData = await read("lib/tool-seo-content.js");
   const footer = await read("components/app-footer.jsx");
@@ -80,11 +81,15 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(seo, /"@type": "FAQPage"/);
   assert.match(seo, /price: "0"/);
   assert.doesNotMatch(shell, /ToolSeoContent/);
-  assert.match(history, /Guide &amp; FAQs/);
+  assert.match(history, /Helpful guide/);
   assert.match(toolPage, /activeView === "guide"/);
   assert.match(toolPage, /ToolSeoContent pathname=\{`\/\$\{tool\}`\}/);
+  assert.match(toolPage, /ToolFaqContent pathname=\{`\/\$\{tool\}`\}/);
   assert.match(pdfEditor, /activeView === "guide" \? <ToolSeoContent pathname="\/pdf-editor" \/>/);
+  assert.match(pdfEditor, /ToolFaqContent pathname="\/pdf-editor" \/>/);
   assert.match(pdfTextEditor, /activeView === "guide" \? <ToolSeoContent pathname="\/pdf-text-editor" \/>/);
+  assert.match(pdfTextEditor, /ToolFaqContent pathname="\/pdf-text-editor" \/>/);
+  assert.match(localAgent, /ToolFaqContent pathname="\/local-agent" \/>/);
   assert.match(shell, /Breadcrumbs pathname=\{pathname\}/);
   assert.match(shell, /Temporary data follows cleanup rules; local results are kept only when you choose\./);
   assert.doesNotMatch(shell, /Files are temporary and auto-cleaned\./);
@@ -96,6 +101,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.doesNotMatch(processingMode, /Server/);
   assert.doesNotMatch(history, /server/i);
   assert.match(toolSeo, /Frequently asked questions/);
+  assert.match(toolSeo, /export function ToolFaqContent/);
   assert.match(toolSeo, /useState\(0\)/);
   assert.match(toolSeo, /aria-expanded=\{openFaqIndex === index\}/);
   assert.match(toolSeo, /tool-seo-faq-question/);
