@@ -1,7 +1,7 @@
 import { Download } from "lucide-react";
 import { downloadUrlWithFilename } from "./result-filename.jsx";
 
-export function ResultDownloadNote({ result, mode = "server", keepResult = false, filename }) {
+export function ResultDownloadNote({ result, mode = "local", keepResult = false, filename }) {
   if (!result?.downloadUrl) return null;
 
   const downloadName = filename || result.filename;
@@ -13,9 +13,7 @@ export function ResultDownloadNote({ result, mode = "server", keepResult = false
       ? "the Local agent Results folder"
       : mode === "local"
         ? "temporary Local agent storage"
-        : mode === "server"
-          ? "temporary server storage"
-          : "this browser"
+        : "temporary processing storage"
   );
 
   const message = retainedLocalResult

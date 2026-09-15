@@ -19,3 +19,5 @@ agent/license-public-key.pem
 agent/license-server-url.txt
 agent/runtime-update-public-key.pem
 license-server-test-url.txt
+.vercel
+.env*

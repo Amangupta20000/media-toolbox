@@ -993,8 +993,8 @@ export function PdfTextEditor() {
   const textHistoryRef = useRef({ past: [], future: [] });
   const [selectedRun, setSelectedRun] = useState(null);
   const [editorValue, setEditorValue] = useState("");
-  const [processingMode, setProcessingMode] = useState("server");
-  const [jobMode, setJobMode] = useState("server");
+  const [processingMode, setProcessingMode] = useState("local");
+  const [jobMode, setJobMode] = useState("local");
   const [locations, setLocations] = useState(null);
   const [capabilities, setCapabilities] = useState(null);
   const [keepResult, setKeepResult] = useState(false);
@@ -1076,7 +1076,7 @@ export function PdfTextEditor() {
   };
 
   useEffect(() => { loadPdfLibrary().then(setPdfLibrary).catch(() => setError("PDF preview support could not be loaded. Refresh and try again.")); }, []);
-  useEffect(() => { probeProcessingLocations().then((value) => { setLocations(value); const preferred = value.server.connected ? "server" : value.local.connected || value.local.ready ? "local" : "server"; setProcessingMode(preferred); setCapabilities(processingCapabilities(value, preferred)); }).catch(() => undefined); }, []);
+  useEffect(() => { probeProcessingLocations().then((value) => { setLocations(value); const preferred = "local"; setProcessingMode(preferred); setCapabilities(processingCapabilities(value, preferred)); }).catch(() => undefined); }, []);
   useEffect(() => {
     if (!locations || keepResultTouchedRef.current) return;
     setKeepResult(Boolean(locations.local?.connected));
@@ -1172,7 +1172,7 @@ export function PdfTextEditor() {
           : models.filter((model) => model.requiresOcr).map((model) => model.pageIndex);
       if (ocrPageIndexes.length && !isProcessingLocationReady(locations, processingMode)) {
         setPages(models);
-        setError("Some pages contain hidden or unsupported text. Connect the Local agent or Server to run OCR on those pages.");
+        setError("Some pages contain hidden or unsupported text. Connect the Local agent to run OCR on those pages.");
       } else if (ocrPageIndexes.length && processingMode === "local" && capabilities && capabilities.pdf?.ocr !== true) {
         setPages(models);
         setError("PDF OCR is not available in this Local Agent. Update the agent, restart it, and try the PDF again.");
@@ -1192,7 +1192,7 @@ export function PdfTextEditor() {
         setOcrMode(requestedOcrMode === "auto" ? "auto" : "embedded");
       } else if (!isProcessingLocationReady(locations, processingMode)) {
         setPages(models);
-        setError("This PDF has no embedded text. Connect the Local agent or Server to run OCR on scanned pages.");
+        setError("This PDF has no embedded text. Connect the Local agent to run OCR on scanned pages.");
       } else if (processingMode === "local" && capabilities && capabilities.pdf?.ocr !== true) {
         setPages(models);
         setError("PDF OCR is not available in this Local Agent. Update the agent, restart it, and try the PDF again.");
@@ -1404,7 +1404,7 @@ export function PdfTextEditor() {
       setCheckingLocation(false);
       if (!isProcessingLocationReady(exportLocations, processingMode)) {
         const locationError = exportLocations?.[processingMode]?.error;
-        setError(locationError || (processingMode === "local" ? "The Local agent is not ready. Start and authorize it, then try again." : "The Server worker is not ready. Start the worker, then try again."));
+        setError(locationError || "The Local agent is not ready. Start and authorize it, then try again.");
         return;
       }
     }
@@ -1442,7 +1442,7 @@ export function PdfTextEditor() {
           <div className="capability-strip">
             <div className="capability-main">
               <span className={`capability-dot ${capabilities?.status === "ready" ? "ready" : ""}`} />
-              <span>{capabilities?.status === "ready" ? `${processingMode === "local" ? "Local agent" : "Server"} worker online` : "Connecting to processing worker"}</span>
+              <span>{capabilities?.status === "ready" ? "Local agent worker online" : "Connecting to Local agent"}</span>
             </div>
             <span>One PDF · 200 MB maximum · OCR fallback · Browser mode disabled</span>
           </div>

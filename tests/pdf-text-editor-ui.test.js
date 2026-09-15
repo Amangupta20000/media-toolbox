@@ -27,7 +27,7 @@ test("PDF text editor is exposed as a dedicated tool with history navigation", a
   assert.doesNotMatch(navigation, /<div className="sidebar-label">Workspace<\/div>/);
   assert.match(navigation, /<div className="topbar-brand" aria-label="Media Toolbox">/);
   assert.match(navigation, /<div className="topbar-brand-main">/);
-  assert.match(navigation, /<img className="brand-logo" src="\/media-toolbox-logo\.png" alt="" aria-hidden="true" \/>/);
+  assert.match(navigation, /<img className="brand-logo" src="\/media-toolbox-logo\.png" alt="Media Toolbox logo" title="Media Toolbox" \/>/);
   assert.match(navigation, /<span className="topbar-brand-subtitle">Secure media utilities<\/span>/);
   assert.ok(navigation.indexOf('<div className="topbar-actions">') > navigation.indexOf('<div className="topbar-brand"'), "topbar controls should follow the centered brand in the DOM");
   const sidebarSource = navigation.slice(navigation.indexOf('<aside'), navigation.indexOf('<main'));

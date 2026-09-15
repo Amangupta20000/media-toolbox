@@ -66,10 +66,14 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /form\.append\("filename"/);
   assert.match(shell, /Saved PDF name/);
   assert.match(shell, /Save to device/);
-  assert.match(shell, /Exported PDFs are temporary unless you choose Save to device/);
+  assert.match(shell, /The completed PDF is temporary and is cleaned up after download/);
   assert.match(shell, /import.*Info/);
   assert.match(shell, /className="pdf-retention-info"/);
+  assert.match(shell, /aria-expanded=\{retentionInfoOpen\}/);
+  assert.match(shell, /Result retention/);
+  assert.match(shell, /cleaned up after download/);
   assert.match(styles, /\.pdf-retention-info/);
+  assert.match(styles, /\.pdf-retention-info-popover/);
   assert.match(await read("lib/job-intake.js"), /safePdfOutputFilename/);
   assert.match(await read("worker/index.js"), /manifest\.outputFilename/);
   assert.match(styles, /\.pdf-editor-shell \{[^}]*overflow: hidden/);
@@ -99,7 +103,7 @@ test("PDF editor can export blank-page-only projects and lets users rename downl
   assert.match(await read("scripts/stage-agent-package.mjs"), /staged Local agent still contains the old PDF-editor requirement/);
   assert.match(filenameField, /Download file name/);
   assert.match(shell, /Save to device/);
-  assert.match(shell, /Exported PDFs are temporary unless you choose Save to device/);
+  assert.match(shell, /The completed PDF is temporary and is cleaned up after download/);
   assert.match(await read("components/tool-page.jsx"), /ResultFilenameField/);
   assert.match(await read("components/pdf-text-editor.jsx"), /ResultFilenameField/);
   assert.match(worker, /layoutPdfTextRuns/);

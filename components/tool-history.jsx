@@ -6,7 +6,7 @@ import { AlertTriangle, Archive, Download, Eye, FileText, Film, FolderOpen, Imag
 import { formatBytes } from "./file-dropzone.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
 import { rememberHistoryEdit } from "./history-edit.js";
-import { deleteDownloadedFile, deleteLocalHistory, deleteServerHistory, getLocalHistory, getServerHistory, openLocalResultsFolder, probeServer } from "./processing-client.js";
+import { deleteLocalHistory, getLocalHistory, openLocalResultsFolder } from "./processing-client.js";
 
 const toolNames = {
   "image-converter": "Image conversion",
@@ -58,22 +58,8 @@ async function loadLocalHistory(tool) {
   }
 }
 
-async function loadServerHistory(tool) {
-  try {
-    await probeServer();
-    const payload = await getServerHistory(tool);
-    return { status: "ready", items: Array.isArray(payload.items) ? payload.items : [], message: "" };
-  } catch (error) {
-    if (Number(error?.status) >= 500) {
-      return { status: "unavailable", items: [], message: "Server history is unavailable because the server worker or persistent storage is not connected. Use the Local agent or connect a persistent backend." };
-    }
-    return { status: "error", items: [], message: error instanceof Error ? error.message : "Server history could not be loaded." };
-  }
-}
-
 export function ToolHistory({ tool }) {
   const [local, setLocal] = useState({ status: "loading", items: [], message: "" });
-  const [server, setServer] = useState({ status: "loading", items: [], message: "" });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [deletingId, setDeletingId] = useState("");
@@ -89,9 +75,8 @@ export function ToolHistory({ tool }) {
   const loadHistory = async () => {
     setLoading(true);
     setMessage("");
-    const [localResult, serverResult] = await Promise.all([loadLocalHistory(tool), loadServerHistory(tool)]);
+    const localResult = await loadLocalHistory(tool);
     setLocal(localResult);
-    setServer(serverResult);
     setLoading(false);
   };
 
@@ -99,10 +84,7 @@ export function ToolHistory({ tool }) {
     loadHistory().catch(() => undefined);
   }, [tool]);
 
-  const items = [
-    ...(local.status === "ready" ? local.items : []).map((item) => ({ ...item, storage: "local" })),
-    ...(server.status === "ready" ? server.items : []).map((item) => ({ ...item, storage: "server" })),
-  ];
+  const items = (local.status === "ready" ? local.items : []).map((item) => ({ ...item, storage: "local" }));
 
   const filteredItems = useMemo(() => {
     const search = query.trim().toLowerCase();
@@ -128,31 +110,12 @@ export function ToolHistory({ tool }) {
 
   const removeItem = async (item) => {
     const resultName = item.result?.filename || "this result";
-    let downloadFolder = "";
-    if (item.storage === "local") {
-      if (!window.confirm(`Delete ${resultName} from this device?`)) return;
-    } else {
-      downloadFolder = window.prompt(`Enter the Downloads folder containing ${resultName}.\n\nExample: ~/Downloads`, "~/Downloads");
-      if (downloadFolder === null) return;
-      if (!downloadFolder.trim()) {
-        setMessage("Enter the Downloads folder path before deleting this result.");
-        return;
-      }
-      if (!window.confirm(`Delete ${resultName} from that Downloads folder and then remove it from server history?`)) return;
-    }
+    if (!window.confirm(`Delete ${resultName} from this device?`)) return;
     setDeletingId(item.id);
     setMessage("");
     try {
-      if (item.storage === "local") {
-        await deleteLocalHistory(item.id);
-        setLocal((current) => ({ ...current, items: current.items.filter((entry) => entry.id !== item.id) }));
-      } else {
-        // The browser owns its Downloads folder. The authorized local agent must
-        // delete the downloaded copy before the server history is removed.
-        await deleteDownloadedFile(downloadFolder, resultName);
-        await deleteServerHistory(item.id);
-        setServer((current) => ({ ...current, items: current.items.filter((entry) => entry.id !== item.id) }));
-      }
+      await deleteLocalHistory(item.id);
+      setLocal((current) => ({ ...current, items: current.items.filter((entry) => entry.id !== item.id) }));
       setPreviewItem((current) => current?.id === item.id ? null : current);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The saved result could not be deleted.");
@@ -162,7 +125,6 @@ export function ToolHistory({ tool }) {
   };
 
   const localReady = local.status === "ready";
-  const serverReady = server.status === "ready";
 
   const openResultsFolder = async () => {
     setOpeningResults(true);
@@ -189,25 +151,24 @@ export function ToolHistory({ tool }) {
 
   return <section className="history-panel" aria-labelledby={`${tool}-history-title`}>
     <div className="history-panel-heading">
-      <div><span className="section-kicker"><span className="kicker-line" /> Saved results</span><h2 id={`${tool}-history-title`}><Icon size={21} /> {toolNames[tool] || "Tool"} history</h2><p>Download or remove results kept by the Local agent or the server.</p></div>
+      <div><span className="section-kicker"><span className="kicker-line" /> Saved results</span><h2 id={`${tool}-history-title`}><Icon size={21} /> {toolNames[tool] || "Tool"} history</h2><p>Download or remove results kept by the Local agent.</p></div>
       <div className="history-heading-actions">{localReady && <button className="secondary-button" type="button" onClick={openResultsFolder} disabled={openingResults}><FolderOpen size={16} /> {openingResults ? "Opening…" : "Open Results folder"}</button>}<button className="secondary-button" type="button" onClick={loadHistory} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={16} /> Refresh</button></div>
     </div>
-    {loading && <div className="history-empty"><RefreshCw className="spin" size={24} /><strong>Loading history</strong><span>Checking saved results on this device and the server.</span></div>}
-    {!loading && !localReady && !serverReady && <div className="history-empty"><AlertTriangle size={22} /><strong>History is unavailable</strong><span>{local.message || server.message || "Connect to the server or authorize the Local agent to view saved results."}</span><Link className="secondary-button" href="/local-agent">Open Local agent setup</Link></div>}
+    {loading && <div className="history-empty"><RefreshCw className="spin" size={24} /><strong>Loading history</strong><span>Checking saved results on this device.</span></div>}
+    {!loading && !localReady && <div className="history-empty"><AlertTriangle size={22} /><strong>History is unavailable</strong><span>{local.message || "Authorize the Local agent to view saved results."}</span><Link className="secondary-button" href="/local-agent">Open Local agent setup</Link></div>}
     {!loading && local.status !== "ready" && <div className="history-source-note"><strong>{local.status === "unsupported" ? "Local history unavailable" : "Local agent"}</strong><span>{local.message || "Pair the Local agent to view files saved on this device."}</span><Link href="/local-agent">Open setup</Link></div>}
-    {!loading && server.status !== "ready" && <div className="history-source-note"><strong>Server history unavailable</strong><span>{server.message || "The server did not respond."}</span></div>}
-    {!loading && (localReady || serverReady) && !items.length && <div className="history-empty"><Icon size={25} /><strong>No saved results yet</strong><span>Local results appear only when “Keep final result on this device” is selected. Server results remain available until they are deleted or cleaned up.</span></div>}
-    {!loading && (localReady || serverReady) && items.length > 0 && <div className="history-filters" aria-label="History filters"><label>Search<input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filename or location" /></label><label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="completed">Completed</option></select></label><label>File size<select value={sizeFilter} onChange={(event) => setSizeFilter(event.target.value)}><option value="all">Any size</option><option value="small">Under 1 MB</option><option value="medium">1–10 MB</option><option value="large">10 MB or more</option></select></label><label>Duration<select value={durationFilter} onChange={(event) => setDurationFilter(event.target.value)}><option value="all">Any duration</option><option value="short">Under 1 minute</option><option value="medium">1–10 minutes</option><option value="long">10 minutes or more</option></select></label><label>Sort<select value={sortBy} onChange={(event) => setSortBy(event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name</option><option value="size">Largest file</option><option value="duration">Longest duration</option></select></label></div>}
-    {!loading && (localReady || serverReady) && items.length > 0 && !filteredItems.length && <div className="history-empty history-filter-empty"><Icon size={25} /><strong>No matching results</strong><span>Change the search or filters to see saved results.</span></div>}
+    {!loading && localReady && !items.length && <div className="history-empty"><Icon size={25} /><strong>No saved results yet</strong><span>Local results appear only when “Keep final result on this device” is selected.</span></div>}
+    {!loading && localReady && items.length > 0 && <div className="history-filters" aria-label="History filters"><label>Search<input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filename or location" /></label><label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="completed">Completed</option></select></label><label>File size<select value={sizeFilter} onChange={(event) => setSizeFilter(event.target.value)}><option value="all">Any size</option><option value="small">Under 1 MB</option><option value="medium">1–10 MB</option><option value="large">10 MB or more</option></select></label><label>Duration<select value={durationFilter} onChange={(event) => setDurationFilter(event.target.value)}><option value="all">Any duration</option><option value="short">Under 1 minute</option><option value="medium">1–10 minutes</option><option value="long">10 minutes or more</option></select></label><label>Sort<select value={sortBy} onChange={(event) => setSortBy(event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name</option><option value="size">Largest file</option><option value="duration">Longest duration</option></select></label></div>}
+    {!loading && localReady && items.length > 0 && !filteredItems.length && <div className="history-empty history-filter-empty"><Icon size={25} /><strong>No matching results</strong><span>Change the search or filters to see saved results.</span></div>}
     {!loading && filteredItems.length > 0 && <div className="history-list">{filteredItems.map((item) => {
       const result = item.result || {};
       return <article className="history-item" key={`${item.storage}-${item.id}`}>
         <div className="history-item-icon"><Icon size={19} /></div>
-        <div className="history-item-copy"><strong title={result.filename}>{result.filename || "Saved result"}</strong><span>{historyDate(item.updatedAt || item.createdAt)} · {formatBytes(result.bytes || 0)} · {item.storage === "local" ? "Local" : "Server"}</span><small><span className="history-status-badge">{item.status || "completed"}</span>{tool === "video-repair" && ` · Duration ${formatDuration(result.durationMs)}`} · {item.location || (item.storage === "local" ? "Local agent Results folder" : "Server temporary storage")}</small></div>
-        <div className="history-item-actions"><button className="icon-button history-preview-button" type="button" onClick={() => setPreviewItem(item)} aria-label={`Preview ${result.filename || "saved result"}`} title="Preview"><Eye size={17} /></button><a className="secondary-button" href={result.downloadUrl} download={result.filename}><Download size={16} /> Download</a><button className="icon-button history-delete-button" type="button" onClick={() => removeItem(item)} disabled={deletingId === item.id} aria-label={item.storage === "local" ? `Delete ${result.filename || "saved result"} from this device` : `Delete ${result.filename || "saved result"} from Downloads and server history`} title={item.storage === "local" ? "Delete from device" : "Delete from Downloads and server history"}><Trash2 size={17} /></button></div>
+        <div className="history-item-copy"><strong title={result.filename}>{result.filename || "Saved result"}</strong><span>{historyDate(item.updatedAt || item.createdAt)} · {formatBytes(result.bytes || 0)} · {item.storage === "local" ? "Local" : "Saved result"}</span><small><span className="history-status-badge">{item.status || "completed"}</span>{tool === "video-repair" && ` · Duration ${formatDuration(result.durationMs)}`} · {item.location || (item.storage === "local" ? "Local agent Results folder" : "Temporary processing storage")}</small></div>
+        <div className="history-item-actions"><button className="icon-button history-preview-button" type="button" onClick={() => setPreviewItem(item)} aria-label={`Preview ${result.filename || "saved result"}`} title="Preview"><Eye size={17} /></button><a className="secondary-button" href={result.downloadUrl} download={result.filename}><Download size={16} /> Download</a><button className="icon-button history-delete-button" type="button" onClick={() => removeItem(item)} disabled={deletingId === item.id} aria-label={`Delete ${result.filename || "saved result"}`} title={item.storage === "local" ? "Delete from device" : "Delete result"}><Trash2 size={17} /></button></div>
       </article>;
     })}</div>}
-    {!loading && <p className="history-note">Server Delete first asks the authorized Local agent to remove the named file from the Downloads folder, then removes the server copy and listing. If the file is missing or the agent is unavailable, the listing stays.</p>}
+    {!loading && <p className="history-note">Delete removes the selected result from its current storage. If the file is missing or the Local agent is unavailable, the history listing stays.</p>}
     {message && <DismissibleMessage className="error-banner" resetKey={message}><AlertTriangle size={17} /><span>{message}</span></DismissibleMessage>}
     {previewItem && <HistoryPreviewModal item={previewItem} onClose={() => setPreviewItem(null)} onDelete={() => removeItem(previewItem)} onEdit={() => editItem(previewItem)} deleting={deletingId === previewItem.id} />}
   </section>;
@@ -242,7 +203,7 @@ function HistoryPreviewModal({ item, onClose, onDelete, onEdit, deleting }) {
 
   return <div className="history-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="history-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="history-preview-title">
-      <div className="history-preview-header"><div><span>Saved result preview</span><strong id="history-preview-title" title={result.filename}>{result.filename || "Saved result"}</strong><small>{item.storage === "local" ? "Local agent result" : "Server result"} · {formatBytes(result.bytes || 0)}</small></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close preview" title="Close preview"><X size={20} /></button></div>
+      <div className="history-preview-header"><div><span>Saved result preview</span><strong id="history-preview-title" title={result.filename}>{result.filename || "Saved result"}</strong><small>{item.storage === "local" ? "Local agent result" : "Saved result"} · {formatBytes(result.bytes || 0)}</small></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close preview" title="Close preview"><X size={20} /></button></div>
       <div className="history-preview-body">
         {!previewUrl && <DismissibleMessage className="preview-unavailable" resetKey="missing-preview"><AlertTriangle size={18} /><span>This saved result is no longer available for preview.</span></DismissibleMessage>}
         {previewUrl && tool === "image-converter" && (previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${result.filename}-image-preview`}><AlertTriangle size={18} /><span>This image cannot be previewed in this browser, but it can still be downloaded.</span></DismissibleMessage> : <img className="history-preview-image" src={previewUrl} alt={`Preview of ${result.filename || "saved image"}`} onError={() => setPreviewError(true)} />)}

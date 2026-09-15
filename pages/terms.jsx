@@ -8,6 +8,9 @@ export default function TermsPage() {
       <p className="legal-intro">These terms describe the basic rules for using Media Toolbox and its local processing agent.</p>
       <p className="legal-meta">Last updated: <time dateTime="2026-09-15">September 15, 2026</time></p>
 
+      <h2>Operator and contact</h2>
+      <p>Media Toolbox is operated by Aman Gupta. For questions about these terms or a particular Media Toolbox deployment, contact <a href="mailto:a20000.gupta@gmail.com">a20000.gupta@gmail.com</a>.</p>
+
       <h2>Using the service</h2>
       <p>You may use Media Toolbox only for lawful purposes and only with files you are authorized to process. You are responsible for reviewing generated files before relying on or sharing them.</p>
 
@@ -24,7 +27,7 @@ export default function TermsPage() {
       <p>Features, releases, limits, and these terms may change as the project evolves. You may stop using the service at any time. Access can be suspended when continued use creates a security, licensing, or operational risk.</p>
 
       <h2>Questions</h2>
-      <p>For questions about these terms or a particular Media Toolbox deployment, contact the operator who provided that deployment.</p>
+      <p>Keep an original copy of important files and contact the operator if you need help with a particular deployment.</p>
     </article>
   </AppShell>;
 }

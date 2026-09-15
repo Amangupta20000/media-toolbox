@@ -5,6 +5,7 @@ export default function Document() {
     <Head>
       <meta name="theme-color" content="#102034" />
       <meta name="color-scheme" content="light dark" />
+      <meta name="format-detection" content="telephone=no" />
     </Head>
     <body>
       <Main />

@@ -345,10 +345,12 @@ export async function probeServer() {
 }
 
 export async function probeProcessingLocations() {
-  const [local, server] = await Promise.allSettled([probeLocalAgent(), probeServer()]);
+  const [local] = await Promise.allSettled([probeLocalAgent()]);
   return {
     local: local.status === "fulfilled" ? local.value : { available: false, connected: false, error: local.reason?.message || "Local agent is not running." },
-    server: server.status === "fulfilled" ? server.value : { available: false, connected: false, error: server.reason?.message || "Server processing is unavailable." },
+    // Reserved for a future deployment that enables online processing. The
+    // current website must never advertise or probe that unavailable path.
+    server: { available: false, connected: false, error: "Online processing is not available in this deployment." },
   };
 }
 
@@ -383,7 +385,7 @@ export function uploadWithProgress(form, mode, onProgress) {
     xhr.open("POST", endpoint(mode, "/jobs"));
     if (mode === "local") xhr.setRequestHeader("Authorization", `Bearer ${storedAgentToken()}`);
     xhr.upload.onprogress = (event) => { if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100)); };
-    xhr.onerror = () => reject(new Error(mode === "local" ? "The local agent could not be reached or is not authorized. Open the Local agent dashboard." : "The upload could not reach the server."));
+    xhr.onerror = () => reject(new Error(mode === "local" ? "The local agent could not be reached or is not authorized. Open the Local agent dashboard." : "The selected processing service could not be reached."));
     xhr.onload = () => {
       let payload = {};
       try { payload = JSON.parse(xhr.responseText); } catch { /* no-op */ }

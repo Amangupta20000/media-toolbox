@@ -6,6 +6,8 @@ import { useRouter } from "next/router";
 import { Archive, Bot, ChevronDown, Clock3, Film, FileText, Image as ImageIcon, Menu, Moon, ShieldCheck, Sparkles, Sun } from "lucide-react";
 import { probeLocalAgent } from "./processing-client.js";
 import { AppFooter } from "./app-footer.jsx";
+import { ToolSeoContent } from "./tool-seo-content.jsx";
+import { metadataForPathname, normalizeSitePath } from "../lib/site-metadata.js";
 
 const navigation = [
   { href: "/image-converter", label: "Image converter", detail: "Resize-free format conversion", icon: ImageIcon },
@@ -22,6 +24,21 @@ const pdfNavigation = [
 const moreNavigation = [
   { href: "/coming-soon", label: "Coming soon", detail: "More tools in progress", icon: Sparkles },
 ];
+
+function breadcrumbLabelFor(pathname) {
+  const normalizedPath = normalizeSitePath(pathname);
+  return metadataForPathname(normalizedPath).breadcrumbLabel || metadataForPathname(normalizedPath).title.replace(/\s*\|\s*Media Toolbox$/, "");
+}
+
+function Breadcrumbs({ pathname }) {
+  const normalizedPath = normalizeSitePath(pathname);
+  const pageLabel = breadcrumbLabelFor(normalizedPath);
+  return <div className="breadcrumb-wrap">
+    <nav className="breadcrumb-nav" aria-label="Breadcrumb">
+      {normalizedPath === "/" ? <span aria-current="page">Home</span> : <><Link href="/" title="Home">Home</Link><span className="breadcrumb-separator" aria-hidden="true">/</span><span aria-current="page">{pageLabel}</span></>}
+    </nav>
+  </div>;
+}
 
 function accessTimerFor(authorization, now, trialAvailable = false) {
   if (!authorization) return null;
@@ -144,8 +161,8 @@ export function AppShell({ children }) {
         {moreNavigation.map((item) => { const Icon = item.icon; const active = pathname === item.href; return <Link key={item.href} href={item.href} className={`tool-nav-item ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}><span className="nav-icon"><Icon size={19} /></span><span className="nav-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>{active && <span className="active-dot" />}</Link>; })}
       </nav>
       <div className="sidebar-footer">
-        <div className="privacy-card"><ShieldCheck size={17} /><div><strong>Private by design</strong><span>Files are temporary and auto-cleaned.</span></div></div>
-        <span className="version-label">v1.0 · self-hosted worker</span>
+        <div className="privacy-card"><ShieldCheck size={17} /><div><strong>Private by design</strong><span>Temporary data follows cleanup rules; local results are kept only when you choose.</span></div></div>
+        <span className="version-label">v1.0 · Local agent</span>
       </div>
     </aside>
     <main className="main-area">
@@ -153,7 +170,7 @@ export function AppShell({ children }) {
         <button className="topbar-menu-button" type="button" aria-label={sidebarHidden || !mobileOpen ? "Show tools" : "Hide tools"} title={sidebarHidden || !mobileOpen ? "Show tools" : "Hide tools"} aria-controls="app-sidebar" aria-expanded={!sidebarHidden && mobileOpen} onClick={toggleSidebar}><Menu size={21} aria-hidden="true" /></button>
         <div className="topbar-brand" aria-label="Media Toolbox">
           <div className="topbar-brand-main">
-            <div className="brand-mark"><img className="brand-logo" src="/media-toolbox-logo.png" alt="" aria-hidden="true" /></div>
+            <div className="brand-mark"><img className="brand-logo" src="/media-toolbox-logo.png" alt="Media Toolbox logo" title="Media Toolbox" /></div>
             <div className="brand-copy"><span>Media</span><strong>Toolbox</strong></div>
           </div>
           <span className="topbar-brand-subtitle">Secure media utilities</span>
@@ -161,6 +178,8 @@ export function AppShell({ children }) {
         <div className="topbar-actions"><button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}<span>{theme === "dark" ? "Light mode" : "Dark mode"}</span></button><Link href="/local-agent" className={`topbar-status ${localAgentStatus.connected ? "connected" : ""}`} aria-label={localAgentStatus.connected ? "Open connected local agent" : "Open local agent setup"}><span className={`status-pulse ${localAgentStatus.connected ? "connected" : ""}`} /><span>{localAgentStatus.connected ? "Agent connected" : "Agent setup"}</span></Link>{accessTimer && <div className={`agent-access-timer ${accessTimer.state}`} title={`${accessTimer.label}: ${accessTimer.value}`} aria-label={`${accessTimer.label} ${accessTimer.value}`}><Clock3 size={15} /><span className="timer-label">{accessTimer.label}</span><strong>{accessTimer.value}</strong></div>}</div>
       </header>
       <div className="content-wrap">{children}</div>
+      <ToolSeoContent pathname={pathname} />
+      <Breadcrumbs pathname={pathname} />
       <AppFooter />
     </main>
   </div>;

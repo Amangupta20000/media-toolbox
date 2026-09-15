@@ -235,7 +235,7 @@ export function ToolPage({ tool }) {
   const [compressionEstimate, setCompressionEstimate] = useState({ status: "idle", data: null });
   const [uploadProgress, setUploadProgress] = useState(0);
   const [jobId, setJobId] = useState(null);
-  const [jobMode, setJobMode] = useState("server");
+  const [jobMode, setJobMode] = useState("local");
   const [job, setJob] = useState(null);
   const [batchJobs, setBatchJobs] = useState(null);
   const [error, setError] = useState("");
@@ -243,7 +243,7 @@ export function ToolPage({ tool }) {
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewError, setPreviewError] = useState(false);
   const [locations, setLocations] = useState(null);
-  const [processingMode, setProcessingMode] = useState("server");
+  const [processingMode, setProcessingMode] = useState("local");
   const [keepResult, setKeepResult] = useState(false);
   const [activeView, setActiveView] = useState("tool");
 
@@ -257,7 +257,7 @@ export function ToolPage({ tool }) {
       // create the short-lived session when the user submits the job. This
       // keeps the trial from starting during a passive health probe while
       // avoiding a dead-end where Local is never selectable in a new browser.
-      const preferred = value.server.connected ? "server" : value.local.connected || value.local.ready ? "local" : "server";
+      const preferred = "local";
       setProcessingMode(preferred);
       setCapabilities(processingCapabilities(value, preferred));
     }).catch(() => undefined);
@@ -345,7 +345,7 @@ export function ToolPage({ tool }) {
   const heicReady = capabilities?.image?.heic || capabilities?.image?.sips;
   const imageMagickReady = capabilities?.image?.imagemagick !== false;
   const sipsReady = capabilities?.image?.sips === true;
-  const serverReferenceReady = capabilities?.video?.defaultReference === true;
+  const matchingReferenceReady = capabilities?.video?.defaultReference === true;
   const pdfCompressorReady = capabilities?.pdf?.compressor !== false;
 
   const defaultImageSettings = () => ({ format: "original", maxSizeKb: "", jpegConfirmed: false });
@@ -449,7 +449,7 @@ export function ToolPage({ tool }) {
   const submit = async () => {
     setError("");
     if (!(isImage ? imageFiles.length : source)) { setError(`Choose a ${isImage ? "source image" : isPdfCompressor ? "PDF" : "video"} first.`); return; }
-    if (!isProcessingLocationReady(locations, processingMode)) { setError(processingMode === "local" ? "Admin login or activation is required in the Local agent dashboard." : "Server processing is unavailable. Choose Local agent after authorizing it."); return; }
+    if (!isProcessingLocationReady(locations, processingMode)) { setError("Admin login or activation is required in the Local agent dashboard."); return; }
     if (isImage && imageFiles.length > maxImageFiles) { setError(`Choose up to ${maxImageFiles} images per request.`); return; }
     if (isImage && imageSettings.some((setting) => setting.maxSizeKb && (!/^\d+$/.test(setting.maxSizeKb) || Number(setting.maxSizeKb) <= 0))) { setError("Enter a positive whole number of KB for every image with a size target."); return; }
     if (isImage && imageSettings.some((setting) => setting.format === "jpeg" && !setting.jpegConfirmed)) { setError("Confirm the JPEG transparency warning for every JPG output."); return; }
@@ -493,13 +493,13 @@ export function ToolPage({ tool }) {
     <ToolViewTabs value={activeView} onChange={setActiveView} />
     {activeView === "history" ? <ToolHistory tool={tool} /> : <>
     <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />
-    <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${capabilities?.status === "ready" ? "ready" : ""}`} /><span>{capabilities?.status === "ready" ? `${processingMode === "local" ? "Local agent" : "Server"} worker online` : "Connecting to processing worker"}</span></div>{isImage ? <span>{heicReady ? (capabilities?.image?.heic ? "HEIC enabled" : "HEIC enabled via local fallback") : capabilities?.status === "ready" ? "HEIC unavailable" : "HEIC capability checking"}</span> : isPdfCompressor ? <span>{capabilities?.status !== "ready" ? "PDF compression capability checking" : pdfCompressorReady ? "PDF compression ready" : "PDF structural optimization fallback"}</span> : <span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery + fallback" : "Reference recovery · upload a reference") : capabilities?.status === "ready" ? "FFmpeg recovery enabled · reference recovery unavailable" : "Video capabilities checking"}</span>}</div>
+    <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${capabilities?.status === "ready" ? "ready" : ""}`} /><span>{capabilities?.status === "ready" ? "Local agent worker online" : "Connecting to Local agent"}</span></div>{isImage ? <span>{heicReady ? (capabilities?.image?.heic ? "HEIC enabled" : "HEIC enabled via local fallback") : capabilities?.status === "ready" ? "HEIC unavailable" : "HEIC capability checking"}</span> : isPdfCompressor ? <span>{capabilities?.status !== "ready" ? "PDF compression capability checking" : pdfCompressorReady ? "PDF compression ready" : "PDF structural optimization fallback"}</span> : <span>{capabilities?.video?.untrunc ? (matchingReferenceReady ? "Reference recovery + fallback" : "Reference recovery · upload a reference") : capabilities?.status === "ready" ? "FFmpeg recovery enabled · reference recovery unavailable" : "Video capabilities checking"}</span>}</div>
     {job ? <JobStatusCard job={job} isImage={isImage} isPdfCompressor={isPdfCompressor} mode={jobMode} keepResult={keepResult} onReset={reset} /> : batchJobs ? <BatchJobStatusCard jobs={batchJobs} mode={jobMode} onReset={reset} /> : <div className="workspace-grid">
       <section className="tool-card primary-card"><div className="card-heading"><div><span className="card-index">01</span><h2>{isImage ? "Add up to 5 images" : isPdfCompressor ? "Add a PDF" : "Add a damaged video"}</h2></div><span className="required-label">Required</span></div><FileDropzone files={isImage ? imageFiles : undefined} file={isImage ? undefined : source} onFiles={isImage ? handleImageFiles : undefined} onFile={isImage ? undefined : (file) => { setSource(file); setError(""); }} onRemoveFile={isImage ? removeImageFile : undefined} onClear={() => { setSource(null); setImageFiles([]); setImageSettings([]); setActiveImageIndex(0); setSameConversion(false); setSameSize(false); setPreviewUrl(""); setPreviewError(false); }} multiple={isImage} variant={isImage ? "image" : isPdfCompressor ? "pdf" : "video"} accept={isImage ? imageAccept : isPdfCompressor ? ".pdf,application/pdf" : "video/*,.mkv,.webm,.avi,.3gp"} label={isImage ? "Drop up to 5 images here" : isPdfCompressor ? "Drop a PDF here" : "Drop a video here"} hint={isImage ? "or click to browse · paste an image directly" : "or click to browse from your device"} required disabled={Boolean(uploadProgress)} />{isImage && imageFiles[0] && previewUrl && <div className="image-preview-card"><div className="preview-heading"><span>First image preview</span><small>Local only · not uploaded</small></div><div className="image-preview-frame">{previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${imageFiles[0].name}-preview`}><AlertTriangle size={18} /><span>This browser cannot preview this image format, but the file can still be processed.</span></DismissibleMessage> : <img src={previewUrl} alt={`Preview of ${imageFiles[0].name}`} onError={() => setPreviewError(true)} />}</div></div>}<div className="limit-row"><span>Maximum file size</span><strong>{isImage ? "25 MB each · 5 per request" : isPdfCompressor ? "200 MB" : "2 GB"}</strong></div><div className={`keep-result-slot ${processingMode === "local" ? "visible" : ""}`} aria-hidden={processingMode !== "local"}>{processingMode === "local" && <label className="keep-result-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label>}</div></section>
-    {isImage ? <ImageSettingsCard files={imageFiles} settings={imageSettings} activeIndex={activeImageIndex} sameConversion={sameConversion} sameSize={sameSize} method={method} capabilities={capabilities} imageMagickReady={imageMagickReady} sipsReady={sipsReady} onChange={updateImageSetting} onActiveIndexChange={setActiveImageIndex} onSameConversionChange={toggleSameConversion} onSameSizeChange={toggleSameSize} onMethodChange={setMethod} /> : isPdfCompressor ? <PdfCompressionSettingsCard source={source} profile={compressionProfile} customQuality={customQuality} removeColor={removeColor} customTargetMb={customTargetMb} estimate={compressionEstimate} onChange={setCompressionProfile} onCustomQualityChange={setCustomQuality} onRemoveColorChange={setRemoveColor} onCustomTargetChange={setCustomTargetMb} capabilities={capabilities} /> : <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Reference video</h2></div><span className={serverReferenceReady ? "optional-label" : "required-label"}>{serverReferenceReady ? "Optional server fallback" : "Upload for damaged MP4"}</span></div><p className="card-description">A healthy recording from the same device or app can rebuild missing MP4 metadata when it was recorded with the same settings.</p><FileDropzone file={reference} onFile={setReference} onClear={() => setReference(null)} variant="video" accept="video/*,.mkv,.webm,.avi,.3gp" label="Drop a reference video" hint={serverReferenceReady ? "or continue without one" : "required when MP4 metadata is missing"} disabled={Boolean(uploadProgress)} /><div className="info-note"><Info size={16} /><span>{capabilities?.video?.untrunc ? (serverReferenceReady ? "Reference recovery is available. If you do not upload one, the configured server reference will be tried." : "No server-side reference is configured. Upload a healthy recording from the same device or app; readable containers can still be repaired without one.") : "FFmpeg can repair readable containers. Missing MP4 metadata requires Untrunc and a matching healthy reference."}</span></div></section>}
-      <section className="tool-card action-card"><div className="action-copy"><div className="action-icon"><Zap size={19} /></div><div><h2>Ready when you are</h2><p>{isImage ? "Your output will be created as a new file." : isPdfCompressor ? "The original PDF stays untouched; a smaller copy is created." : "The worker will try the safest recovery method first."}</p></div></div><button className="primary-button" onClick={submit} disabled={!canSubmit}>{uploadProgress ? <><LoaderCircle className="spin" size={18} /> Uploading {uploadProgress}%</> : <><Sparkles size={18} /> {isImage ? "Convert image" : isPdfCompressor ? "Compress PDF" : "Repair video"}</>}</button></section>
+    {isImage ? <ImageSettingsCard files={imageFiles} settings={imageSettings} activeIndex={activeImageIndex} sameConversion={sameConversion} onChange={updateImageSetting} onActiveIndexChange={setActiveImageIndex} sameSize={sameSize} method={method} capabilities={capabilities} imageMagickReady={imageMagickReady} sipsReady={sipsReady} onSameConversionChange={toggleSameConversion} onSameSizeChange={toggleSameSize} onMethodChange={setMethod} /> : isPdfCompressor ? <PdfCompressionSettingsCard source={source} profile={compressionProfile} customQuality={customQuality} removeColor={removeColor} customTargetMb={customTargetMb} estimate={compressionEstimate} onChange={setCompressionProfile} onCustomQualityChange={setCustomQuality} onRemoveColorChange={setRemoveColor} onCustomTargetChange={setCustomTargetMb} capabilities={capabilities} /> : <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Reference video</h2></div><span className={matchingReferenceReady ? "optional-label" : "required-label"}>{matchingReferenceReady ? "Optional matching reference" : "Upload for damaged MP4"}</span></div><p className="card-description">A healthy recording from the same device or app can rebuild missing MP4 metadata when it was recorded with the same settings.</p><FileDropzone file={reference} onFile={setReference} onClear={() => setReference(null)} variant="video" accept="video/*,.mkv,.webm,.avi,.3gp" label="Drop a reference video" hint={matchingReferenceReady ? "or continue without one" : "required when MP4 metadata is missing"} disabled={Boolean(uploadProgress)} /><div className="info-note"><Info size={16} /><span>{capabilities?.video?.untrunc ? (matchingReferenceReady ? "Reference recovery is available. If you do not upload one, the configured matching reference will be tried." : "No matching reference is configured. Upload a healthy recording from the same device or app; readable containers can still be repaired without one.") : "FFmpeg can repair readable containers. Missing MP4 metadata requires Untrunc and a matching healthy reference."}</span></div></section>}
+      <section className="tool-card action-card"><div className="action-copy"><div className="action-icon"><Zap size={19} /></div><div><h2>Ready when you are</h2><p>{isImage ? "Your output will be created as a new file." : isPdfCompressor ? "The original PDF stays untouched; a smaller copy is created." : "The Local agent will try the safest recovery method first."}</p></div></div><button className="primary-button" onClick={submit} disabled={!canSubmit}>{uploadProgress ? <><LoaderCircle className="spin" size={18} /> Uploading {uploadProgress}%</> : <><Sparkles size={18} /> {isImage ? "Convert image" : isPdfCompressor ? "Compress PDF" : "Repair video"}</>}</button></section>
     </div>}
-    {!job && !isImage && !isPdfCompressor && <VideoRecoverySummary hasServerReference={serverReferenceReady} hasUntrunc={capabilities?.video?.untrunc} />}
+    {!job && !isImage && !isPdfCompressor && <VideoRecoverySummary hasMatchingReference={matchingReferenceReady} hasUntrunc={capabilities?.video?.untrunc} />}
     {error && <DismissibleMessage className="error-banner" resetKey={error}><AlertTriangle size={18} /><span>{error}</span></DismissibleMessage>}
     {!job && !batchJobs && <div className="trust-row"><div><CheckCircle2 size={16} /> No resizing by default</div><div><Clock3 size={16} /> Temporary processing only</div><div><ShieldCheck size={16} /> Private worker pipeline</div></div>}
     </>}
@@ -606,12 +606,12 @@ function BatchDownloadAction({ result }) {
   return <div className="batch-download-action"><ResultFilenameField originalFilename={result.filename} value={filenameStemValue} onChange={setFilenameStemValue} /><a className="secondary-button" href={downloadUrlWithFilename(result.downloadUrl, filename)} download={filename}><Download size={16} /> Download</a></div>;
 }
 
-function VideoRecoverySummary({ hasServerReference, hasUntrunc }) {
+function VideoRecoverySummary({ hasMatchingReference, hasUntrunc }) {
   const capabilityText = hasUntrunc === undefined
     ? "Checking reference-video support."
     : hasUntrunc
-      ? hasServerReference
-        ? "A backup video is set up on the server if you do not upload one."
+      ? hasMatchingReference
+        ? "A matching backup video is configured if you do not upload one."
         : "No backup video is set up. Upload a healthy matching video when needed."
       : "The reference-repair tool is not installed, so missing MP4 information cannot be rebuilt."
     ;

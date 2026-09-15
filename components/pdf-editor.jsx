@@ -423,14 +423,14 @@ async function loadPdfFile(file, pdfLibrary, { allowServerFallback = false } = {
   } catch (fallbackError) {
     if (!allowServerFallback) {
       const detail = fallbackError instanceof Error ? fallbackError.message : browserError?.message;
-      throw new Error(detail ? `The PDF preview and editor parser could not read this PDF: ${detail}` : "This PDF could not be read. Choose Local agent or Server.");
+      throw new Error(detail ? `The PDF preview and editor parser could not read this PDF: ${detail}` : "This PDF could not be read. Connect the Local agent and try again.");
     }
     try {
       const inspection = await inspectPdfOnServer(file);
       return { data, documentProxy: null, pageCount: inspection.pageCount, fallbackDocument: null, pageSizes: inspection.pages, previewToken: inspection.previewToken, serverFallback: true, passwordProtected: false };
     } catch (serverError) {
       const detail = serverError instanceof Error ? serverError.message : fallbackError instanceof Error ? fallbackError.message : browserError?.message;
-      throw new Error(detail || "The browser and server PDF readers could not open this file.");
+      throw new Error(detail || "The browser and Local agent PDF readers could not open this file.");
     }
   }
 }
@@ -512,7 +512,7 @@ async function rasterizeBrowserPages(pages, sourceDocuments, preparedPages, onPr
     const preparedPage = preparedPages[index];
     if (page.kind === "source") {
       const documentProxy = sourceDocuments?.[page.pdfIndex];
-      if (!documentProxy) throw new Error("This PDF page cannot be rendered in Browser mode. Choose Local agent or Server for this file.");
+      if (!documentProxy) throw new Error("This PDF page cannot be rendered in Browser mode. Connect the Local agent for this file.");
       onProgress?.(17);
       const pdfPage = page.pdfPage || await withTimeout(documentProxy.getPage(page.pageIndex + 1), 60000, "A PDF page took too long to load in Browser mode.");
       onProgress?.(18);
@@ -621,10 +621,10 @@ async function exportPdfInBrowser(pdfFiles, pages, sourceDocuments, pdfLibrary, 
     const images = [];
     for (const image of getPageImages(page)) {
       const extension = fileExtension(image.file?.name);
-      if (![".png", ".jpg", ".jpeg"].includes(extension)) throw new Error("Browser PDF mode supports PNG, JPG, and JPEG images. Choose Local agent or Server for HEIC and other image formats.");
+      if (![".png", ".jpg", ".jpeg"].includes(extension)) throw new Error("Browser PDF mode supports PNG, JPG, and JPEG images. Connect the Local agent for HEIC and other image formats.");
       const bytes = image.sourceBytes
         ? image.sourceBytes.slice(0)
-        : await withTimeout(image.file.arrayBuffer(), 30000, `Timed out while reading ${image.file.name}. Choose Local agent or Server for this file.`);
+        : await withTimeout(image.file.arrayBuffer(), 30000, `Timed out while reading ${image.file.name}. Connect the Local agent for this file.`);
       images.push({ x: image.x, y: image.y, width: image.width, height: image.height, rotation: normalizeImageRotation(image.rotation), extension, bytes });
     }
     preparedPages.push({ kind: page.kind, pdfIndex: page.pdfIndex, pageIndex: page.pageIndex, width: page.width, height: page.height, rotation: page.rotation, images, textBoxes: getPageTextBoxes(page) });
@@ -662,7 +662,7 @@ async function exportPdfInBrowser(pdfFiles, pages, sourceDocuments, pdfLibrary, 
     await drawBrowserPdfTextBoxes(output, target, page, browserFontCache, { concatTransformationMatrix, popGraphicsState, pushGraphicsState });
     onProgress?.(64 + Math.round(((index + 1) / Math.max(1, rasterPages.length)) * 8));
   }
-  const bytes = new Uint8Array(await withTimeout(output.save(), 120000, "Browser PDF export took too long while saving the file. Try Local agent or Server for this file."));
+  const bytes = new Uint8Array(await withTimeout(output.save(), 120000, "Browser PDF export took too long while saving the file. Try the Local agent for this file."));
   const previewImages = [];
   let previewError = null;
   if (pdfLibrary) {
@@ -713,6 +713,7 @@ export function PdfEditor() {
   const [processingMode, setProcessingMode] = useState("local");
   const [jobMode, setJobMode] = useState("local");
   const [keepResult, setKeepResult] = useState(false);
+  const [retentionInfoOpen, setRetentionInfoOpen] = useState(false);
   const [jobKeepResult, setJobKeepResult] = useState(false);
   const [resultFilenameStem, setResultFilenameStem] = useState("");
   const [previewZoom, setPreviewZoom] = useState(1);
@@ -1057,7 +1058,7 @@ export function PdfEditor() {
       if (browserFallbacks || serverFallbacks || thumbnailFailures || passwordProtectedFiles) {
         const messages = [];
         if (browserFallbacks) messages.push("PDF preview was unavailable, so a safe PDF parser was used");
-        if (serverFallbacks) messages.push("The browser used the server PDF reader to validate the document");
+        if (serverFallbacks) messages.push("The Local agent PDF reader was used to validate the document");
         if (thumbnailFailures) messages.push(`${thumbnailFailures} page preview${thumbnailFailures === 1 ? "" : "s"} could not be rendered`);
         if (passwordProtectedFiles) messages.push(`${passwordProtectedFiles} password-protected PDF${passwordProtectedFiles === 1 ? " was" : "s were"} opened with the supplied password and will be safely flattened during export`);
         setPreviewError(`${messages.join("; ")}. The PDF can still be edited and exported.`);
@@ -1065,7 +1066,7 @@ export function PdfEditor() {
     } catch (loadError) {
       const detail = loadError instanceof Error ? loadError.message : "";
       console.error("PDF editor import failed", loadError);
-      setError(/password|encrypt/i.test(detail) ? "The PDF could not be opened. Check the password and try again." : detail ? `PDF import failed: ${detail.slice(0, 240)}` : "The browser and server PDF readers could not open this file.");
+      setError(/password|encrypt/i.test(detail) ? "The PDF could not be opened. Check the password and try again." : detail ? `PDF import failed: ${detail.slice(0, 240)}` : "The browser and Local agent PDF readers could not open this file.");
     } finally {
       setLoadingFiles(false);
     }
@@ -1517,10 +1518,10 @@ export function PdfEditor() {
     if (validationError) { setError(`Export validation failed: ${validationError}`); return; }
     if (processingMode === "browser") {
       setProcessingMode("local");
-      setError("Browser mode is temporarily unavailable. Choose Local agent or Server.");
+      setError("Browser mode is temporarily unavailable. Choose Local agent.");
       return;
     }
-    if (processingMode !== "browser" && !isProcessingLocationReady(locations, processingMode)) { setError(processingMode === "local" ? "Admin login or activation is required in the Local agent dashboard." : "Server processing is unavailable."); return; }
+    if (processingMode !== "browser" && !isProcessingLocationReady(locations, processingMode)) { setError("Admin login or activation is required in the Local agent dashboard."); return; }
     setError("");
     setJobMode(processingMode);
     if (processingMode === "browser") {
@@ -1676,7 +1677,7 @@ export function PdfEditor() {
       <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { addPdfFiles(event.target.files); event.target.value = ""; }} />
       <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/heic,image/heif,image/tiff,image/gif,image/bmp,.png,.jpg,.jpeg,.heic,.heif,.tif,.tiff,.gif,.bmp" multiple hidden onChange={(event) => { const targetPageId = imageTargetPageIdRef.current; imageTargetPageIdRef.current = null; addImages(event.target.files, targetPageId || undefined); event.target.value = ""; }} />
       <div className={`pdf-retention-row ${processingMode !== "local" ? "pdf-retention-row-tools-only" : ""}`}>
-        {processingMode === "local" && <><label className="keep-result-check pdf-retention-check"><input type="checkbox" checked={keepResult} onChange={(event) => { keepResultTouchedRef.current = true; setKeepResult(event.target.checked); }} /><span>Keep final result on this device</span></label><button className="pdf-retention-info" type="button" aria-label={keepResult ? "The completed PDF will be saved to the Local agent Results folder." : "Exported PDFs are temporary unless you choose Save to device."} title={keepResult ? "The completed PDF will be saved to the Local agent Results folder." : "Exported PDFs are temporary unless you choose Save to device."}><Info size={15} /></button></>}
+        {processingMode === "local" && <><label className="keep-result-check pdf-retention-check"><input type="checkbox" checked={keepResult} onChange={(event) => { keepResultTouchedRef.current = true; setKeepResult(event.target.checked); }} /><span>Keep final result on this device</span></label><div className="pdf-retention-info-control"><button className="pdf-retention-info" type="button" aria-label="Show result retention details" aria-controls="pdf-retention-info-copy" aria-expanded={retentionInfoOpen} title="Show result retention details" onClick={() => setRetentionInfoOpen((current) => !current)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setRetentionInfoOpen(false); } }}><Info size={15} /></button>{retentionInfoOpen && <div id="pdf-retention-info-copy" className="pdf-retention-info-popover" role="status" aria-live="polite"><strong>Result retention</strong><span>{keepResult ? "The completed PDF is kept in the Local agent Results folder until you remove it." : "The completed PDF is temporary and is cleaned up after download. Select this option to keep it on this device."}</span></div>}</div></>}
         <div ref={moreToolsRef} className="pdf-more-tools pdf-more-tools-bottom">
           <button className="icon-button pdf-more-tools-trigger" type="button" aria-label="Open other PDF tools" aria-haspopup="menu" aria-expanded={moreToolsOpen} title={selectedPage ? "Other tools" : canUndo || canRedo ? "Undo or redo document changes" : "Add a page to use other tools"} disabled={!selectedPage && !canUndo && !canRedo} onClick={() => setMoreToolsOpen((current) => !current)}><MoreHorizontal size={20} /></button>
           {moreToolsOpen && (selectedPage || canUndo || canRedo) && <div className="pdf-more-tools-menu" role="menu" aria-label="Other PDF tools">
@@ -1909,7 +1910,7 @@ function PdfPageCanvas({ page, pdfDocument, pageNumber, previewZoom = 1, selecte
 
 function PdfFallbackPreview({ page, compact = false, selectedObject, onSelectObject, onChange, onRemove, onChangeTextBoxes, onRemoveTextBox }) {
   const previewUrl = page.previewToken ? `/api/pdf/preview?token=${encodeURIComponent(page.previewToken)}&page=${page.pageNumber}` : "";
-  return <div className="pdf-page-fallback"><div className="pdf-page-fallback-stage" style={{ "--page-ratio": pageDisplayRatio(page) }} onPointerDown={(event) => { if (event.target === event.currentTarget) onSelectObject?.(null); }}>{previewUrl ? <img src={previewUrl} alt={`Preview of PDF page ${page.pageNumber}`} style={{ transform: `rotate(${normalizeRotation(page.rotation)}deg)` }} /> : <div className="pdf-page-fallback-empty"><FileText size={28} /><strong>Preview is unavailable</strong></div>}<ImageOverlayLayer page={page} selectedImageId={selectedObject?.type === "image" ? selectedObject.id : null} onSelect={(id) => onSelectObject?.({ type: "image", id })} onChange={onChange} onRemove={onRemove} /><TextBoxOverlayLayer page={page} selectedTextBoxId={selectedObject?.type === "textBox" ? selectedObject.id : null} onSelect={(id) => onSelectObject?.({ type: "textBox", id })} onChange={onChangeTextBoxes} onRemove={onRemoveTextBox} /></div>{!compact && <div className="pdf-page-fallback-note"><FileText size={22} /><strong>Server-rendered PDF preview</strong><span>Page {page.pageNumber} is ready to include in the exported PDF.</span></div>}</div>;
+  return <div className="pdf-page-fallback"><div className="pdf-page-fallback-stage" style={{ "--page-ratio": pageDisplayRatio(page) }} onPointerDown={(event) => { if (event.target === event.currentTarget) onSelectObject?.(null); }}>{previewUrl ? <img src={previewUrl} alt={`Preview of PDF page ${page.pageNumber}`} style={{ transform: `rotate(${normalizeRotation(page.rotation)}deg)` }} /> : <div className="pdf-page-fallback-empty"><FileText size={28} /><strong>Preview is unavailable</strong></div>}<ImageOverlayLayer page={page} selectedImageId={selectedObject?.type === "image" ? selectedObject.id : null} onSelect={(id) => onSelectObject?.({ type: "image", id })} onChange={onChange} onRemove={onRemove} /><TextBoxOverlayLayer page={page} selectedTextBoxId={selectedObject?.type === "textBox" ? selectedObject.id : null} onSelect={(id) => onSelectObject?.({ type: "textBox", id })} onChange={onChangeTextBoxes} onRemove={onRemoveTextBox} /></div>{!compact && <div className="pdf-page-fallback-note"><FileText size={22} /><strong>Local-agent PDF preview</strong><span>Page {page.pageNumber} is ready to include in the exported PDF.</span></div>}</div>;
 }
 
 function BlankPageCanvas({ page, selectedObject, onSelectObject, onChange, onRemove, onChangeTextBoxes, onRemoveTextBox, onAddImages }) {
@@ -2251,7 +2252,7 @@ function PdfResultPreview({ result }) {
   </div>;
 }
 
-function PdfJobCard({ job: initialJob, mode = "server", keepResult = false, onReset, onContinue }) {
+function PdfJobCard({ job: initialJob, mode = "local", keepResult = false, onReset, onContinue }) {
   const [job, setJob] = useState(initialJob);
   const [printing, setPrinting] = useState(false);
   const [printError, setPrintError] = useState("");
