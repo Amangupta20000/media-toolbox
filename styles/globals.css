@@ -28,22 +28,21 @@ a { color: inherit; text-decoration: none; }
 .app-shell { min-height: 100vh; display: flex; background: var(--canvas); }
 .sidebar { position: sticky; top: 0; width: 280px; height: 100vh; height: 100dvh; max-height: 100dvh; flex: 0 0 280px; align-self: flex-start; overflow-y: auto; padding: 28px 18px 20px; display: flex; flex-direction: column; background: #fff; border-right: 1px solid var(--line); transition: width .22s ease, flex-basis .22s ease, padding .22s ease; z-index: 20; }
 .sidebar-collapsed .sidebar { width: 86px; flex-basis: 86px; padding-inline: 14px; }
-.sidebar-collapsed .brand-copy, .sidebar-collapsed .sidebar-label, .sidebar-collapsed .nav-copy, .sidebar-collapsed .active-dot, .sidebar-collapsed .privacy-card div, .sidebar-collapsed .version-label { display: none; }
-.sidebar-collapsed .brand-lockup { justify-content: space-between; position: static; gap: 0; padding: 0; }
-.sidebar-collapsed .sidebar-collapse { display: grid; position: static; width: 26px; height: 26px; margin-left: 0; z-index: 1; }
+.sidebar-collapsed .sidebar .sidebar-label, .sidebar-collapsed .sidebar .nav-copy, .sidebar-collapsed .sidebar .active-dot, .sidebar-collapsed .sidebar .privacy-card div, .sidebar-collapsed .sidebar .version-label { display: none; }
+.sidebar-collapsed .sidebar .sidebar-header { justify-content: center; padding: 0; }
+.sidebar-collapsed .sidebar-collapse { display: grid; position: static; width: 35px; height: 35px; margin-left: 0; z-index: 1; }
 .sidebar-collapsed .tool-nav-item { justify-content: center; padding-inline: 0; }
-.brand-lockup { height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px; }
+.sidebar-header { height: 38px; display: flex; align-items: center; justify-content: flex-end; padding: 0 8px; }
 .brand-mark { width: 31px; height: 31px; border-radius: 10px; display: grid; place-items: center; color: white; background: linear-gradient(135deg, #173c61, #22a6a8); box-shadow: 0 7px 16px rgba(22, 120, 139, .18); }
 .brand-copy { display: flex; flex-direction: column; line-height: 1.04; letter-spacing: -.02em; font-size: 17px; color: var(--navy); }
 .brand-copy span { font-weight: 500; }
 .brand-copy strong { font-weight: 780; }
 .icon-button { width: 31px; height: 31px; margin-left: auto; display: grid; place-items: center; color: #8393a6; background: transparent; border: 1px solid transparent; border-radius: 9px; }
-.sidebar-collapse { border-radius: 50%; outline: 0; }
+.sidebar-collapse { width: 38px; height: 38px; margin-left: auto; padding: 0; color: #71879a; background: #f2f5f8; border: 1px solid #dce6ed; border-radius: 50%; outline: 0; }
 .sidebar-collapse:focus { outline: 0; }
-.sidebar-collapse:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; box-shadow: 0 0 0 5px rgba(30, 159, 163, .18); }
+.sidebar-collapse:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; box-shadow: none; }
 .sidebar-collapse > svg { display: block; }
 .icon-button:hover { color: var(--navy); background: #f1f5f8; border-color: var(--line); }
-.sidebar-context { margin: 13px 12px 0; color: #8c9bab; font-size: 10px; line-height: 1.35; }
 .sidebar-label { margin: 54px 12px 13px; color: #a0acba; text-transform: uppercase; letter-spacing: .13em; font-size: 10px; font-weight: 800; }
 .tool-nav { min-width: 0; display: grid; gap: 7px; }
 .tool-nav-item { position: relative; display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px 13px; color: #6e7e91; border: 1px solid transparent; border-radius: 13px; transition: all .17s ease; }
@@ -65,11 +64,11 @@ a { color: inherit; text-decoration: none; }
 .sidebar-collapsed .sidebar { overflow: visible; }
 .sidebar-collapsed .pdf-tools-chevron { display: grid; }
 .sidebar-collapsed .pdf-tools-group { position: relative; }
-.sidebar-collapsed .pdf-tools-subnav { position: absolute; top: 0; left: calc(100% + 10px); width: 280px; margin: 0; padding: 8px; overflow: hidden; background: #fff; border: 1px solid #dcebed; border-radius: 13px; box-shadow: 0 15px 34px rgba(28, 52, 72, .16); z-index: 30; }
+.sidebar-collapsed .pdf-tools-subnav { position: absolute; top: 0; left: calc(100% + 10px); width: min(280px, calc(100vw - 112px)); margin: 0; padding: 8px; overflow: visible; background: #fff; border: 1px solid #dcebed; border-radius: 13px; box-shadow: 0 15px 34px rgba(28, 52, 72, .16); z-index: 30; }
 .sidebar-collapsed .pdf-tools-subnav .pdf-tool-child { width: 100%; overflow: hidden; }
-.sidebar-collapsed .pdf-tools-subnav .nav-copy { display: flex; flex: 1 1 auto; overflow: hidden; }
+.sidebar-collapsed .sidebar .pdf-tools-subnav .nav-copy { display: flex; flex: 1 1 auto; overflow: visible; }
 .sidebar-collapsed .pdf-tools-subnav .nav-label-row { overflow: hidden; }
-.sidebar-collapsed .pdf-tools-subnav .nav-copy strong, .sidebar-collapsed .pdf-tools-subnav .nav-copy small { overflow: hidden; text-overflow: ellipsis; }
+.sidebar-collapsed .pdf-tools-subnav .nav-copy strong, .sidebar-collapsed .pdf-tools-subnav .nav-copy small { overflow: visible; text-overflow: clip; }
 .sidebar-collapsed .pdf-tools-subnav .active-dot { display: inline-block; }
 .sidebar-collapsed .pdf-tools-subnav .pdf-tool-child { justify-content: initial; padding-inline: 10px; }
 .nav-icon { width: 35px; height: 35px; display: grid; place-items: center; flex: 0 0 35px; border-radius: 10px; background: #f2f5f8; color: #8395aa; }
@@ -89,10 +88,11 @@ a { color: inherit; text-decoration: none; }
 .version-label { display: block; padding: 0 11px; color: #aab5c0; font-size: 10px; }
 .main-area { min-width: 0; flex: 1; }
 .topbar { position: sticky; top: 0; z-index: 15; height: 77px; display: flex; align-items: center; justify-content: flex-start; padding: 0 5.3vw; background: rgba(255,255,255,.86); border-bottom: 1px solid var(--line); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
-.topbar-brand { position: absolute; left: 50%; display: flex; align-items: center; gap: 9px; transform: translateX(-50%); }
+.topbar-brand { position: absolute; left: 50%; display: flex; flex-direction: column; align-items: center; gap: 4px; transform: translateX(-50%); }
+.topbar-brand-main { display: flex; align-items: center; gap: 9px; }
 .topbar-brand .brand-mark { width: 30px; height: 30px; border-radius: 9px; }
 .topbar-brand .brand-copy { font-size: 15px; }
-.sidebar-collapsed .sidebar-context { display: none; }
+.topbar-brand-subtitle { color: #8c9bab; font-size: 9px; line-height: 1.2; white-space: nowrap; }
 .eyebrow { color: #9ba8b7; text-transform: uppercase; letter-spacing: .15em; font-size: 9px; font-weight: 800; }
 .topbar-title { color: var(--navy); font-size: 13px; font-weight: 700; }
 .topbar-status { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; color: #8190a2; background: #fff; border: 1px solid var(--line); border-radius: 9px; font-size: 11px; font-weight: 700; transition: color .16s ease, background .16s ease, border-color .16s ease, box-shadow .16s ease; }
@@ -612,7 +612,7 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .result-summary span { font-size: 10px; }
 .warning-list > div { font-size: 11px; }
 
-.topbar-actions { display: flex; align-items: center; gap: 10px; margin-left: 0; }
+.topbar-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; position: relative; z-index: 1; }
 .theme-toggle { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 11px; color: #647b8e; background: #fff; border: 1px solid var(--line); border-radius: 9px; font-size: 11px; font-weight: 700; transition: all .16s ease; }
 .theme-toggle:hover { color: var(--navy); background: #f5f9fb; border-color: #b9cbd8; }
 .theme-toggle svg { color: var(--teal); }
@@ -657,7 +657,7 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .topbar-status, [data-theme="dark"] .page-heading p, [data-theme="dark"] .heading-note, [data-theme="dark"] .capability-strip, [data-theme="dark"] .limit-row, [data-theme="dark"] .info-note, [data-theme="dark"] .trust-row { color: #9db0c0; }
 [data-theme="dark"] .nav-copy small, [data-theme="dark"] .privacy-card span, [data-theme="dark"] .action-copy p, [data-theme="dark"] .job-message, [data-theme="dark"] .card-description, [data-theme="dark"] .recovery-summary, [data-theme="dark"] .recovery-table td { color: #a5b6c4; }
 [data-theme="dark"] .sidebar-label, [data-theme="dark"] .version-label, [data-theme="dark"] .job-id { color: #8095a7; }
-[data-theme="dark"] .sidebar-context, [data-theme="dark"] .app-footer { color: #9db0c0; }
+[data-theme="dark"] .topbar-brand-subtitle, [data-theme="dark"] .app-footer { color: #9db0c0; }
 [data-theme="dark"] .legal-document { color: #b3c3ce; }
 [data-theme="dark"] .legal-document h1, [data-theme="dark"] .legal-document h2 { color: #edf7fb; }
 [data-theme="dark"] .legal-document .legal-intro { color: #a5b6c4; }
@@ -791,14 +791,10 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
   .sidebar { position: fixed; inset: 0 auto 0 0; width: 300px; height: 100dvh; max-height: 100dvh; flex-basis: 300px; transform: translateX(-105%); box-shadow: 18px 0 35px rgba(19, 41, 63, .13); transition: transform .23s ease; }
   .sidebar.mobile-open { transform: translateX(0); }
   .sidebar-collapsed .sidebar { width: 300px; flex-basis: 300px; padding: 31px 20px 22px; overflow: auto; }
-  .sidebar-collapsed .brand-copy, .sidebar-collapsed .sidebar-label, .sidebar-collapsed .nav-copy, .sidebar-collapsed .active-dot, .sidebar-collapsed .privacy-card div, .sidebar-collapsed .version-label { display: initial; }
-  .sidebar-collapsed .brand-copy { display: flex; }
-  .sidebar-collapsed .sidebar-label, .sidebar-collapsed .privacy-card div, .sidebar-collapsed .version-label { display: block; }
-  .sidebar-collapsed .sidebar-context { display: block; }
-  .sidebar-collapsed .nav-copy { display: flex; }
-  .sidebar-collapsed .active-dot { display: inline-block; }
-  .sidebar-collapsed .brand-lockup { justify-content: initial; gap: 10px; padding: 0 8px; }
-  .sidebar-collapsed .brand-lockup { position: static; }
+  .sidebar-collapsed .sidebar .sidebar-label, .sidebar-collapsed .sidebar .privacy-card div, .sidebar-collapsed .sidebar .version-label { display: block; }
+  .sidebar-collapsed .sidebar .nav-copy { display: flex; }
+  .sidebar-collapsed .sidebar .active-dot { display: inline-block; }
+  .sidebar-collapsed .sidebar .sidebar-header { justify-content: flex-end; padding: 0 8px; }
   .sidebar-collapsed .sidebar-collapse { display: grid; position: static; width: 35px; height: 35px; margin-left: auto; }
   .sidebar-collapsed .tool-nav-item { justify-content: initial; padding-inline: 13px; }
   .sidebar-collapsed .pdf-tools-group { position: static; }

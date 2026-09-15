@@ -101,9 +101,7 @@ export function AppShell({ children }) {
   return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
     <div className={`mobile-scrim ${mobileOpen ? "visible" : ""}`} onClick={() => setMobileOpen(false)} />
     <aside id="app-sidebar" className={`sidebar ${mobileOpen ? "mobile-open" : ""}`}>
-      <div className="brand-lockup">
-        <div className="brand-mark"><Sparkles size={18} strokeWidth={2.4} /></div>
-        <div className="brand-copy"><span>Media</span><strong>Toolbox</strong></div>
+      <div className="sidebar-header">
         <button
           type="button"
           className="icon-button sidebar-collapse"
@@ -116,7 +114,6 @@ export function AppShell({ children }) {
           <Menu size={18} strokeWidth={2.25} aria-hidden="true" />
         </button>
       </div>
-      <div className="sidebar-context">Secure media utilities</div>
       <nav className="tool-nav" aria-label="Tools">
         {navigation.map((item) => {
           const Icon = item.icon;
@@ -159,8 +156,11 @@ export function AppShell({ children }) {
       <header className="topbar">
         <button className="mobile-menu-button" aria-label="Open tools" onClick={() => setMobileOpen(true)}><Menu size={21} /></button>
         <div className="topbar-brand" aria-label="Media Toolbox">
-          <div className="brand-mark"><Sparkles size={17} strokeWidth={2.4} /></div>
-          <div className="brand-copy"><span>Media</span><strong>Toolbox</strong></div>
+          <div className="topbar-brand-main">
+            <div className="brand-mark"><Sparkles size={17} strokeWidth={2.4} /></div>
+            <div className="brand-copy"><span>Media</span><strong>Toolbox</strong></div>
+          </div>
+          <span className="topbar-brand-subtitle">Secure media utilities</span>
         </div>
         <div className="topbar-actions"><button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}<span>{theme === "dark" ? "Light mode" : "Dark mode"}</span></button><Link href="/local-agent" className={`topbar-status ${localAgentStatus.connected ? "connected" : ""}`} aria-label={localAgentStatus.connected ? "Open connected local agent" : "Open local agent setup"}><span className={`status-pulse ${localAgentStatus.connected ? "connected" : ""}`} /><span>{localAgentStatus.connected ? "Agent connected" : "Agent setup"}</span></Link>{accessTimer && <div className={`agent-access-timer ${accessTimer.state}`} title={`${accessTimer.label}: ${accessTimer.value}`} aria-label={`${accessTimer.label} ${accessTimer.value}`}><Clock3 size={15} /><span className="timer-label">{accessTimer.label}</span><strong>{accessTimer.value}</strong></div>}</div>
       </header>
