@@ -47,7 +47,8 @@ a { color: inherit; text-decoration: none; }
 .pdf-tools-group { min-width: 0; max-width: 100%; display: grid; gap: 5px; }
 .pdf-tools-trigger { width: 100%; min-width: 0; max-width: 100%; font: inherit; text-align: left; cursor: pointer; appearance: none; -webkit-appearance: none; color: inherit; background: transparent; border: 1px solid transparent; }
 .pdf-tools-trigger .nav-copy { flex: 1; }
-.pdf-tools-chevron { flex: 0 0 auto; margin-left: auto; color: #8b9baa; transition: transform .18s ease; }
+.pdf-tools-chevron { flex: 0 0 auto; display: grid; place-items: center; width: 30px; height: 30px; margin-left: auto; padding: 5px; color: #71879a; background: #f2f5f8; border: 1px solid #dce6ed; border-radius: 50%; transition: transform .18s ease, color .18s ease, background .18s ease, border-color .18s ease; }
+.pdf-tools-trigger:hover .pdf-tools-chevron, .pdf-tools-trigger.active .pdf-tools-chevron { color: #147d85; background: #d9f3f1; border-color: #b9e5e3; }
 .pdf-tools-trigger[aria-expanded="true"] .pdf-tools-chevron { transform: rotate(180deg); }
 .pdf-tools-subnav { min-width: 0; max-width: 100%; display: grid; gap: 5px; margin-left: 18px; padding-left: 17px; border-left: 1px solid #dcebed; }
 .pdf-tool-child { min-width: 0; max-width: 100%; min-height: 58px; padding: 8px 10px; gap: 9px; border-radius: 10px; }
@@ -629,6 +630,8 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .sidebar-label, [data-theme="dark"] .version-label, [data-theme="dark"] .job-id { color: #8095a7; }
 [data-theme="dark"] .tool-nav-item:hover { color: var(--navy); background: #172b3d; }
 [data-theme="dark"] .tool-nav-item.active { color: var(--navy); background: #153b42; border-color: #27626a; }
+[data-theme="dark"] .pdf-tools-chevron { color: #a9c0cb; background: #1d3244; border-color: #345366; }
+[data-theme="dark"] .pdf-tools-trigger:hover .pdf-tools-chevron, [data-theme="dark"] .pdf-tools-trigger.active .pdf-tools-chevron { color: #8fe0d8; background: #205763; border-color: #4c8a8f; }
 [data-theme="dark"] .nav-icon { color: #9ab0c0; background: #1d3244; }
 [data-theme="dark"] .active .nav-icon { color: #82e0d7; background: #1e5158; }
 [data-theme="dark"] .privacy-card, [data-theme="dark"] .capability-strip, [data-theme="dark"] .recovery-summary, [data-theme="dark"] .action-card { background: #132535; border-color: var(--line); }
