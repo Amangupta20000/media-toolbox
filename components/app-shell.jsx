@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import { Archive, Bot, ChevronDown, Clock3, Film, FileText, Image as ImageIcon, Menu, Moon, ShieldCheck, Sparkles, Sun } from "lucide-react";
 import { probeLocalAgent } from "./processing-client.js";
+import { AppFooter } from "./app-footer.jsx";
 
 const navigation = [
   { href: "/image-converter", label: "Image converter", detail: "Resize-free format conversion", icon: ImageIcon },
@@ -115,7 +116,7 @@ export function AppShell({ children }) {
           <Menu size={18} strokeWidth={2.25} aria-hidden="true" />
         </button>
       </div>
-      <div className="sidebar-label">Workspace</div>
+      <div className="sidebar-context">Secure media utilities</div>
       <nav className="tool-nav" aria-label="Tools">
         {navigation.map((item) => {
           const Icon = item.icon;
@@ -157,10 +158,11 @@ export function AppShell({ children }) {
     <main className="main-area">
       <header className="topbar">
         <button className="mobile-menu-button" aria-label="Open tools" onClick={() => setMobileOpen(true)}><Menu size={21} /></button>
-        <div className="topbar-context"><span className="eyebrow">Workspace</span><span className="topbar-title">Secure media utilities</span></div>
+        <div className="topbar-context"><span className="topbar-title">Workspace</span></div>
         <div className="topbar-actions"><button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}<span>{theme === "dark" ? "Light mode" : "Dark mode"}</span></button><Link href="/local-agent" className={`topbar-status ${localAgentStatus.connected ? "connected" : ""}`} aria-label={localAgentStatus.connected ? "Open connected local agent" : "Open local agent setup"}><span className={`status-pulse ${localAgentStatus.connected ? "connected" : ""}`} /><span>{localAgentStatus.connected ? "Agent connected" : "Agent setup"}</span></Link>{accessTimer && <div className={`agent-access-timer ${accessTimer.state}`} title={`${accessTimer.label}: ${accessTimer.value}`} aria-label={`${accessTimer.label} ${accessTimer.value}`}><Clock3 size={15} /><span className="timer-label">{accessTimer.label}</span><strong>{accessTimer.value}</strong></div>}</div>
       </header>
       <div className="content-wrap">{children}</div>
+      <AppFooter />
     </main>
   </div>;
 }

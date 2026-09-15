@@ -43,6 +43,7 @@ a { color: inherit; text-decoration: none; }
 .sidebar-collapse:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; box-shadow: 0 0 0 5px rgba(30, 159, 163, .18); }
 .sidebar-collapse > svg { display: block; }
 .icon-button:hover { color: var(--navy); background: #f1f5f8; border-color: var(--line); }
+.sidebar-context { margin: 13px 12px 0; color: #8c9bab; font-size: 10px; line-height: 1.35; }
 .sidebar-label { margin: 54px 12px 13px; color: #a0acba; text-transform: uppercase; letter-spacing: .13em; font-size: 10px; font-weight: 800; }
 .tool-nav { min-width: 0; display: grid; gap: 7px; }
 .tool-nav-item { position: relative; display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px 13px; color: #6e7e91; border: 1px solid transparent; border-radius: 13px; transition: all .17s ease; }
@@ -83,7 +84,8 @@ a { color: inherit; text-decoration: none; }
 .version-label { display: block; padding: 0 11px; color: #aab5c0; font-size: 10px; }
 .main-area { min-width: 0; flex: 1; }
 .topbar { position: sticky; top: 0; z-index: 15; height: 77px; display: flex; align-items: center; justify-content: space-between; padding: 0 5.3vw; background: rgba(255,255,255,.86); border-bottom: 1px solid var(--line); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
-.topbar-context { display: flex; flex-direction: column; gap: 4px; }
+.topbar-context { position: absolute; left: 50%; display: flex; flex-direction: column; gap: 4px; transform: translateX(-50%); }
+.sidebar-collapsed .sidebar-context { display: none; }
 .eyebrow { color: #9ba8b7; text-transform: uppercase; letter-spacing: .15em; font-size: 9px; font-weight: 800; }
 .topbar-title { color: var(--navy); font-size: 13px; font-weight: 700; }
 .topbar-status { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; color: #8190a2; background: #fff; border: 1px solid var(--line); border-radius: 9px; font-size: 11px; font-weight: 700; transition: color .16s ease, background .16s ease, border-color .16s ease, box-shadow .16s ease; }
@@ -95,6 +97,16 @@ a { color: inherit; text-decoration: none; }
 .status-pulse { background: #45bd96; box-shadow: 0 0 0 4px rgba(69,189,150,.12); }
 .mobile-menu-button { display: none; width: 35px; height: 35px; margin-right: 10px; place-items: center; border: 1px solid var(--line); border-radius: 10px; color: var(--navy); background: white; }
 .content-wrap { width: min(1050px, calc(100% - 10.6vw)); margin: 0 auto; padding: 55px 0 46px; }
+.app-footer { width: min(1050px, calc(100% - 10.6vw)); margin: 0 auto; padding: 19px 0 27px; display: flex; align-items: center; justify-content: space-between; gap: 18px; color: #8a9aaa; border-top: 1px solid var(--line); font-size: 10px; }
+.app-footer nav { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 14px; }
+.app-footer a { color: inherit; transition: color .16s ease; }
+.app-footer a:hover { color: var(--teal-dark); }
+.legal-document { max-width: 820px; margin: 0 auto; padding: 34px 38px 42px; color: #526a7d; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
+.legal-document h1 { margin: 13px 0 10px; color: var(--navy); font-size: clamp(30px, 4vw, 44px); letter-spacing: -.04em; }
+.legal-document h2 { margin: 28px 0 8px; color: var(--navy); font-size: 17px; letter-spacing: -.02em; }
+.legal-document p { margin: 0 0 12px; font-size: 13px; line-height: 1.7; }
+.legal-document .legal-intro { max-width: 630px; color: #74899a; font-size: 15px; line-height: 1.6; }
+.legal-document .legal-meta { margin-top: 18px; color: #93a2af; font-size: 11px; }
 .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; margin-bottom: 26px; }
 .section-kicker { display: flex; align-items: center; gap: 8px; color: var(--teal-dark); font-size: 10px; font-weight: 800; letter-spacing: .15em; text-transform: uppercase; }
 .kicker-line { width: 23px; height: 2px; background: var(--teal); }
@@ -638,6 +650,11 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .topbar-status, [data-theme="dark"] .page-heading p, [data-theme="dark"] .heading-note, [data-theme="dark"] .capability-strip, [data-theme="dark"] .limit-row, [data-theme="dark"] .info-note, [data-theme="dark"] .trust-row { color: #9db0c0; }
 [data-theme="dark"] .nav-copy small, [data-theme="dark"] .privacy-card span, [data-theme="dark"] .action-copy p, [data-theme="dark"] .job-message, [data-theme="dark"] .card-description, [data-theme="dark"] .recovery-summary, [data-theme="dark"] .recovery-table td { color: #a5b6c4; }
 [data-theme="dark"] .sidebar-label, [data-theme="dark"] .version-label, [data-theme="dark"] .job-id { color: #8095a7; }
+[data-theme="dark"] .sidebar-context, [data-theme="dark"] .app-footer { color: #9db0c0; }
+[data-theme="dark"] .legal-document { color: #b3c3ce; }
+[data-theme="dark"] .legal-document h1, [data-theme="dark"] .legal-document h2 { color: #edf7fb; }
+[data-theme="dark"] .legal-document .legal-intro { color: #a5b6c4; }
+[data-theme="dark"] .legal-document .legal-meta { color: #8195a6; }
 [data-theme="dark"] .tool-nav-item:hover { color: var(--navy); background: #172b3d; }
 [data-theme="dark"] .tool-nav-item.active { color: var(--navy); background: #153b42; border-color: #27626a; }
 [data-theme="dark"] .pdf-tools-chevron { color: #a9c0cb; background: #1d3244; border-color: #345366; }
@@ -770,6 +787,7 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
   .sidebar-collapsed .brand-copy, .sidebar-collapsed .sidebar-label, .sidebar-collapsed .nav-copy, .sidebar-collapsed .active-dot, .sidebar-collapsed .privacy-card div, .sidebar-collapsed .version-label { display: initial; }
   .sidebar-collapsed .brand-copy { display: flex; }
   .sidebar-collapsed .sidebar-label, .sidebar-collapsed .privacy-card div, .sidebar-collapsed .version-label { display: block; }
+  .sidebar-collapsed .sidebar-context { display: block; }
   .sidebar-collapsed .nav-copy { display: flex; }
   .sidebar-collapsed .active-dot { display: inline-block; }
   .sidebar-collapsed .brand-lockup { justify-content: initial; gap: 10px; padding: 0 8px; }
@@ -781,10 +799,14 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
   .mobile-scrim.visible { display: block; position: fixed; inset: 0; z-index: 19; background: rgba(16,32,52,.28); backdrop-filter: blur(2px); }
   .mobile-menu-button { display: grid; }
   .topbar { height: 72px; justify-content: flex-start; padding-inline: 18px; }
+  .topbar-context { position: static; margin-left: 0; transform: none; }
   .topbar-status { margin-left: auto; font-size: 11px; }
   .topbar-actions { gap: 8px; }
   .agent-access-timer { padding-inline: 9px; }
   .content-wrap { width: calc(100% - 28px); padding: 36px 0 39px; }
+  .app-footer { width: calc(100% - 28px); align-items: flex-start; flex-direction: column; padding-bottom: 24px; }
+  .app-footer nav { justify-content: flex-start; gap: 11px; }
+  .legal-document { padding: 25px 20px 30px; }
   .page-heading { display: block; margin-bottom: 19px; }
   h1 { font-size: 38px; }
   .heading-note { margin-top: 17px; }

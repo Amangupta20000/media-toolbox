@@ -22,6 +22,9 @@ test("PDF text editor is exposed as a dedicated tool with history navigation", a
   assert.match(navigation, /PDF tools/);
   assert.doesNotMatch(navigation, /<strong>PDF tools<\/strong><span className="nav-beta">Beta<\/span>/);
   assert.match(navigation, /const \[pdfToolsOpen, setPdfToolsOpen\] = useState\(false\)/);
+  assert.match(navigation, /<div className="sidebar-context">Secure media utilities<\/div>/);
+  assert.doesNotMatch(navigation, /<div className="sidebar-label">Workspace<\/div>/);
+  assert.match(navigation, /<div className="topbar-context"><span className="topbar-title">Workspace<\/span><\/div>/);
   assert.match(navigation, /aria-label=\{collapsed \? "Expand sidebar" : "Collapse sidebar"\}/);
   assert.match(navigation, /type="button"/);
   assert.match(navigation, /aria-expanded=\{!collapsed\}/);
@@ -41,6 +44,8 @@ test("PDF text editor is exposed as a dedicated tool with history navigation", a
   assert.match(styles, /\.sidebar-collapsed \.pdf-tools-subnav \.nav-copy \{[^}]*display: flex/);
   assert.match(styles, /\.sidebar-collapse \{[^}]*border-radius: 50%[^}]*outline: 0/);
   assert.match(styles, /\.sidebar-collapse:focus-visible \{[^}]*outline: 2px solid var\(--teal\)/);
+  assert.match(styles, /\.topbar-context \{[^}]*position: absolute[^}]*left: 50%/);
+  assert.match(styles, /\.sidebar-collapsed \.sidebar-context \{[^}]*display: none/);
   assert.match(styles, /\.pdf-tools-subnav \{[^}]*min-width: 0[^}]*max-width: 100%/);
   assert.match(styles, /\.pdf-tool-child \{[^}]*min-width: 0[^}]*max-width: 100%/);
   assert.match(shell, /ToolViewTabs/);
