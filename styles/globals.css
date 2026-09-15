@@ -39,7 +39,10 @@ a { color: inherit; text-decoration: none; }
 .brand-copy span { font-weight: 500; }
 .brand-copy strong { font-weight: 780; }
 .icon-button { width: 31px; height: 31px; margin-left: auto; display: grid; place-items: center; color: #8393a6; background: transparent; border: 1px solid transparent; border-radius: 9px; }
-.sidebar-collapse { border-radius: 50%; }
+.sidebar-collapse { border-radius: 50%; outline: 0; }
+.sidebar-collapse:focus { outline: 0; }
+.sidebar-collapse:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; box-shadow: 0 0 0 5px rgba(30, 159, 163, .18); }
+.sidebar-collapse > svg { display: block; }
 .icon-button:hover { color: var(--navy); background: #f1f5f8; border-color: var(--line); }
 .sidebar-label { margin: 54px 12px 13px; color: #a0acba; text-transform: uppercase; letter-spacing: .13em; font-size: 10px; font-weight: 800; }
 .tool-nav { min-width: 0; display: grid; gap: 7px; }

@@ -99,11 +99,21 @@ export function AppShell({ children }) {
 
   return <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
     <div className={`mobile-scrim ${mobileOpen ? "visible" : ""}`} onClick={() => setMobileOpen(false)} />
-    <aside className={`sidebar ${mobileOpen ? "mobile-open" : ""}`}>
+    <aside id="app-sidebar" className={`sidebar ${mobileOpen ? "mobile-open" : ""}`}>
       <div className="brand-lockup">
         <div className="brand-mark"><Sparkles size={18} strokeWidth={2.4} /></div>
         <div className="brand-copy"><span>Media</span><strong>Toolbox</strong></div>
-        <button className="icon-button sidebar-collapse" aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} title={collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setCollapsed((value) => !value)}><Menu size={18} aria-hidden="true" /></button>
+        <button
+          type="button"
+          className="icon-button sidebar-collapse"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!collapsed}
+          aria-controls="app-sidebar"
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          onClick={() => setCollapsed((value) => !value)}
+        >
+          <Menu size={18} strokeWidth={2.25} aria-hidden="true" />
+        </button>
       </div>
       <div className="sidebar-label">Workspace</div>
       <nav className="tool-nav" aria-label="Tools">
