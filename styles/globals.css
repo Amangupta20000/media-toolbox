@@ -32,7 +32,6 @@ a { color: inherit; text-decoration: none; }
 .sidebar-collapsed .brand-lockup { justify-content: space-between; position: static; gap: 0; padding: 0; }
 .sidebar-collapsed .sidebar-collapse { display: grid; position: static; width: 26px; height: 26px; margin-left: 0; z-index: 1; }
 .sidebar-collapsed .tool-nav-item { justify-content: center; padding-inline: 0; }
-.sidebar-collapsed .pdf-tools-chevron { display: none; }
 .brand-lockup { height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px; }
 .brand-mark { width: 31px; height: 31px; border-radius: 10px; display: grid; place-items: center; color: white; background: linear-gradient(135deg, #173c61, #22a6a8); box-shadow: 0 7px 16px rgba(22, 120, 139, .18); }
 .brand-copy { display: flex; flex-direction: column; line-height: 1.04; letter-spacing: -.02em; font-size: 17px; color: var(--navy); }
@@ -60,6 +59,13 @@ a { color: inherit; text-decoration: none; }
 .pdf-tool-child .nav-icon { width: 31px; height: 31px; flex-basis: 31px; }
 .pdf-tool-child .nav-copy strong { font-size: 12px; }
 .pdf-tool-child .nav-copy small { font-size: 9px; }
+.sidebar-collapsed .sidebar { overflow: visible; }
+.sidebar-collapsed .pdf-tools-chevron { display: grid; }
+.sidebar-collapsed .pdf-tools-group { position: relative; }
+.sidebar-collapsed .pdf-tools-subnav { position: absolute; top: 0; left: calc(100% + 10px); width: 240px; margin: 0; padding: 8px; background: #fff; border: 1px solid #dcebed; border-radius: 13px; box-shadow: 0 15px 34px rgba(28, 52, 72, .16); z-index: 30; }
+.sidebar-collapsed .pdf-tools-subnav .nav-copy { display: flex; }
+.sidebar-collapsed .pdf-tools-subnav .active-dot { display: inline-block; }
+.sidebar-collapsed .pdf-tools-subnav .pdf-tool-child { justify-content: initial; padding-inline: 10px; }
 .nav-icon { width: 35px; height: 35px; display: grid; place-items: center; flex: 0 0 35px; border-radius: 10px; background: #f2f5f8; color: #8395aa; }
 .active .nav-icon { color: #158e95; background: #d9f3f1; }
 .nav-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -518,7 +524,6 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 /* Comfortable reading scale for the main interface. */
 .sidebar { width: 300px; flex-basis: 300px; padding-top: 31px; }
 .sidebar-collapsed .sidebar { width: 92px; flex-basis: 92px; }
-.sidebar-collapsed .pdf-tools-subnav { display: none; }
 .brand-copy { font-size: 18px; }
 .brand-mark { width: 34px; height: 34px; }
 .icon-button { width: 35px; height: 35px; }
@@ -637,6 +642,7 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .tool-nav-item.active { color: var(--navy); background: #153b42; border-color: #27626a; }
 [data-theme="dark"] .pdf-tools-chevron { color: #a9c0cb; background: #1d3244; border-color: #345366; }
 [data-theme="dark"] .pdf-tools-trigger:hover .pdf-tools-chevron, [data-theme="dark"] .pdf-tools-trigger.active .pdf-tools-chevron { color: #8fe0d8; background: #205763; border-color: #4c8a8f; }
+[data-theme="dark"] .sidebar-collapsed .pdf-tools-subnav { background: #132535; border-color: #345366; box-shadow: 0 15px 34px rgba(0, 0, 0, .34); }
 [data-theme="dark"] .nav-icon { color: #9ab0c0; background: #1d3244; }
 [data-theme="dark"] .active .nav-icon { color: #82e0d7; background: #1e5158; }
 [data-theme="dark"] .privacy-card, [data-theme="dark"] .capability-strip, [data-theme="dark"] .recovery-summary, [data-theme="dark"] .action-card { background: #132535; border-color: var(--line); }
@@ -760,7 +766,7 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 @media (max-width: 680px) {
   .sidebar { position: fixed; inset: 0 auto 0 0; width: 300px; height: 100dvh; max-height: 100dvh; flex-basis: 300px; transform: translateX(-105%); box-shadow: 18px 0 35px rgba(19, 41, 63, .13); transition: transform .23s ease; }
   .sidebar.mobile-open { transform: translateX(0); }
-  .sidebar-collapsed .sidebar { width: 300px; flex-basis: 300px; padding: 31px 20px 22px; }
+  .sidebar-collapsed .sidebar { width: 300px; flex-basis: 300px; padding: 31px 20px 22px; overflow: auto; }
   .sidebar-collapsed .brand-copy, .sidebar-collapsed .sidebar-label, .sidebar-collapsed .nav-copy, .sidebar-collapsed .active-dot, .sidebar-collapsed .privacy-card div, .sidebar-collapsed .version-label { display: initial; }
   .sidebar-collapsed .brand-copy { display: flex; }
   .sidebar-collapsed .sidebar-label, .sidebar-collapsed .privacy-card div, .sidebar-collapsed .version-label { display: block; }
@@ -770,6 +776,8 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
   .sidebar-collapsed .brand-lockup { position: static; }
   .sidebar-collapsed .sidebar-collapse { display: grid; position: static; width: 35px; height: 35px; margin-left: auto; }
   .sidebar-collapsed .tool-nav-item { justify-content: initial; padding-inline: 13px; }
+  .sidebar-collapsed .pdf-tools-group { position: static; }
+  .sidebar-collapsed .pdf-tools-subnav { position: static; width: auto; margin-left: 18px; padding: 0 0 0 17px; background: transparent; border: 0; border-left: 1px solid #dcebed; border-radius: 0; box-shadow: none; }
   .mobile-scrim.visible { display: block; position: fixed; inset: 0; z-index: 19; background: rgba(16,32,52,.28); backdrop-filter: blur(2px); }
   .mobile-menu-button { display: grid; }
   .topbar { height: 72px; justify-content: flex-start; padding-inline: 18px; }

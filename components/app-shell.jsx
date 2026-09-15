@@ -127,7 +127,7 @@ export function AppShell({ children }) {
           </Link>;
         })}
         <div className="pdf-tools-group">
-          <button type="button" className={`tool-nav-item pdf-tools-trigger ${pdfToolActive ? "active" : ""}`} aria-expanded={pdfToolsOpen} aria-controls="pdf-tools-subnav" onClick={() => setPdfToolsOpen((value) => !value)} title="PDF tools">
+          <button type="button" className={`tool-nav-item pdf-tools-trigger ${pdfToolActive ? "active" : ""}`} aria-expanded={pdfToolsOpen} aria-haspopup="true" aria-controls="pdf-tools-subnav" onClick={() => setPdfToolsOpen((value) => !value)} title="PDF tools">
             <span className="nav-icon"><FileText size={19} /></span>
             <span className="nav-copy"><span className="nav-label-row"><strong>PDF tools</strong></span><small>Edit, manage, and compress PDFs</small></span>
             <ChevronDown className="pdf-tools-chevron" size={18} aria-hidden="true" />
