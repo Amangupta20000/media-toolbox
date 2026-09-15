@@ -705,6 +705,8 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .topbar-title, [data-theme="dark"] .nav-copy strong, [data-theme="dark"] .card-heading h2, [data-theme="dark"] .action-copy h2, [data-theme="dark"] .job-card h2, [data-theme="dark"] .recovery-summary-heading { color: var(--navy); }
 [data-theme="dark"] .topbar-status, [data-theme="dark"] .page-heading p, [data-theme="dark"] .heading-note, [data-theme="dark"] .capability-strip, [data-theme="dark"] .limit-row, [data-theme="dark"] .info-note, [data-theme="dark"] .trust-row { color: #9db0c0; }
 [data-theme="dark"] .nav-copy small, [data-theme="dark"] .privacy-card span, [data-theme="dark"] .action-copy p, [data-theme="dark"] .job-message, [data-theme="dark"] .card-description, [data-theme="dark"] .recovery-summary, [data-theme="dark"] .recovery-table td { color: #a5b6c4; }
+[data-theme="dark"] .section-kicker { color: #8fe0d8; }
+[data-theme="dark"] .tool-nav-item { color: #aabccc; }
 [data-theme="dark"] .sidebar-label, [data-theme="dark"] .version-label, [data-theme="dark"] .job-id { color: #8095a7; }
 [data-theme="dark"] .topbar-brand-subtitle, [data-theme="dark"] .app-footer { color: #9db0c0; }
 [data-theme="dark"] .legal-document { color: #b3c3ce; }

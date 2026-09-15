@@ -37,6 +37,8 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(document, /name="theme-color"/);
   assert.match(document, /media-toolbox-theme/);
   assert.match(document, /document\.documentElement\.dataset\.theme/);
+  assert.match(styles, /\[data-theme="dark"\] \.section-kicker \{ color: #8fe0d8; \}/);
+  assert.match(styles, /\[data-theme="dark"\] \.tool-nav-item \{ color: #aabccc; \}/);
   assert.match(shell, /AppFooter/);
   assert.match(shell, /<Link href="\/" title="Home">Home<\/Link>/);
   assert.match(shell, /<Link href="\/" className="topbar-brand" aria-label="NativeMedia Agent home">/);
