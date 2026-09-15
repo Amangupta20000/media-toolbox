@@ -8,6 +8,7 @@ import { probeLocalAgent } from "./processing-client.js";
 import { AppFooter } from "./app-footer.jsx";
 import { FreeAccessModal } from "./free-access-modal.jsx";
 import { metadataForPathname, normalizeSitePath, PRODUCT_TAGLINE } from "../lib/site-metadata.js";
+import { formatAccessDuration } from "../lib/access-duration.js";
 
 const navigation = [
   { href: "/local-agent", label: "Local agent", detail: "Process files on this device", icon: Bot },
@@ -54,10 +55,7 @@ function accessTimerFor(authorization, now, trialAvailable = false) {
       : Math.max(0, Number(authorization.remainingMs || 0));
     if (!remainingMs) return { label: authorization.mode === "trial" ? "Trial" : "Access", value: "Expired", state: "expired" };
 
-    const totalSeconds = Math.ceil(remainingMs / 1000);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = String(totalSeconds % 60).padStart(2, "0");
-    return { label: authorization.mode === "trial" ? "Trial" : "Access", value: `${minutes}:${seconds}`, state: authorization.mode };
+    return { label: authorization.mode === "trial" ? "Trial" : "Access", value: formatAccessDuration(remainingMs), state: authorization.mode };
   }
 
   if (authorization.legalAccepted && (authorization.trialAvailable || trialAvailable)) return { label: "Trial", value: "Ready", state: "available" };
