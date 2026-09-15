@@ -67,6 +67,7 @@ test("PDF text editor is exposed as a dedicated tool with history navigation", a
   assert.match(styles, /\.sidebar-menu-button \{[^}]*align-self: flex-end/);
   assert.match(styles, /\.sidebar-hidden \.sidebar \{[^}]*border-right-width: 0/);
   assert.match(styles, /\.sidebar-hidden \.topbar-menu-button \{[^}]*display: grid/);
+  assert.match(styles, /\.pdf-text-editor-shell \{[^}]*overflow: hidden/);
   assert.match(styles, /\.mobile-menu-open \.topbar-menu-button \{[^}]*display: none/);
   assert.match(styles, /\.app-shell \{ --sidebar-menu-left: 188px; \}/);
   assert.doesNotMatch(styles, /sidebar-collapsed|sidebar-collapse|collapsed-menu-button/);
@@ -119,10 +120,13 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(ocr, /fontSize: Math\.max\(1, \(word\.bbox\.y1 - word\.bbox\.y0\) \* pageUnitScale\)/);
   assert.doesNotMatch(shell, /pdf-text-edit-preview/);
   assert.match(shell, /Continue editing/);
-  assert.match(shell, /Keep final result on this device/);
+  assert.doesNotMatch(shell, /Keep final result on this device/);
+  assert.doesNotMatch(shell, /keepResultTouchedRef/);
+  assert.doesNotMatch(shell, /pdf-retention-info/);
+  assert.match(shell, /const effectiveKeepResult = processingMode === "local" && saveToDevice/);
+  assert.match(shell, /className="pdf-retention-name"/);
   assert.match(shell, /Saved PDF name/);
   assert.match(shell, /Save to device/);
-  assert.match(shell, /Exported PDFs are temporary unless you choose Save to device/);
   assert.match(shell, /form\.append\("filename"/);
   assert.match(intake, /outputFilename/);
   assert.match(worker, /safePdfOutputFilename\(options\.outputFilename/);

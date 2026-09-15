@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Bold, CheckCircle2, Copy, Download, FilePlus2, FileText, GripVertical, ImagePlus, Info, Italic, LoaderCircle, Lock, MoreHorizontal, Plus, Printer, Redo2, RotateCcw, RotateCw, Save, Trash2, Type, Underline, Undo2, Unlock, UploadCloud, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertTriangle, Bold, CheckCircle2, Copy, Download, FilePlus2, FileText, GripVertical, ImagePlus, Italic, LoaderCircle, Lock, MoreHorizontal, Plus, Printer, Redo2, RotateCcw, RotateCw, Save, Trash2, Type, Underline, Undo2, Unlock, UploadCloud, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
 import { formatBytes } from "./file-dropzone.jsx";
@@ -712,7 +712,6 @@ export function PdfEditor() {
   const [locations, setLocations] = useState(null);
   const [processingMode, setProcessingMode] = useState("local");
   const [jobMode, setJobMode] = useState("local");
-  const [keepResult, setKeepResult] = useState(false);
   const [jobKeepResult, setJobKeepResult] = useState(false);
   const [resultFilenameStem, setResultFilenameStem] = useState("");
   const [previewZoom, setPreviewZoom] = useState(1);
@@ -737,7 +736,6 @@ export function PdfEditor() {
   const pdfLibraryPromiseRef = useRef(null);
   const historyEditLoadedRef = useRef(false);
   const moreToolsRef = useRef(null);
-  const keepResultTouchedRef = useRef(false);
   const resultFilenameTouchedRef = useRef(false);
   const pagesRef = useRef([]);
   const pdfFilesRef = useRef([]);
@@ -762,11 +760,6 @@ export function PdfEditor() {
   }, []);
 
   useEffect(() => { probeProcessingLocations().then(setLocations).catch(() => undefined); }, []);
-
-  useEffect(() => {
-    if (!locations || keepResultTouchedRef.current) return;
-    setKeepResult(Boolean(locations.local?.connected));
-  }, [locations]);
 
   // Saving to the device is a background persistence action. It still uses
   // the local worker to produce the PDF, but it must not replace the editor
@@ -1572,7 +1565,7 @@ export function PdfEditor() {
       return;
     }
     form.append("operations", JSON.stringify(operations));
-    const effectiveKeepResult = processingMode === "local" && (keepResult || saveToDevice);
+    const effectiveKeepResult = processingMode === "local" && saveToDevice;
     form.append("filename", downloadFilename(resultFilenameStem || filenameStem(defaultResultFilename), defaultResultFilename));
     if (processingMode === "local") form.append("retention", effectiveKeepResult ? "keep" : "delete");
     try {
@@ -1692,8 +1685,8 @@ export function PdfEditor() {
       </div>
       <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { addPdfFiles(event.target.files); event.target.value = ""; }} />
       <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/heic,image/heif,image/tiff,image/gif,image/bmp,.png,.jpg,.jpeg,.heic,.heif,.tif,.tiff,.gif,.bmp" multiple hidden onChange={(event) => { const targetPageId = imageTargetPageIdRef.current; imageTargetPageIdRef.current = null; addImages(event.target.files, targetPageId || undefined); event.target.value = ""; }} />
-      <div className={`pdf-retention-row ${processingMode !== "local" ? "pdf-retention-row-tools-only" : ""}`}>
-        {processingMode === "local" && <><label className="keep-result-check pdf-retention-check"><input type="checkbox" checked={keepResult} onChange={(event) => { keepResultTouchedRef.current = true; setKeepResult(event.target.checked); }} /><span>Keep final result on this device</span></label><div className="pdf-retention-info-control"><button className="pdf-retention-info" type="button" aria-label="Show result retention details" aria-describedby="pdf-retention-info-copy" title="Show result retention details"><Info size={15} /></button><div id="pdf-retention-info-copy" className="pdf-retention-info-popover" role="tooltip"><strong>Result retention</strong><span>{keepResult ? "The completed PDF is kept in the Local agent Results folder until you remove it." : "The completed PDF is temporary and is cleaned up after download. Select this option to keep it on this device."}</span></div></div><div className="pdf-retention-name"><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem || filenameStem(defaultResultFilename)} label="Saved PDF name" description="This name is used for the export and, when retained, for PDF editor History in the Results folder." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(filenameStem(value)); }} /></div></>}
+      <div className="pdf-retention-row">
+        {processingMode === "local" && <div className="pdf-retention-name"><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem || filenameStem(defaultResultFilename)} label="Saved PDF name" description="This name is used for the export and, when retained, for PDF editor History in the Results folder." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(filenameStem(value)); }} /></div>}
         {processingMode === "local" && <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles || Boolean(saveJob)} title="Save the current PDF to the Local agent Results folder without leaving the editor"><Save size={17} /> {saveJob ? "Saving…" : "Save to device"}</button>}
       </div>
       {!pdfFiles.length && !pages.length ? <PdfEmptyState onBrowse={() => pdfInputRef.current?.click()} onBlank={addBlankPage} loading={loadingFiles} dragActive={pdfDragActive} /> : !pages.length ? <PdfNoPagesState onBrowse={() => pdfInputRef.current?.click()} onBlank={addBlankPage} /> : <div className="pdf-editor-layout">

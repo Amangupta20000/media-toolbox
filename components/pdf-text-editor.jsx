@@ -997,7 +997,6 @@ export function PdfTextEditor() {
   const [jobMode, setJobMode] = useState("local");
   const [locations, setLocations] = useState(null);
   const [capabilities, setCapabilities] = useState(null);
-  const [keepResult, setKeepResult] = useState(false);
   const [jobKeepResult, setJobKeepResult] = useState(false);
   const [resultFilenameStem, setResultFilenameStem] = useState("");
   const [previewZoom, setPreviewZoom] = useState(1);
@@ -1018,7 +1017,6 @@ export function PdfTextEditor() {
   const historyEditLoadedRef = useRef(false);
   const sourceBytesRef = useRef(null);
   const sourcePasswordRef = useRef("");
-  const keepResultTouchedRef = useRef(false);
   const resultFilenameTouchedRef = useRef(false);
 
   const syncTextEditorState = (next) => {
@@ -1077,10 +1075,6 @@ export function PdfTextEditor() {
 
   useEffect(() => { loadPdfLibrary().then(setPdfLibrary).catch(() => setError("PDF preview support could not be loaded. Refresh and try again.")); }, []);
   useEffect(() => { probeProcessingLocations().then((value) => { setLocations(value); const preferred = "local"; setProcessingMode(preferred); setCapabilities(processingCapabilities(value, preferred)); }).catch(() => undefined); }, []);
-  useEffect(() => {
-    if (!locations || keepResultTouchedRef.current) return;
-    setKeepResult(Boolean(locations.local?.connected));
-  }, [locations]);
   const defaultResultFilename = useMemo(() => source?.name ? `${filenameStem(source.name)}_edited.pdf` : "edited.pdf", [source?.name]);
   useEffect(() => {
     if (!resultFilenameTouchedRef.current) setResultFilenameStem(filenameStem(defaultResultFilename));
@@ -1378,7 +1372,6 @@ export function PdfTextEditor() {
   const reset = () => {
     previewRequestRef.current += 1;
     if (job && ["queued", "processing"].includes(job.status)) deleteProcessingJob(jobMode, job.id).catch(() => undefined);
-    keepResultTouchedRef.current = false;
     resultFilenameTouchedRef.current = false;
     setPendingOcrFile(null); setOcrMode(null); setSource(null); setSourceHash(""); setPages([]); clearTextEditorHistory(); setSelectedRun(null); setJob(null); setJobKeepResult(false); setResultFilenameStem(""); setError(""); setUploadProgress(0); setPreviewUpdating(false); setCheckingLocation(false); sourceBytesRef.current = null; sourcePasswordRef.current = "";
   };
@@ -1419,7 +1412,7 @@ export function PdfTextEditor() {
       const origin = textOrigin(model, run, pdfLibrary);
       editPayload.push({ pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), runId: run.runId, originalText: run.text || run.originalText, originalTextHash: run.originalTextHash, ...(moveOnly ? { moveOnly: true } : { replacementText: replacementText ?? run.text }), ...(format ? { format } : {}), ...(run.item?.width ? { boxWidth: Number(run.item.width) } : {}), mode: run.mode || "native", offsetX: offset.x, offsetY: offset.y, scale: transform.scale, scaleX: transform.scaleX, scaleY: transform.scaleY, rotation: transform.rotation, ...(origin ? { originX: origin.x, originY: origin.y } : {}), ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) });
     }
-    const effectiveKeepResult = processingMode === "local" && (keepResult || saveToDevice);
+    const effectiveKeepResult = processingMode === "local" && saveToDevice;
     const form = new FormData();
     form.append("tool", "pdf-text-editor"); form.append("source", source, source.name); form.append("sourceHash", sourceHash); form.append("edits", JSON.stringify(editPayload)); form.append("filename", downloadFilename(resultFilenameStem || filenameStem(defaultResultFilename), defaultResultFilename)); if (processingMode === "local") form.append("retention", effectiveKeepResult ? "keep" : "delete");
     try { setUploadProgress(1); const response = await uploadWithProgress(form, processingMode, setUploadProgress); setUploadProgress(0); const id = response.jobId || response.jobIds?.[0]; setJobMode(processingMode); setJobKeepResult(effectiveKeepResult); setJob({ id, status: "queued", progress: 0, stage: "Queued", message: effectiveKeepResult ? "Waiting for the worker. The completed PDF will be saved to this device." : "Waiting for the worker.", logs: [], warnings: [], error: null, result: null }); } catch (submitError) { setUploadProgress(0); setError(submitError instanceof Error ? submitError.message : "The PDF text edit could not be submitted."); }
@@ -1483,7 +1476,7 @@ export function PdfTextEditor() {
                     {processingMode === "local" && <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!canSubmit} title="Process the PDF and keep it in the Local agent Results folder"><Save size={17} /> Save to device</button>}
                   </div>
                 </div>
-                {processingMode === "local" && <div className="pdf-retention-row pdf-text-retention-row"><label className="keep-result-check pdf-retention-check"><input type="checkbox" checked={keepResult} onChange={(event) => { keepResultTouchedRef.current = true; setKeepResult(event.target.checked); }} /><span>Keep final result on this device</span></label><span className="pdf-retention-status" aria-live="polite">{keepResult ? "The completed PDF will be saved to the Local agent Results folder." : "Exported PDFs are temporary unless you choose Save to device."}</span><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem || filenameStem(defaultResultFilename)} label="Saved PDF name" description="This name is used for export and for PDF text editor History when the result is retained." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(filenameStem(value)); }} /></div>}
+                {processingMode === "local" && <div className="pdf-retention-row pdf-text-retention-row"><div className="pdf-retention-name"><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem || filenameStem(defaultResultFilename)} label="Saved PDF name" description="This name is used for export and for PDF text editor History when the result is retained." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(filenameStem(value)); }} /></div></div>}
                 {ocrDetected && <DismissibleMessage className="pdf-text-ocr-notice" resetKey={`${nativePages}-${ocrPageScope}`}><AlertTriangle size={17} /><div><strong>{nativePages ? "Mixed text mode" : "OCR mode"}</strong><span>{nativePages ? `${ocrPageScope}. The other ${nativePages} page${nativePages === 1 ? " stays" : "s stay"} on the original selectable text path.` : "OCR is used because the PDF does not expose a usable visible text layer or its text is hidden behind page artwork. OCR regions are reconstructed visually with an approximate font; exact original font, opacity, and hidden pixels cannot be recovered."}</span></div></DismissibleMessage>}
                 <div className="pdf-text-editor-layout">
                   <VirtualizedPdfTextRail pages={pages} onSelect={scrollToPage} />
