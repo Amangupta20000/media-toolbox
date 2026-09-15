@@ -73,7 +73,7 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --draft \
-              --title "Media Toolbox Agent $GITHUB_REF_NAME" \
+              --title "NativeMedia Agent $GITHUB_REF_NAME" \
               --notes "$release_notes" \
               --generate-notes
           fi
@@ -242,9 +242,10 @@ jobs:
       - name: Package signed agent runtime update
         env:
           AGENT_RUNTIME_UPDATE_PRIVATE_KEY: ${{ secrets.AGENT_RUNTIME_UPDATE_PRIVATE_KEY }}
-          # This workflow publishes a full installer release. Runtime-only
-          # payloads must not advertise a desktop update for these tags.
-          AGENT_UPDATE_TYPE: full
+          # Keep the signed runtime manifest aligned with the release kind.
+          # Set AGENT_UPDATE_TYPE=full for Electron/app changes; use runtime
+          # only when the installed desktop app itself does not need updating.
+          AGENT_UPDATE_TYPE: ${{ vars.AGENT_UPDATE_TYPE || 'runtime' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -289,7 +290,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !startsWith(github.ref, 'refs/tags/agent-v') }}
         with:
-          name: media-toolbox-agent-${{ matrix.artifact }}
+          name: nativemedia-agent-${{ matrix.artifact }}
           path: upload/*
           if-no-files-found: error
 

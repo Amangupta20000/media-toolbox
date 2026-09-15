@@ -33,7 +33,7 @@ test("HTTPS website does not fall back to an HTTP agent endpoint", () => {
 test("secure Windows/Linux pages discover HTTP loopback while macOS stays HTTPS-only", () => {
   const originalWindow = globalThis.window;
   const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
-  globalThis.window = { location: { protocol: "https:", origin: "https://media-toolbox-woad.vercel.app" } };
+  globalThis.window = { location: { protocol: "https:", origin: "https://native-media-agent.vercel.app" } };
   try {
     Object.defineProperty(globalThis, "navigator", { value: { platform: "Win32" }, configurable: true, writable: true });
     assert.deepEqual(agentBaseCandidates({ secure: true, configured: "http://127.0.0.1:4789", remembered: "" }), [
@@ -60,7 +60,7 @@ test("secure Windows/Linux pages discover HTTP loopback while macOS stays HTTPS-
 test("secure Windows pages discard a remembered HTTPS loopback endpoint", () => {
   const originalWindow = globalThis.window;
   const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
-  globalThis.window = { location: { protocol: "https:", origin: "https://media-toolbox-woad.vercel.app" } };
+  globalThis.window = { location: { protocol: "https:", origin: "https://native-media-agent.vercel.app" } };
   try {
     Object.defineProperty(globalThis, "navigator", { value: { platform: "Win32" }, configurable: true, writable: true });
     assert.deepEqual(agentBaseCandidates({ secure: true, configured: "http://127.0.0.1:4789", remembered: "https://127.0.0.1:4789" }), [
@@ -77,7 +77,7 @@ test("secure Windows pages expose only the HTTP loopback URL to direct callers",
   const originalWindow = globalThis.window;
   const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
   globalThis.window = {
-    location: { protocol: "https:", origin: "https://media-toolbox-woad.vercel.app" },
+    location: { protocol: "https:", origin: "https://native-media-agent.vercel.app" },
     localStorage: { getItem: () => "https://127.0.0.1:4789" },
   };
   try {
@@ -93,7 +93,7 @@ test("secure Windows pages expose only the HTTP loopback URL to direct callers",
 test("secure Windows pages use HTTP when the browser only exposes a user agent", () => {
   const originalWindow = globalThis.window;
   const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
-  globalThis.window = { location: { protocol: "https:", origin: "https://media-toolbox-woad.vercel.app" } };
+  globalThis.window = { location: { protocol: "https:", origin: "https://native-media-agent.vercel.app" } };
   try {
     Object.defineProperty(globalThis, "navigator", { value: { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36" }, configurable: true, writable: true });
     assert.deepEqual(agentBaseCandidates({ secure: true, configured: "http://127.0.0.1:4789", remembered: "https://127.0.0.1:4789" }), [
@@ -109,7 +109,7 @@ test("secure Windows pages use HTTP when the browser only exposes a user agent",
 test("secure Windows pages prefer an explicit Windows user agent over a conflicting platform hint", () => {
   const originalWindow = globalThis.window;
   const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
-  globalThis.window = { location: { protocol: "https:", origin: "https://media-toolbox-woad.vercel.app" } };
+  globalThis.window = { location: { protocol: "https:", origin: "https://native-media-agent.vercel.app" } };
   try {
     Object.defineProperty(globalThis, "navigator", { value: { userAgentData: { platform: "macOS" }, platform: "MacIntel", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edg/140.0.0.0" }, configurable: true, writable: true });
     assert.deepEqual(agentBaseCandidates({ secure: true, configured: "http://127.0.0.1:4789", remembered: "https://127.0.0.1:4789" }), [

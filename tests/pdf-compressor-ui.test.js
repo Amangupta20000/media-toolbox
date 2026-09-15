@@ -5,7 +5,7 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 const read = (file) => fs.readFile(new URL(file, root), "utf8");
 
-test("PDF compressor is registered as a beta tool and keeps signatures planned", async () => {
+test("PDF compressor is available and is not listed as coming soon", async () => {
   const navigation = await read("components/app-shell.jsx");
   const comingSoon = await read("pages/coming-soon.jsx");
   const route = await read("pages/pdf-compressor.jsx");
@@ -14,8 +14,9 @@ test("PDF compressor is registered as a beta tool and keeps signatures planned",
   const intake = await read("lib/job-intake.js");
   const worker = await read("worker/index.js");
   assert.match(history, /tool !== "pdf-compressor" && <button className="secondary-button" type="button" onClick=\{onEdit\}/);
-  assert.match(navigation, /href: "\/pdf-compressor"[^\n]+beta: true/);
-  assert.match(comingSoon, /\["PDF compressor"[^\n]+"Beta", "\/pdf-compressor"\]/);
+  assert.match(navigation, /href: "\/pdf-compressor"[^\n]+icon: Archive \}/);
+  assert.doesNotMatch(navigation, /href: "\/pdf-compressor"[^\n]+beta: true/);
+  assert.doesNotMatch(comingSoon, /\["PDF compressor"/);
   assert.match(comingSoon, /\["Sign images & PDFs"[^\n]+PenLine\]/);
   assert.match(route, /ToolPage tool="pdf-compressor"/);
   assert.match(toolPage, /pdf-custom-quality/);

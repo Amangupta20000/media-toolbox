@@ -5,6 +5,18 @@ const releaseDirectory = path.resolve(process.argv[2] || ".agent-build/release")
 const entries = await fs.readdir(releaseDirectory);
 
 function normalizedName(name) {
+  if (name.startsWith("NativeMedia.Agent.Setup.")) {
+    return `NativeMedia-Agent-Setup-${name.slice("NativeMedia.Agent.Setup.".length)}`;
+  }
+  if (name.startsWith("NativeMedia Agent Setup ")) {
+    return `NativeMedia-Agent-Setup-${name.slice("NativeMedia Agent Setup ".length)}`;
+  }
+  if (name.startsWith("NativeMedia.Agent-")) {
+    return `NativeMedia-Agent-${name.slice("NativeMedia.Agent-".length)}`;
+  }
+  if (name.startsWith("NativeMedia Agent-")) {
+    return `NativeMedia-Agent-${name.slice("NativeMedia Agent-".length)}`;
+  }
   if (name.startsWith("Media.Toolbox.Agent.Setup.")) {
     return `Media-Toolbox-Agent-Setup-${name.slice("Media.Toolbox.Agent.Setup.".length)}`;
   }
@@ -42,6 +54,8 @@ for (const name of entries.filter((entry) => /^latest.*\.yml$/.test(entry))) {
   const manifestPath = path.join(releaseDirectory, name);
   const content = await fs.readFile(manifestPath, "utf8");
   const normalizedContent = content
+    .replaceAll("NativeMedia.Agent.Setup.", "NativeMedia-Agent-Setup-")
+    .replaceAll("NativeMedia.Agent-", "NativeMedia-Agent-")
     .replaceAll("Media.Toolbox.Agent.Setup.", "Media-Toolbox-Agent-Setup-")
     .replaceAll("Media.Toolbox.Agent-", "Media-Toolbox-Agent-");
   if (normalizedContent !== content) {

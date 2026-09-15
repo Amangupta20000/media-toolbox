@@ -24,7 +24,7 @@ export const licenseConfig = {
   port: Number(process.env.LICENSE_SERVER_PORT) || 4900,
   dataDir: path.resolve(process.env.LICENSE_DATA_DIR || (process.platform === "darwin" ? DEFAULT_SSD_DIRECTORY : path.join(process.cwd(), "license-data"))),
   volumeUuid: String(process.env.LICENSE_VOLUME_UUID || DEFAULT_VOLUME_UUID).trim().toUpperCase(),
-  publicOrigins: listOrigins(process.env.LICENSE_PUBLIC_ORIGINS || "https://media-toolbox-woad.vercel.app,http://localhost:3000,http://127.0.0.1:3000"),
+  publicOrigins: listOrigins(process.env.LICENSE_PUBLIC_ORIGINS || "https://native-media-agent.vercel.app,http://localhost:3000,http://127.0.0.1:3000"),
   adminUsername: process.env.LICENSE_ADMIN_USERNAME || "Admin",
   adminPassword: process.env.LICENSE_ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD,
   adminSessionTtlMs: 8 * 60 * 60 * 1000,

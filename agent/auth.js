@@ -7,6 +7,7 @@ import { config, paths } from "../lib/config.js";
 import { createAgentAuth, getAgentAuth, hasUsedAgentLicense, recordUsedAgentLicense, updateAgentAuth } from "../lib/db.js";
 import { activationDurationOptions, isAllowedActivationDuration, verifyLicenseToken } from "./token.js";
 import { DEFAULT_LICENSE_PROXY_URL } from "./license-proxy.cjs";
+import { FREE_ACCESS_CODE, FREE_ACCESS_DURATION_MS } from "../lib/free-access.js";
 
 export const ADMIN_USERNAME = "Admin";
 export const ADMIN_PASSWORD = "Aman";
@@ -23,7 +24,7 @@ export const ACTIVATION_SESSION_TIME_FACTOR = 2 / 3;
 export const LEGAL_VERSION = "1.0.0";
 
 const DEFAULT_ORIGINS = [
-  "https://media-toolbox-woad.vercel.app",
+  "https://native-media-agent.vercel.app",
   "http://localhost:3000",
   "http://127.0.0.1:3000",
 ];
@@ -99,6 +100,11 @@ export function defaultTrustedOrigins() {
 
 function normalizeOrigins(values) {
   return [...new Set((Array.isArray(values) ? values : []).map(normalizeOrigin).filter(Boolean))];
+}
+
+function isSupportedLicenseDuration(payload) {
+  return isAllowedActivationDuration(payload?.durationMs)
+    || (payload?.promoCode === FREE_ACCESS_CODE && Number(payload?.durationMs) === FREE_ACCESS_DURATION_MS);
 }
 
 function publicKeyCandidates() {
@@ -398,10 +404,11 @@ function activateVerifiedPayload(payload, code, record, now) {
   // device binding prevents the same signed code being copied elsewhere.
   if (typeof payload.deviceId !== "string" || !payload.deviceId.trim()) throw new Error("This activation code is not bound to a device.");
   if (payload.deviceId !== record.device_id) throw new Error("This activation code belongs to a different device.");
-  if (!isAllowedActivationDuration(payload.durationMs)) throw new Error("This activation code contains an unsupported duration.");
+  if (!isSupportedLicenseDuration(payload)) throw new Error("This activation code contains an unsupported duration.");
   if (!Array.isArray(payload.origins) || !normalizeOrigins(payload.origins).length) throw new Error("The activation code has no valid trusted website origins.");
   if (hasUsedAgentLicense(payload.licenseId) || record.activation_id === payload.licenseId) throw new Error("This activation code has already been used.");
   if (payload.issuedAt && Number(payload.issuedAt) > now + 5 * 60 * 1000) throw new Error("This activation code is not valid yet.");
+  if (payload.promoCode === FREE_ACCESS_CODE && (!Number.isFinite(Number(payload.redemptionExpiresAt)) || Number(payload.redemptionExpiresAt) <= now)) throw new Error(`${FREE_ACCESS_CODE} is no longer active.`);
   const origins = normalizeOrigins(payload.origins);
   const codeHash = createHash("sha256").update(String(code).replace(/\s+/g, "")).digest("hex");
   recordUsedAgentLicense(payload.licenseId, now);
@@ -500,7 +507,7 @@ async function onlineLicenseFetch(pathname, options = {}) {
 
 function requestOrigin(value) {
   const origin = normalizeOrigin(value);
-  if (!origin) throw new Error("Enter a valid website origin, such as https://media-toolbox-woad.vercel.app.");
+  if (!origin) throw new Error("Enter a valid website origin, such as https://native-media-agent.vercel.app.");
   return origin;
 }
 
@@ -548,7 +555,7 @@ export async function activateOnline(code, now = Date.now()) {
     const publicKey = readPublicKey();
     if (!publicKey) throw new Error("Activation is not configured on this agent. The owner must embed the license public key before packaging.");
     const payload = verifyLicenseToken(body.token, publicKey);
-    if (!isAllowedActivationDuration(payload.durationMs)) throw new Error("The licensing server returned an invalid activation duration.");
+    if (!isSupportedLicenseDuration(payload)) throw new Error("The licensing server returned an invalid activation duration.");
     if (payload.deviceId !== record.device_id) throw new Error("The licensing server returned a token for a different device.");
     return activateVerifiedPayload(payload, body.token, record, now);
   } catch (error) {

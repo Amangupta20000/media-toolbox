@@ -6,6 +6,8 @@ const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, shell, Tray }
 const { autoUpdater } = require("electron-updater");
 const { createLicenseServerManager, findNode22Executable } = require("./license-server-manager.cjs");
 const { compareVersions, createRuntimeUpdater, readInstalledRuntime } = require("./runtime-update.cjs");
+const PRODUCT_NAME = "NativeMedia Agent";
+const PRODUCT_TAGLINE = "Your browser interface. Your computer does the work.";
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -19,7 +21,7 @@ if (!app.requestSingleInstanceLock()) {
   let runtimeUpdater;
   let installedRuntimeDirectory = "";
   const latestReleaseUrl = "https://github.com/Amangupta20000/media-toolbox/releases/latest";
-  const websiteHomeUrl = "https://media-toolbox-woad.vercel.app/";
+  const websiteHomeUrl = "https://native-media-agent.vercel.app/";
   const updateState = {
     kind: "electron",
     platform: process.platform,
@@ -169,7 +171,7 @@ if (!app.requestSingleInstanceLock()) {
       autoHideMenuBar: false,
       skipTaskbar: false,
       show: false,
-      title: "Media Toolbox Agent",
+      title: PRODUCT_NAME,
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
@@ -428,7 +430,7 @@ if (!app.requestSingleInstanceLock()) {
       maxHeight: 285,
       resizable: false,
       show: false,
-      title: "Media Toolbox pairing code",
+      title: `${PRODUCT_NAME} pairing code`,
       webPreferences: { contextIsolation: true, sandbox: true },
     });
     pairingWindow.on("closed", () => {
@@ -436,7 +438,7 @@ if (!app.requestSingleInstanceLock()) {
       pairingWatch = null;
       pairingWindow = null;
     });
-    const page = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:28px;background:#102b3b;color:#e6f3f5;font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:center}h1{margin:0 0 10px;font-size:21px}p{margin:0;color:#a8c0c9;line-height:1.45}code{display:block;margin:22px 0;padding:13px 10px;background:#0a1d29;border:1px solid #2aaeb2;border-radius:10px;color:#72e2df;font:700 34px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.18em}small{color:#94aeb8;display:block;line-height:1.4}</style></head><body><h1>Pair this browser</h1><p>Enter this code on the Media Toolbox website.</p><code>${code}</code><small>This temporary window closes after the browser connects.<br>The agent keeps running in the background.</small></body></html>`;
+    const page = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:28px;background:#102b3b;color:#e6f3f5;font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:center}h1{margin:0 0 10px;font-size:21px}p{margin:0;color:#a8c0c9;line-height:1.45}code{display:block;margin:22px 0;padding:13px 10px;background:#0a1d29;border:1px solid #2aaeb2;border-radius:10px;color:#72e2df;font:700 34px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.18em}small{color:#94aeb8;display:block;line-height:1.4}</style></head><body><h1>Pair this browser</h1><p>Enter this code on the ${PRODUCT_NAME} website.</p><code>${code}</code><small>${PRODUCT_TAGLINE}<br>This temporary window closes after the browser connects.</small></body></html>`;
     pairingWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(page)}`);
     pairingWindow.once("ready-to-show", () => {
       pairingWindow.show();
@@ -456,7 +458,7 @@ if (!app.requestSingleInstanceLock()) {
 
   async function start() {
     loadLocalEnvironment();
-    app.setName?.("Media Toolbox Agent");
+    app.setName?.(PRODUCT_NAME);
     // Use Chromium's trusted network stack for all licensing requests in the
     // desktop process. This also keeps an older verified runtime compatible
     // if it does not yet expose the explicit auth fetch adapter below.
@@ -539,7 +541,7 @@ if (!app.requestSingleInstanceLock()) {
     const scheduledUpdateCheck = setInterval(() => checkForUpdates().catch(() => undefined), 6 * 60 * 60 * 1000);
     scheduledUpdateCheck.unref?.();
     tray = new Tray(require("electron").nativeImage.createEmpty());
-    tray.setToolTip("Media Toolbox local agent");
+    tray.setToolTip(`${PRODUCT_NAME} local agent`);
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: "Show pairing code", click: showPairingCode },
       { label: "Open agent dashboard & sessions", click: openDashboard },
@@ -563,14 +565,14 @@ if (!app.requestSingleInstanceLock()) {
   app.on("window-all-closed", (event) => event.preventDefault());
   app.on("second-instance", (_event, commandLine) => {
     if (commandLine.some((value) => String(value).includes("dashboard"))) openDashboard();
-    else tray?.displayBalloon?.({ title: "Media Toolbox", content: "The local agent is already running." });
+    else tray?.displayBalloon?.({ title: PRODUCT_NAME, content: "The local agent is already running." });
   });
   app.on("open-url", (event, url) => {
     event.preventDefault();
     if (String(url || "").includes("dashboard")) openDashboard();
     else showPairingCode();
   });
-  app.whenReady().then(start).catch((error) => { dialog.showErrorBox("Media Toolbox agent could not start", error.message); app.quit(); });
+  app.whenReady().then(start).catch((error) => { dialog.showErrorBox(`${PRODUCT_NAME} could not start`, error.message); app.quit(); });
   app.on("before-quit", async (event) => {
     if (!agent?.stopAgentServer && !licenseServerManager?.stop) return;
     event.preventDefault();

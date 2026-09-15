@@ -18,7 +18,7 @@ const TAILSCALE_PROCESS_NAME = "Tailscale";
 const TAILSCALE_PGREP_PATH = "/usr/bin/pgrep";
 const TAILSCALE_OPEN_PATH = "/usr/bin/open";
 const DEFAULT_SQLITE_EXECUTABLE = process.platform === "darwin" ? "/usr/bin/sqlite3" : "sqlite3";
-const DEFAULT_LICENSE_PROXY_URL = "https://media-toolbox-woad.vercel.app/api/license";
+const DEFAULT_LICENSE_PROXY_URL = "https://native-media-agent.vercel.app/api/license";
 
 function isAlive(child) {
   return Boolean(child && child.exitCode === null && !child.killed);

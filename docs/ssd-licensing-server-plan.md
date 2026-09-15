@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Media Toolbox will use this Mac as a small, licensing-only service for users on the public internet. Media processing remains in the existing server or Local Agent; this service only creates, approves, and consumes one-time activation licenses with a requested duration of 10 minutes, 30 minutes, 2 hours, 6 hours, or 1 day.
+NativeMedia Agent will use this Mac as a small, licensing-only service for users on the public internet. Media processing remains in the Local Agent; this service only creates, approves, and consumes one-time activation licenses with a requested duration of 10 minutes, 30 minutes, 2 hours, 6 hours, or 1 day.
 
 The service listens on `127.0.0.1:4900` and is published with Tailscale Funnel using the Mac's stable `*.ts.net` hostname. It does not expose the SSD, the desktop, or shell commands.
 

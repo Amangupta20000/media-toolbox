@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { Archive, ArrowRight, Bot, Check, FileText, Film, Image as ImageIcon, ShieldCheck } from "lucide-react";
+import { Archive, ArrowRight, Check, FileText, Film, Image as ImageIcon, ShieldCheck } from "lucide-react";
 import { AppShell } from "../components/app-shell.jsx";
+import { PRODUCT_NAME, PRODUCT_TAGLINE } from "../lib/site-metadata.js";
 
 const toolDirectory = [
   { href: "/pdf-editor", label: "PDF editor", description: "Merge PDFs, arrange pages, and add images or text boxes.", icon: FileText, category: "PDF tools" },
@@ -8,11 +9,10 @@ const toolDirectory = [
   { href: "/pdf-compressor", label: "PDF compressor", description: "Shrink large PDFs with selectable quality and image settings.", icon: Archive, category: "PDF tools" },
   { href: "/image-converter", label: "Image converter", description: "Convert JPG, PNG, HEIC, TIFF, GIF, and BMP files.", icon: ImageIcon, category: "Media tools" },
   { href: "/video-repair", label: "Video repair", description: "Recover readable video files with layered repair methods.", icon: Film, category: "Media tools" },
-  { href: "/local-agent", label: "Local agent", description: "Process supported files on your own Mac, Windows, or Linux computer.", icon: Bot, category: "Private processing" },
 ];
 
 const principles = [
-  ["Choose where files run", "Use the browser where supported or the connected Local agent for on-device processing."],
+  ["Process files on your computer", "The connected NativeMedia Agent desktop app processes files locally on your Mac, Windows, or Linux computer."],
   ["Keep originals untouched", "Every conversion, repair, or PDF edit creates a new result instead of overwriting your source."],
   ["Understand retention", "Temporary Local agent data follows the agent cleanup rules, and local results are retained only when you choose."],
 ];
@@ -22,7 +22,7 @@ export default function HomePage() {
     <section className="home-hero" aria-labelledby="home-title">
       <div className="section-kicker"><span className="kicker-line" /> Private file tools</div>
       <h1 id="home-title">Private PDF and media tools for your desktop</h1>
-      <p>Convert images, repair videos, edit PDFs, and reduce document size with Media Toolbox. Connect the Local agent on macOS, Windows, or Linux to keep processing on your computer and your original files untouched.</p>
+      <p>Convert images, repair videos, edit PDFs, and reduce document size with {PRODUCT_NAME}. {PRODUCT_TAGLINE} Connect the agent on macOS, Windows, or Linux to keep processing on your computer and your original files untouched.</p>
       <div className="home-actions">
         <Link className="primary-button" href="/pdf-editor">Open PDF editor <ArrowRight size={17} /></Link>
         <Link className="secondary-button" href="/image-converter">Convert an image</Link>

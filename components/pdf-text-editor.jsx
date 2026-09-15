@@ -8,6 +8,7 @@ import { ProcessingMode } from "./processing-mode.jsx";
 import { ResultDownloadNote } from "./result-download-note.jsx";
 import { downloadFilename, downloadUrlWithFilename, filenameStem, ResultFilenameField } from "./result-filename.jsx";
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
+import { ToolSeoContent } from "./tool-seo-content.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
 import { deleteProcessingJob, getProcessingJob, inspectPdfWithOcr, isProcessingLocationReady, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 import { applyRasterTextEdits, inferRasterTextAppearance } from "../lib/pdf-ocr-raster.js";
@@ -1429,7 +1430,7 @@ export function PdfTextEditor() {
         <div className="heading-note"><ShieldCheck size={16} /><span>Only selected text operators change</span></div>
       </div>
       <ToolViewTabs value={activeView} onChange={setActiveView} />
-      {activeView === "history" ? <ToolHistory tool="pdf-text-editor" /> : (
+      {activeView === "history" ? <ToolHistory tool="pdf-text-editor" /> : activeView === "guide" ? <ToolSeoContent pathname="/pdf-text-editor" /> : (
         <>
           <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />
           <div className="capability-strip">

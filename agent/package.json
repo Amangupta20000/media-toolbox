@@ -1,12 +1,12 @@
 {
   "name": "media-toolbox-agent-runtime",
-  "version": "1.5.7",
+  "version": "1.5.8",
   "private": true,
-  "description": "Runtime and packaging dependencies for the Media Toolbox desktop agent.",
-  "homepage": "https://media-toolbox-woad.vercel.app",
+  "description": "Runtime and packaging dependencies for the NativeMedia Agent desktop app.",
+  "homepage": "https://native-media-agent.vercel.app",
   "author": {
-    "name": "Media Toolbox",
-    "email": "support@media-toolbox.app"
+    "name": "Aman Gupta",
+    "email": "a20000.gupta@gmail.com"
   },
   "type": "module",
   "main": "agent/electron-main.cjs",

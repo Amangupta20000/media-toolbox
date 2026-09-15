@@ -58,6 +58,12 @@ test("licensing server handles approval, online agent redemption, replay, and wr
     assert.equal(healthState.service, "media-toolbox-license-server");
     assert.deepEqual(healthState.database, { status: "healthy", healthy: true, error: "" });
 
+    const freeAccess = await fetch(`${base}/v1/free-access`, { headers: { Origin: "http://localhost:3000" } });
+    assert.equal(freeAccess.status, 200);
+    const freeAccessState = await freeAccess.json();
+    assert.equal(freeAccessState.active, true);
+    assert.equal(freeAccessState.codeExpiresAt - freeAccessState.redemptionExpiresAt, 30 * 24 * 60 * 60 * 1000);
+
     const preflight = await fetch(`${base}/v1/admin/login`, {
       method: "OPTIONS",
       headers: {
@@ -153,6 +159,73 @@ activateOnline(process.env.ACTIVATION_CODE).then(() => { console.log(JSON.string
     assert.ok(auditEvents.has("admin.logout"));
     const afterLogout = await fetch(`${base}/v1/admin/license-requests`, { headers: { Authorization: `Bearer ${admin.token}` } });
     assert.equal(afterLogout.status, 401);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    store.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("FreeForAll can be redeemed repeatedly for seven days during its launch window", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-free-access-test-"));
+  const keys = generateKeyPairSync("ed25519", { privateKeyEncoding: { type: "pkcs8", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" } });
+  const start = Date.now();
+  let now = start;
+  const serverConfig = {
+    host: "127.0.0.1",
+    port: 0,
+    dataDir: root,
+    publicOrigins: ["http://localhost:3000"],
+    adminUsername: "Admin",
+    adminPassword: "Aman",
+    maxBodyBytes: 32 * 1024,
+  };
+  const { LicenseService, createLicenseServer } = await import("../license-server/server.js");
+  const { LicenseStore } = await import("../license-server/store.js");
+  const { verifyLicenseToken } = await import("../lib/token.js");
+  const { FREE_ACCESS_CODE, FREE_ACCESS_CODE_LIFETIME_MS, FREE_ACCESS_DURATION_MS, FREE_ACCESS_ISSUED_AT_SETTING, FREE_ACCESS_REDEMPTION_WINDOW_MS } = await import("../lib/free-access.js");
+  const store = new LicenseStore(root);
+  const service = new LicenseService({ config: serverConfig, store, privateKey: keys.privateKey, now: () => now });
+  const server = await createLicenseServer({ service, cleanupIntervalMs: 0 });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const redeem = (deviceId) => fetch(`${base}/v1/licenses/redeem`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
+    body: JSON.stringify({ code: FREE_ACCESS_CODE, deviceId, origin: "http://localhost:3000" }),
+  });
+
+  try {
+    const firstResponse = await redeem("device-one");
+    assert.equal(firstResponse.status, 200);
+    const first = await firstResponse.json();
+    assert.equal(first.promoCode, FREE_ACCESS_CODE);
+    assert.equal(first.expiresAt - start, FREE_ACCESS_DURATION_MS);
+    const firstPayload = verifyLicenseToken(first.token, keys.publicKey);
+    assert.equal(firstPayload.deviceId, "device-one");
+    assert.equal(firstPayload.durationMs, FREE_ACCESS_DURATION_MS);
+    assert.equal(firstPayload.promoCode, FREE_ACCESS_CODE);
+    assert.equal(firstPayload.codeExpiresAt - firstPayload.issuedAt, FREE_ACCESS_CODE_LIFETIME_MS);
+    assert.equal(firstPayload.redemptionExpiresAt - firstPayload.issuedAt, FREE_ACCESS_REDEMPTION_WINDOW_MS);
+    assert.equal(Number(store.getSetting(FREE_ACCESS_ISSUED_AT_SETTING)), start);
+
+    const childScript = `import { acceptLegalConsent, activateOnline, getAuthorizationState } from "./agent/auth.js";
+acceptLegalConsent();
+activateOnline(process.env.ACTIVATION_CODE).then(() => { console.log(JSON.stringify(getAuthorizationState())); }).catch((error) => { console.error(error.message); process.exit(1); });`;
+    const child = await runAgentChild(childScript, { ...process.env, DATA_DIR: path.join(root, "agent-one"), MEDIA_TOOLBOX_DOWNLOADS_DIR: path.join(root, "Downloads"), AGENT_LICENSE_SERVER_URL: base, AGENT_LICENSE_PUBLIC_KEY: keys.publicKey, ACTIVATION_CODE: FREE_ACCESS_CODE });
+    assert.equal(child.status, 0, `${child.stdout}\n${child.stderr}`);
+    assert.match(child.stdout, /"mode":"activation"/);
+
+    now = start + 7 * 24 * 60 * 60 * 1000;
+    const secondResponse = await redeem("device-two");
+    assert.equal(secondResponse.status, 200);
+    const second = await secondResponse.json();
+    assert.notEqual(second.licenseId, first.licenseId);
+
+    now = start + FREE_ACCESS_REDEMPTION_WINDOW_MS + 1;
+    const expiredResponse = await redeem("device-three");
+    assert.equal(expiredResponse.status, 409);
+    assert.match((await expiredResponse.json()).error, /no longer active/i);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     store.close();

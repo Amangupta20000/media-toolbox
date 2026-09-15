@@ -178,7 +178,7 @@ async function createZip(directory, destination) {
 }
 
 await fs.mkdir(outputDirectory, { recursive: true });
-const fileName = `Media-Toolbox-Agent-Runtime-${version}-${platform}-${arch}.zip`;
+const fileName = `NativeMedia-Agent-Runtime-${version}-${platform}-${arch}.zip`;
 const archivePath = path.join(outputDirectory, fileName);
 const files = await createZip(runtimeDirectory, archivePath);
 const archive = await fs.readFile(archivePath);

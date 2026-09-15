@@ -90,6 +90,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`Media Toolbox Tailscale test mode failed: ${error.message}`);
+  console.error(`NativeMedia Agent Tailscale test mode failed: ${error.message}`);
   process.exitCode = 1;
 });

@@ -1,6 +1,6 @@
 import { startLicenseServer } from "./server.js";
 
 startLicenseServer().catch((error) => {
-  console.error("Media Toolbox licensing server failed to start:", error);
+  console.error("NativeMedia Agent licensing server failed to start:", error);
   process.exitCode = 1;
 });

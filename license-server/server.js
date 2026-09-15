@@ -5,6 +5,7 @@ import { DEFAULT_ADMIN_PASSWORD, licenseConfig } from "./config.js";
 import { createLicenseStore } from "./store.js";
 import { loadPrivateKey, publicKeyFor, encryptText, decryptText } from "./secrets.js";
 import { updateAgentLicenseServerVariable } from "./github.js";
+import { FREE_ACCESS_CODE, FREE_ACCESS_CODE_LIFETIME_MS, FREE_ACCESS_DURATION_MS, FREE_ACCESS_ISSUED_AT_SETTING, FREE_ACCESS_REDEMPTION_WINDOW_MS, isFreeAccessCode } from "../lib/free-access.js";
 
 const WINDOW_MS = 60 * 60 * 1000;
 
@@ -138,11 +139,27 @@ export class LicenseService {
     this.privateKey = privateKey;
     this.now = now;
     this.rate = new Map();
+    // Start the launch window when the licensing service is first initialized,
+    // not when the first visitor happens to redeem the public code.
+    this.freeAccessWindow();
   }
 
   async signingKey() {
     if (!this.privateKey) this.privateKey = await loadPrivateKey(this.config.dataDir);
     return this.privateKey;
+  }
+
+  freeAccessWindow() {
+    let issuedAt = Number(this.store.getSetting?.(FREE_ACCESS_ISSUED_AT_SETTING));
+    if (!Number.isFinite(issuedAt) || issuedAt <= 0) {
+      issuedAt = this.now();
+      this.store.setSetting?.(FREE_ACCESS_ISSUED_AT_SETTING, issuedAt);
+    }
+    return {
+      issuedAt,
+      codeExpiresAt: issuedAt + FREE_ACCESS_CODE_LIFETIME_MS,
+      redemptionExpiresAt: issuedAt + FREE_ACCESS_REDEMPTION_WINDOW_MS,
+    };
   }
 
   allowedOrigin(request, required = false) {
@@ -246,6 +263,30 @@ export class LicenseService {
     const code = String(body.code || "").trim();
     if (!deviceId || deviceId.length > 200 || !code) throw new Error("A device ID and activation code are required.");
     const privateKey = await this.signingKey();
+
+    if (isFreeAccessCode(code)) {
+      const now = this.now();
+      const window = this.freeAccessWindow();
+      if (window.codeExpiresAt <= now || window.redemptionExpiresAt <= now) throw new Error(`${FREE_ACCESS_CODE} is no longer active.`);
+      const origin = normalizeOrigin(body.origin || request.headers.origin || this.config.publicOrigins?.[0]);
+      if (!origin || !this.config.publicOrigins.includes(origin)) throw new Error("This activation code is not valid for this website origin.");
+      const licenseId = `freeforall-${randomUUID()}`;
+      const payload = {
+        v: 1,
+        licenseId,
+        origins: [...this.config.publicOrigins],
+        issuedAt: window.issuedAt,
+        durationMs: FREE_ACCESS_DURATION_MS,
+        promoCode: FREE_ACCESS_CODE,
+        codeExpiresAt: window.codeExpiresAt,
+        redemptionExpiresAt: window.redemptionExpiresAt,
+      };
+      const token = createSignedLicenseToken({ ...payload, deviceId, boundAt: now }, privateKey);
+      this.store.audit("license.redeemed", null, origin, { licenseId, promoCode: FREE_ACCESS_CODE, deviceId, unlimited: true, clientIp: clientIp(request), userAgent: clientUserAgent(request) }, now);
+      this.store.audit("device.activity", null, origin, { activity: "license.redeemed", licenseId, promoCode: FREE_ACCESS_CODE, deviceId, clientIp: clientIp(request), userAgent: clientUserAgent(request) }, now);
+      return { ok: true, token, licenseId, deviceId, origin, expiresAt: now + FREE_ACCESS_DURATION_MS, promoCode: FREE_ACCESS_CODE, redemptionExpiresAt: window.redemptionExpiresAt };
+    }
+
     const publicKey = publicKeyFor(privateKey);
     const payload = verifyLicenseToken(code, publicKey);
     if (payload.v !== 1 || typeof payload.licenseId !== "string" || !isAllowedActivationDuration(payload.durationMs) || !Array.isArray(payload.origins) || payload.deviceId) throw new Error("The activation code format is invalid.");
@@ -282,6 +323,15 @@ export class LicenseService {
           service: "media-toolbox-license-server",
           protocolVersion: 1,
           database,
+        }, origin);
+      }
+      if (url.pathname === "/v1/free-access" && request.method === "GET") {
+        const window = this.freeAccessWindow();
+        const now = this.now();
+        return json(response, 200, {
+          active: window.codeExpiresAt > now && window.redemptionExpiresAt > now,
+          codeExpiresAt: window.codeExpiresAt,
+          redemptionExpiresAt: window.redemptionExpiresAt,
         }, origin);
       }
       if (url.pathname === "/v1/license-requests" && request.method === "POST") return json(response, 201, await this.requestLicense(request, await readJson(request, this.config.maxBodyBytes)), origin);
@@ -347,7 +397,7 @@ export async function createLicenseServer(options = {}) {
   const cleanupIntervalMs = Number(options.cleanupIntervalMs ?? service.config.licenseRequestCleanupIntervalMs ?? 60 * 1000);
   if (cleanupIntervalMs > 0) {
     const cleanup = () => {
-      try { service.store.cleanup(service.now()); } catch (error) { console.error("Media Toolbox licensing request cleanup failed:", error); }
+      try { service.store.cleanup(service.now()); } catch (error) { console.error("NativeMedia Agent licensing request cleanup failed:", error); }
     };
     cleanup();
     const cleanupTimer = setInterval(cleanup, cleanupIntervalMs);
@@ -370,7 +420,7 @@ export async function startLicenseServer(options = {}) {
   });
   active = server;
   const address = server.address();
-  console.log(`Media Toolbox licensing server listening on http://${host}:${address.port}`);
+  console.log(`NativeMedia Agent licensing server listening on http://${host}:${address.port}`);
   return server;
 }
 

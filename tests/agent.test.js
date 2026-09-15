@@ -169,7 +169,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   const updateConfig = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "build", "app-update.yml"), "utf8");
   const releaseWorkflow = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".github", "workflows", "agent-release.yml"), "utf8");
   assert.match(dashboardHtml, /id="start-trial-button"/);
-  assert.match(dashboardHtml, /<a class="brand" href="https:\/\/media-toolbox-woad\.vercel\.app\/" target="_blank" rel="noreferrer" aria-label="Open Media Toolbox home page">/);
+  assert.match(dashboardHtml, /<a class="brand" href="https:\/\/native-media-agent\.vercel\.app\/" target="_blank" rel="noreferrer" aria-label="Open NativeMedia Agent home page">/);
   assert.match(dashboardHtml, /id="authorization-panel" class="panel authorization-panel"/);
   assert.doesNotMatch(dashboardHtml, /Authorize processing/);
   assert.doesNotMatch(dashboardHtml, /class="divider"/);
@@ -229,7 +229,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardPreload, /agent:open-release-page/);
   assert.match(dashboardPreload, /agent:open-website-home/);
   assert.match(dashboardRenderer, /api\.openWebsiteHome/);
-  assert.match(electronMain, /const websiteHomeUrl = "https:\/\/media-toolbox-woad\.vercel\.app\/"/);
+  assert.match(electronMain, /const websiteHomeUrl = "https:\/\/native-media-agent\.vercel\.app\/"/);
   assert.match(electronMain, /agent:open-website-home/);
   assert.match(dashboardRenderer, /currentState\?\.authorization\?\.mode === "admin"/);
   assert.match(dashboardRenderer, /authorization\.deviceId/);
@@ -296,8 +296,9 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(releaseWorkflow, /Package signed agent runtime update/);
   assert.match(releaseWorkflow, /AGENT_RUNTIME_UPDATE_PUBLIC_KEY/);
   assert.match(releaseWorkflow, /AGENT_RUNTIME_UPDATE_PRIVATE_KEY/);
+  assert.match(releaseWorkflow, /AGENT_UPDATE_TYPE: \$\{\{ vars\.AGENT_UPDATE_TYPE \|\| 'runtime' \}\}/);
   assert.match(releaseWorkflow, /agent-runtime-manifest-\*\.json/);
-  assert.match(releaseWorkflow, /name: media-toolbox-agent-\$\{\{ matrix\.artifact \}\}/);
+  assert.match(releaseWorkflow, /name: nativemedia-agent-\$\{\{ matrix\.artifact \}\}/);
   assert.match(await fs.readFile(path.join(projectDirectory, "scripts/package-agent-runtime.mjs"), "utf8"), /public\/fonts/);
   assert.match(await fs.readFile(path.join(projectDirectory, "electron-builder.yml"), "utf8"), /public\/fonts\/\*\*\/\*/);
   assert.deepEqual(Object.keys(agentPackage.dependencies).sort(), ["@ffmpeg-installer/ffmpeg", "@ffprobe-installer/ffprobe", "@napi-rs/canvas", "@pdf-lib/standard-fonts", "@tesseract.js-data/eng", "@tesseract.js-data/hin", "better-sqlite3", "busboy", "electron-updater", "fontkit", "pdf-lib", "pdfjs-dist", "selfsigned", "sharp", "tesseract.js"]);
@@ -361,7 +362,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(agentAuth, /X-Media-Toolbox-Device-Id/);
   assert.match(agentAuth, /X-Media-Toolbox-Device-Name/);
   assert.match(agentAuth, /X-Media-Toolbox-OS/);
-  assert.match(releaseWorkflow, /AGENT_UPDATE_TYPE: full/);
+  assert.match(releaseWorkflow, /AGENT_UPDATE_TYPE: \$\{\{ vars\.AGENT_UPDATE_TYPE \|\| 'runtime' \}\}/);
   assert.doesNotMatch(dashboardHtml, /bottom-left/);
 });
 
@@ -767,7 +768,7 @@ test("packaged licensing server manager uses a real cwd and can restart after st
     resourcesPath,
     dataDirectory: path.join(temporaryMount, "MediaToolboxLicensing"),
     mountPath: temporaryMount,
-    electronExecutable: "/Applications/Media Toolbox Agent.app/Contents/MacOS/Media Toolbox Agent",
+    electronExecutable: "/Applications/NativeMedia Agent.app/Contents/MacOS/NativeMedia Agent",
     useElectronRuntime: true,
     existsSync: (value) => value === temporaryMount || value === resourcesPath || value.endsWith(path.join("license-server", "index.js")),
     healthCheck: async () => healthy,
@@ -1028,9 +1029,9 @@ test("client licensing status can use the website fallback when direct HTTPS is 
       assert.equal(value, "https://license.example.test/v1/health");
       return false;
     },
-    publicProxyUrl: "https://media-toolbox-woad.vercel.app/api/license",
-    publicProxyHealthCheck: async (value) => value === "https://media-toolbox-woad.vercel.app/api/license/v1/health",
-    publicProxyHealthStatusCheck: async (value) => ({ reachable: true, healthy: value === "https://media-toolbox-woad.vercel.app/api/license/v1/health", statusCode: 200, database: { status: "healthy", healthy: true, error: "" }, error: "" }),
+    publicProxyUrl: "https://native-media-agent.vercel.app/api/license",
+    publicProxyHealthCheck: async (value) => value === "https://native-media-agent.vercel.app/api/license/v1/health",
+    publicProxyHealthStatusCheck: async (value) => ({ reachable: true, healthy: value === "https://native-media-agent.vercel.app/api/license/v1/health", statusCode: 200, database: { status: "healthy", healthy: true, error: "" }, error: "" }),
     existsSync: (value) => value.endsWith(path.join("license-server", "index.js")),
     healthCheck: async () => false,
   });
@@ -1267,7 +1268,7 @@ test("desktop dashboard can request and poll an online activation code", async (
     const config = auth.getLicenseRequestConfig();
     assert.equal(config.available, true);
     assert.equal(config.localServerUrl, `http://127.0.0.1:${server.address().port}`);
-    assert.ok(config.suggestedOrigins.includes("https://media-toolbox-woad.vercel.app"));
+    assert.ok(config.suggestedOrigins.includes("https://native-media-agent.vercel.app"));
     assert.deepEqual(config.allowedDurations.map(({ value }) => value), ["10m", "30m", "2h", "6h", "1d"]);
     const created = await auth.requestActivationCode("http://localhost:3000", "Local agent dashboard", 7200000);
     assert.equal(created.status, "pending");
@@ -1573,22 +1574,22 @@ test("secure website preflight is allowed for the Windows/Linux HTTP loopback tr
   const response = await fetch(url("/v1/health"), {
     method: "OPTIONS",
     headers: {
-      Origin: "https://media-toolbox-woad.vercel.app",
+      Origin: "https://native-media-agent.vercel.app",
       "Access-Control-Request-Method": "GET",
       "Access-Control-Request-Private-Network": "true",
     },
   });
   assert.equal(response.status, 204);
-  assert.equal(response.headers.get("access-control-allow-origin"), "https://media-toolbox-woad.vercel.app");
+  assert.equal(response.headers.get("access-control-allow-origin"), "https://native-media-agent.vercel.app");
   assert.equal(response.headers.get("access-control-allow-private-network"), "true");
 });
 
 test("secure website health responses include the private-network permission", async () => {
   const response = await fetch(url("/v1/health"), {
-    headers: { Origin: "https://media-toolbox-woad.vercel.app" },
+    headers: { Origin: "https://native-media-agent.vercel.app" },
   });
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("access-control-allow-origin"), "https://media-toolbox-woad.vercel.app");
+  assert.equal(response.headers.get("access-control-allow-origin"), "https://native-media-agent.vercel.app");
   assert.equal(response.headers.get("access-control-allow-private-network"), "true");
 });
 
@@ -1596,14 +1597,14 @@ test("secure website session preflight exposes authorization responses to the br
   const response = await fetch(url("/v1/session"), {
     method: "OPTIONS",
     headers: {
-      Origin: "https://media-toolbox-woad.vercel.app",
+      Origin: "https://native-media-agent.vercel.app",
       "Access-Control-Request-Method": "POST",
       "Access-Control-Request-Headers": "content-type",
       "Access-Control-Request-Private-Network": "true",
     },
   });
   assert.equal(response.status, 204);
-  assert.equal(response.headers.get("access-control-allow-origin"), "https://media-toolbox-woad.vercel.app");
+  assert.equal(response.headers.get("access-control-allow-origin"), "https://native-media-agent.vercel.app");
   assert.equal(response.headers.get("access-control-allow-headers"), "Authorization, Content-Type, Accept, Range, X-Requested-With");
   assert.equal(response.headers.get("access-control-allow-private-network"), "true");
 });
@@ -1612,14 +1613,14 @@ test("secure website capability preflight allows the complete browser request co
   const response = await fetch(url("/v1/capabilities"), {
     method: "OPTIONS",
     headers: {
-      Origin: "https://media-toolbox-woad.vercel.app",
+      Origin: "https://native-media-agent.vercel.app",
       "Access-Control-Request-Method": "GET",
       "Access-Control-Request-Headers": "authorization,accept,range",
       "Access-Control-Request-Private-Network": "true",
     },
   });
   assert.equal(response.status, 204);
-  assert.equal(response.headers.get("access-control-allow-origin"), "https://media-toolbox-woad.vercel.app");
+  assert.equal(response.headers.get("access-control-allow-origin"), "https://native-media-agent.vercel.app");
   assert.equal(response.headers.get("access-control-allow-headers"), "Authorization, Content-Type, Accept, Range, X-Requested-With");
   assert.equal(response.headers.get("access-control-allow-methods"), "GET, POST, DELETE, OPTIONS, HEAD");
   assert.equal(response.headers.get("access-control-expose-headers"), "Accept-Ranges, Content-Disposition, Content-Length, Content-Range");

@@ -1,6 +1,6 @@
-# Media Toolbox
+# NativeMedia Agent
 
-Private image conversion, video repair, and PDF editing tools. The website runs on any modern browser. Processing can run in the connected server or in the optional cross-platform Local agent. The frontend uses the Next.js Pages Router and plain JSX/JavaScript.
+Native-agent powered image conversion, video repair, and PDF editing tools. The website runs in any modern browser while the connected cross-platform Local agent does the processing on the user's computer. The frontend uses the Next.js Pages Router and plain JSX/JavaScript.
 
 ## Features
 
@@ -12,18 +12,18 @@ Private image conversion, video repair, and PDF editing tools. The website runs 
 - Video recovery with lossless remux, MKV/WebM repair, optional Untrunc reference recovery, tolerant transcode, and video-only fallback.
 - Recovered video is validated with strict FFmpeg decoding; when Untrunc exposes decodable but damaged frames, the worker re-encodes them into a fresh H.264/AAC MP4 and reports the best-effort limitation.
 - PDF editor beta: load 1-5 PDFs (200 MB total), merge them, reorder or delete pages, add blank pages, place/move/resize/rotate images, and add styled text boxes with built-in PDF fonts, size, bold, italic, underline, text colour, and background colour controls.
-- PDF editor merges and exports through the Local agent or Server while retaining source page sizes and rotations and never modifying the original PDFs. Inserted HEIC/TIFF/GIF/BMP images use the ImageMagick/libheif normalization path when needed. PDF page previews and thumbnails are rendered by the application; no browser PDF viewer is used.
-- PDF text editor beta: open one PDF, select detected text runs across pages, replace them with inline editing, and export through the Local agent or Server. Native PDFs preserve searchable text and change only the selected text-show operators. Image-only PDFs use the bundled English OCR engine as a clearly labeled fallback.
+- PDF editor merges and exports through the NativeMedia Agent Local agent while retaining source page sizes and rotations and never modifying the original PDFs. Inserted HEIC/TIFF/GIF/BMP images use the ImageMagick/libheif normalization path when needed. PDF page previews and thumbnails are rendered by the application; no browser PDF viewer is used.
+- PDF text editor beta: open one PDF, select detected text runs across pages, replace them with inline editing, and export through the NativeMedia Agent Local agent. Native PDFs preserve searchable text and change only the selected text-show operators. Image-only PDFs use the bundled English OCR engine as a clearly labeled fallback.
 - Responsive two-column workspace with a collapsible tool sidebar.
 - Drag-and-drop or browse upload controls.
 - Local in-browser image preview before upload, including transparency checkerboard support.
 - Background jobs with progress, live worker logs, and downloadable results.
-- Public website/server APIs with authorization enforced by the Local agent for local processing, plus automatic temporary-file cleanup.
-- Processing location can be selected per job: Local agent or Server.
+- Public website APIs with authorization enforced by the NativeMedia Agent Local agent, plus automatic temporary-file cleanup.
+- Processing runs through the connected Local agent on the user's computer.
 
-## Local processing agent
+## NativeMedia Agent local processing
 
-The Local agent is an optional desktop application for macOS, Windows, and Linux. It runs the same worker functions as the server, listens only on `127.0.0.1:4789`, starts at login after installation, and processes one job at a time. Packaged agents use a per-install HTTPS certificate on the loopback endpoint so an HTTPS production website can connect in Safari without a mixed-content block; the installer adds that certificate to the user's trust store where the platform supports it. A trusted browser can upload to it without sending the source files to the server. The agent never accepts shell commands or arbitrary filesystem paths from the website; its download-delete action accepts only a named regular file inside the user's Downloads folder.
+The NativeMedia Agent is a desktop application for macOS, Windows, and Linux. It listens only on `127.0.0.1:4789`, starts at login after installation, and processes one job at a time. Packaged agents use a per-install HTTPS certificate on the loopback endpoint so an HTTPS production website can connect in Safari without a mixed-content block; the installer adds that certificate to the user's trust store where the platform supports it. A trusted browser can upload to it without sending the source files to a processing server. The agent never accepts shell commands or arbitrary filesystem paths from the website; its download-delete action accepts only a named regular file inside the user's Downloads folder.
 
 The Local agent dashboard owns local processing authorization. Every installation provisions the fixed Admin account (`Admin` / `Aman`), keeps the Admin unlock across restarts until logout, and provides one persistent five-minute trial. The trial starts only when the first local processing session is requested; opening the website or checking agent health does not consume it. An owner can generate a signed, origin-scoped activation code bound to one installation's Device ID for 10 minutes, 30 minutes, 2 hours, 6 hours, or 1 day. The same code cannot be reused on another installation or replayed after it has been consumed. The website never collects these credentials or codes.
 
@@ -61,7 +61,7 @@ Generate the owner signing key pair once, outside the repository:
 
 ```bash
 npm run agent:license-keygen
-npm run agent:license -- --device-id <device-id> --duration 10m --origins https://media-toolbox-woad.vercel.app,http://localhost:3000,http://127.0.0.1:3000
+npm run agent:license -- --device-id <device-id> --duration 10m --origins https://native-media-agent.vercel.app,http://localhost:3000,http://127.0.0.1:3000
 ```
 
 The first command writes the private key and public key to `~/.config/media-toolbox/` by default. Keep the private key on the owner's computer only; never commit it, upload it to Vercel, or add it to a GitHub variable. The public key is safe to distribute because it can only verify licenses.
@@ -135,13 +135,15 @@ Set the owner-only GitHub token on the SSD server as `LICENSE_GITHUB_TOKEN`. It 
 
 The owner opens the hidden `/admin` route, signs in, and approves or declines pending requests, or logs in as Admin in the desktop agent dashboard and uses its **License requests** panel. A user requests a code from the desktop dashboard, waits for owner approval, then copies the displayed code into that dashboard. The service returns the code only to the requesting dashboard session. The agent redeems it with its device ID; the service stores the binding and removes the encrypted code payload.
 
+The website also shows the public `FreeForAll` launch code once per browser session, after a five-second delay. It can be redeemed repeatedly and on multiple devices; each redemption creates a signed seven-day activation. The licensing service records the launch timestamp on the SSD, accepts new redemptions for 60 days, and keeps a 90-day hard expiry on the code metadata. The existing owner-issued codes remain one-use codes.
+
 The initial owner credential is intentionally fixed as `Admin / Aman` to match the product requirement. It is hashed for comparison, rate-limited, and should be replaced before using this service for valuable licenses. Never put the private signing key, master key, Tailscale auth key, GitHub token, or the SSD directory in Vercel or GitHub variables.
 
 The licensing server also keeps an owner-only audit log in the same SSD-backed `licenses.sqlite3` database. It records activation requests, approvals, declines, redemptions, expiries, admin session logins/logouts, and device activity without storing activation codes or private keys. The web `/admin` page and the desktop agent dashboard show the latest entries after Admin authentication.
 
 The licensing regression tests cover the storage boundary, request flow, admin approval, one-time redemption, wrong-device/replay rejection, and local-agent online redemption. See [`docs/ssd-licensing-server-plan.md`](docs/ssd-licensing-server-plan.md) for the deployment boundary and later scaling options.
 
-For a Vercel frontend that uses the Local agent, set `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_AGENT_URL` (`http://127.0.0.1:4789` for local HTTP development; secure production pages use the trusted HTTPS loopback agent on macOS and the browser-compatible HTTP loopback agent on Windows/Linux), `NEXT_PUBLIC_AGENT_RELEASES_URL`, `NEXT_PUBLIC_MACOS_AGENT_SIGNED`, and (when using public license requests) `NEXT_PUBLIC_LICENSE_SERVER_URL`. Do not set `NEXT_PUBLIC_AGENT_URL` to a cloud URL: the browser must reach the agent on the same computer. Users must install the latest agent release for the platform they use. The Vercel filesystem is ephemeral and Vercel does not run the separate worker process, so server processing and server history require a persistent backend deployment such as the Docker deployment described below.
+For a Vercel frontend that uses the NativeMedia Agent, set `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_AGENT_URL` (`http://127.0.0.1:4789` for local HTTP development; secure production pages use the trusted HTTPS loopback agent on macOS and the browser-compatible HTTP loopback agent on Windows/Linux), `NEXT_PUBLIC_AGENT_RELEASES_URL`, `NEXT_PUBLIC_MACOS_AGENT_SIGNED`, and (when using public license requests) `NEXT_PUBLIC_LICENSE_SERVER_URL`. Do not set `NEXT_PUBLIC_AGENT_URL` to a cloud URL: the browser must reach the agent on the same computer. Users must install the latest agent release for the platform they use. The Vercel frontend provides the interface; media and PDF processing remains on the user's computer through the NativeMedia Agent.
 
 ### macOS release signing and notarization
 

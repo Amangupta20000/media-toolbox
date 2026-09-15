@@ -28,6 +28,7 @@ export function ToolViewTabs({ value, onChange }) {
   return <div className="tool-view-tabs" role="tablist" aria-label="Tool views">
     <button type="button" role="tab" aria-selected={value === "tool"} className={value === "tool" ? "active" : ""} onClick={() => onChange("tool")}>Tool</button>
     <button type="button" role="tab" aria-selected={value === "history"} className={value === "history" ? "active" : ""} onClick={() => onChange("history")}>History</button>
+    <button type="button" role="tab" aria-selected={value === "guide"} className={value === "guide" ? "active" : ""} onClick={() => onChange("guide")}>Guide &amp; FAQs</button>
   </div>;
 }
 

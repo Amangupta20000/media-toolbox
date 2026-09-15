@@ -2,10 +2,10 @@
   "name": "media-toolbox",
   "version": "1.0.0",
   "private": true,
-  "description": "Private media conversion, repair, and PDF editing tools with an optional local processing agent.",
+  "description": "Native-agent powered media conversion, repair, and PDF editing tools for local desktop processing.",
   "author": {
-    "name": "Media Toolbox",
-    "email": "support@media-toolbox.app"
+    "name": "Aman Gupta",
+    "email": "a20000.gupta@gmail.com"
   },
   "type": "module",
   "engines": {

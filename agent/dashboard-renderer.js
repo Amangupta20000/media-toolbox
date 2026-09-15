@@ -28,7 +28,7 @@
   brand?.addEventListener("click", (event) => {
     if (typeof api?.openWebsiteHome !== "function") return;
     event.preventDefault();
-    api.openWebsiteHome().catch((error) => showNotice(error.message || "The Media Toolbox website could not be opened."));
+    api.openWebsiteHome().catch((error) => showNotice(error.message || "The NativeMedia Agent website could not be opened."));
   });
 
   function renderUpdate(value = {}) {
@@ -792,7 +792,7 @@
     try {
       if (api.copyText) await api.copyText(command);
       else await navigator.clipboard.writeText(command);
-      setLicenseServerNotice("Start command copied. Run it from the MediaToolbox project folder if the packaged start button cannot be used.", "success");
+      setLicenseServerNotice("Start command copied. Run it from the project folder if the packaged start button cannot be used.", "success");
     } catch (error) {
       setLicenseServerNotice(error.message || "The start command could not be copied.", "error");
     }

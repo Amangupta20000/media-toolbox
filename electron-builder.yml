@@ -1,5 +1,5 @@
 appId: com.mediatoolbox.agent
-productName: Media Toolbox Agent
+productName: NativeMedia Agent
 publish:
   provider: github
   owner: Amangupta20000
@@ -143,6 +143,10 @@ extraResources:
   # relative ../lib path. Keep that one shared module beside it as well.
   - from: lib/token.js
     to: lib/token.js
+  # Keep the shared promotional-access policy beside the external licensing
+  # server so its 60-day redemption window is enforced by the owner runtime.
+  - from: lib/free-access.js
+    to: lib/free-access.js
   # The external licensing server runs from Resources/license-server rather
   # than app.asar. Keep its native SQLite package and its runtime CommonJS
   # dependencies in a real Resources/node_modules tree so Node's ESM package
@@ -188,7 +192,7 @@ win:
   target:
     - nsis
 linux:
-  maintainer: support@media-toolbox.app
+  maintainer: a20000.gupta@gmail.com
   target:
     - AppImage
     - deb

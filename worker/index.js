@@ -1271,7 +1271,7 @@ async function cleanupExpired() {
 async function main() {
   await fsp.mkdir(paths.jobs, { recursive: true });
   await writeCapabilities();
-  console.log("Media Toolbox worker is ready.");
+  console.log("NativeMedia Agent worker is ready.");
   while (true) {
     const job = claimNextJob();
     if (job) {

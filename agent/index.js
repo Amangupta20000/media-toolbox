@@ -23,6 +23,6 @@ function defaultDataDirectory() {
 
 process.env.DATA_DIR = defaultDataDirectory();
 import("./server.js").then(({ startAgentServer }) => startAgentServer()).catch((error) => {
-  console.error("Media Toolbox local agent failed to start:", error);
+  console.error("NativeMedia Agent local agent failed to start:", error);
   process.exitCode = 1;
 });

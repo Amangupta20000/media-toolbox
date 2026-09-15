@@ -366,7 +366,7 @@ async function openResultsDirectory() {
 async function directoryWritable(directory) {
   await fsp.mkdir(directory, { recursive: true });
   const probe = path.join(directory, `.media-toolbox-self-test-${randomUUID()}`);
-  await fsp.writeFile(probe, "Media Toolbox self-test\n", { flag: "wx" });
+  await fsp.writeFile(probe, "NativeMedia Agent self-test\n", { flag: "wx" });
   await fsp.rm(probe, { force: true });
   return true;
 }
@@ -939,7 +939,7 @@ export async function startAgentServer({ port = Number(process.env.AGENT_PORT) |
   await fsp.mkdir(paths.jobs, { recursive: true });
   await writeCapabilities();
   state.protocol = tlsEnabled ? "https" : "http";
-  console.log(`Media Toolbox local agent ${AGENT_VERSION} listening on ${state.protocol}://${host}:${port}`);
+  console.log(`NativeMedia Agent local agent ${AGENT_VERSION} listening on ${state.protocol}://${host}:${port}`);
   console.log(`Pairing code: ${state.pairingCode}`);
   const requestHandler = (request, response) => {
     handle(request, response).catch((error) => {
