@@ -408,10 +408,6 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .pdf-editor-actions { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .pdf-editor-actions > * { flex: 0 0 auto; }
 .pdf-editor-actions .primary-button, .pdf-editor-actions .secondary-button { min-height: 40px; white-space: nowrap; }
-.pdf-editor-toolbar-name { grid-column: 1 / -1; display: flex; justify-content: flex-end; min-width: 0; }
-.pdf-editor-toolbar-name .result-filename-field { width: min(100%, 560px); margin: 0; }
-.pdf-editor-toolbar-name .result-filename-input-wrap { max-width: none; }
-.pdf-shortcuts { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; padding-top: 2px; color: #8a9ba9; font-size: 10px; line-height: 1.35; text-align: right; }
 .pdf-zoom-controls { display: inline-flex; align-items: center; gap: 3px; padding: 3px; background: #f2f7f9; border: 1px solid #dbe7ec; border-radius: 10px; }
 .pdf-zoom-controls .icon-button { width: 32px; height: 32px; margin-left: 0; }
 .pdf-zoom-value { min-width: 54px; height: 32px; padding: 0 7px; color: #47657a; background: transparent; border: 1px solid transparent; border-radius: 7px; font-size: 11px; font-weight: 800; cursor: pointer; }
@@ -433,8 +429,6 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .pdf-more-tools-menu button.pdf-more-tools-danger { color: #a65c5c; }
 .pdf-more-tools-menu button.pdf-more-tools-danger > svg { color: #b76868; }
 .pdf-more-tools-menu button.pdf-more-tools-danger:hover { color: var(--danger); background: var(--danger-bg); }
-.pdf-more-tools-bottom { margin-left: auto; }
-.pdf-more-tools-bottom .pdf-more-tools-menu { top: auto; bottom: calc(100% + 8px); }
 .pdf-retention-row-tools-only { justify-content: flex-end; }
 .pdf-editor-layout { display: grid; grid-template-columns: 282px minmax(0, 1fr); min-height: 660px; }
 .pdf-page-rail { position: sticky; top: 84px; align-self: start; min-width: 0; height: min(660px, calc(100dvh - 112px)); min-height: 420px; box-sizing: border-box; overflow: hidden; padding: 18px 15px; background: #f5f9fb; border-right: 1px solid var(--line); }
@@ -786,7 +780,7 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .pdf-retention-check { background: #132535; border-color: var(--line); }
 [data-theme="dark"] .pdf-retention-info-popover { color: #a5b6c4; background: #102230; border-color: #385566; box-shadow: 0 12px 26px rgba(0, 0, 0, .25); }
 [data-theme="dark"] .pdf-retention-info-popover strong { color: #dcebf2; }
-[data-theme="dark"] .pdf-editor-toolbar-heading > span, [data-theme="dark"] .pdf-shortcuts, [data-theme="dark"] .pdf-rail-heading small, [data-theme="dark"] .pdf-selected-heading small, [data-theme="dark"] .thumbnail-meta, [data-theme="dark"] .blank-page-help, [data-theme="dark"] .pdf-editor-tip { color: #9aafbd; }
+[data-theme="dark"] .pdf-editor-toolbar-heading > span, [data-theme="dark"] .pdf-rail-heading small, [data-theme="dark"] .pdf-selected-heading small, [data-theme="dark"] .thumbnail-meta, [data-theme="dark"] .blank-page-help, [data-theme="dark"] .pdf-editor-tip { color: #9aafbd; }
 [data-theme="dark"] .pdf-page-rail { background: #102230; border-color: var(--line); }
 [data-theme="dark"] .pdf-page-thumbnail { background: #172c3c; border-color: #2f4859; }
 [data-theme="dark"] .pdf-page-thumbnail:hover { border-color: #5aa9ad; }
@@ -887,9 +881,6 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
   .pdf-editor-toolbar-heading { align-items: flex-start; flex-direction: column; gap: 4px; padding-top: 0; }
   .pdf-editor-actions { grid-column: 1; justify-content: flex-start; }
   .pdf-editor-actions > button, .pdf-editor-actions > .pdf-more-tools { flex: 1 1 auto; }
-  .pdf-editor-toolbar-name { justify-content: flex-start; }
-  .pdf-editor-toolbar-name .result-filename-field { width: 100%; }
-  .pdf-shortcuts { grid-column: 1; justify-content: flex-start; text-align: left; }
   .pdf-editor-layout { display: flex; flex-direction: column; }
   .pdf-editor-shell { overflow: hidden; }
   .pdf-page-rail { position: static; height: auto; min-height: 0; max-height: none; overflow: visible; border-right: 0; border-bottom: 1px solid var(--line); }
@@ -1043,7 +1034,8 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .pdf-retention-info-popover { position: absolute; z-index: 1000; top: calc(100% + 8px); right: 0; display: grid; visibility: hidden; width: min(320px, calc(100vw - 48px)); gap: 4px; margin: 0; padding: 11px 13px; color: #60788a; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 12px 26px rgba(26, 52, 77, .14); font-size: 11px; font-weight: 500; line-height: 1.45; opacity: 0; pointer-events: none; transform: translateY(-4px); transition: opacity .15s ease, transform .15s ease, visibility 0s linear .15s; }
 .pdf-retention-info-control:hover .pdf-retention-info-popover, .pdf-retention-info-control:focus-within .pdf-retention-info-popover { visibility: visible; opacity: 1; pointer-events: auto; transform: translateY(0); transition-delay: 0s; }
 .pdf-retention-info-popover strong { color: var(--navy); font-size: 11px; }
-.pdf-retention-row .result-filename-field { flex: 1 1 320px; margin: 12px 0; }
+.pdf-retention-name { min-width: 0; flex: 1 1 320px; }
+.pdf-retention-name .result-filename-field { margin: 12px 0; }
 .agent-status-card, .agent-pair-card, .agent-capabilities-card, .agent-install-card, .agent-sessions-card { display: flex; gap: 18px; margin-bottom: 16px; padding: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 10px 24px rgba(26, 52, 77, .04); }
 .agent-status-card { align-items: center; }
 .agent-status-card.connected { border-color: #55bfc0; background: #f2fbfa; }

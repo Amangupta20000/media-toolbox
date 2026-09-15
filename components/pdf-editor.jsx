@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Bold, CheckCircle2, Copy, Download, FilePlus2, FileText, GripVertical, ImagePlus, Info, Italic, Keyboard, LoaderCircle, Lock, MoreHorizontal, Plus, Printer, Redo2, RotateCcw, RotateCw, Save, Trash2, Type, Underline, Undo2, Unlock, UploadCloud, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertTriangle, Bold, CheckCircle2, Copy, Download, FilePlus2, FileText, GripVertical, ImagePlus, Info, Italic, LoaderCircle, Lock, MoreHorizontal, Plus, Printer, Redo2, RotateCcw, RotateCw, Save, Trash2, Type, Underline, Undo2, Unlock, UploadCloud, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
 import { formatBytes } from "./file-dropzone.jsx";
@@ -1667,36 +1667,34 @@ export function PdfEditor() {
           <button className="secondary-button" type="button" onClick={() => pdfInputRef.current?.click()} disabled={loadingFiles || pdfFiles.length >= MAX_PDF_COUNT}><Plus size={17} /> Add PDF</button>
           <button className="secondary-button" type="button" onClick={addBlankPage}><FilePlus2 size={17} /> Blank page</button>
           <div className="pdf-zoom-controls" aria-label="Preview zoom"><button className="icon-button" type="button" onClick={() => changePreviewZoom(-0.1)} aria-label="Zoom out" title="Zoom out (-)"><ZoomOut size={16} /></button><button className="pdf-zoom-value" type="button" onClick={resetPreviewZoom} title="Reset zoom (0)">{Math.round(previewZoom * 100)}%</button><button className="icon-button" type="button" onClick={() => changePreviewZoom(0.1)} aria-label="Zoom in" title="Zoom in (+)"><ZoomIn size={16} /></button></div>
-          {processingMode === "local" && <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles || Boolean(saveJob)} title="Save the current PDF to the Local agent Results folder without leaving the editor"><Save size={17} /> {saveJob ? "Saving…" : "Save to device"}</button>}
+          <div ref={moreToolsRef} className="pdf-more-tools">
+            <button className="icon-button pdf-more-tools-trigger" type="button" aria-label="Open other PDF tools" aria-haspopup="menu" aria-expanded={moreToolsOpen} title={selectedPage ? "Other tools" : canUndo || canRedo ? "Undo or redo document changes" : "Add a page to use other tools"} disabled={!selectedPage && !canUndo && !canRedo} onClick={() => setMoreToolsOpen((current) => !current)}><MoreHorizontal size={20} /></button>
+            {moreToolsOpen && (selectedPage || canUndo || canRedo) && <div className="pdf-more-tools-menu" role="menu" aria-label="Other PDF tools">
+              <div className="pdf-more-tools-heading">History</div>
+              <button type="button" role="menuitem" disabled={!canUndo} onClick={() => { setMoreToolsOpen(false); undoDocument(); }}><Undo2 size={16} /><span>Undo</span><kbd>⌘/Ctrl+Z</kbd></button>
+              <button type="button" role="menuitem" disabled={!canRedo} onClick={() => { setMoreToolsOpen(false); redoDocument(); }}><Redo2 size={16} /><span>Redo</span><kbd>⇧⌘/Ctrl+Z</kbd></button>
+              {selectedPage && <>
+                <div className="pdf-more-tools-divider" />
+                <div className="pdf-more-tools-heading">Page tools</div>
+                <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); rotateSelectedPage(-90); }}><RotateCcw size={16} /><span>Rotate left</span><kbd>←</kbd></button>
+                <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); rotateSelectedPage(90); }}><RotateCw size={16} /><span>Rotate right</span><kbd>→</kbd></button>
+                <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); void duplicateSelectedPage(); }}><Copy size={16} /><span>Duplicate page</span><kbd>⌘/Ctrl+D</kbd></button>
+                <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); imageInputRef.current?.click(); }}><ImagePlus size={16} /><span>Add images</span></button>
+                <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); addTextBox(); }}><Type size={16} /><span>Add text box</span></button>
+                {selectedPageImages.length > 0 && <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); removeAllImages(selectedPage.id); }}><Trash2 size={16} /><span>Remove images</span></button>}
+                <div className="pdf-more-tools-divider" />
+                <button className="pdf-more-tools-danger" type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); deletePage(selectedPage.id); }}><Trash2 size={16} /><span>Delete page</span><kbd>Delete</kbd></button>
+              </>}
+            </div>}
+          </div>
           <button className="primary-button" type="button" onClick={submit} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles}><WandSparkles size={17} /> {uploadProgress ? `Uploading ${uploadProgress}%` : "Export PDF"}</button>
         </div>
-        {processingMode === "local" && <div className="pdf-editor-toolbar-name"><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem || filenameStem(defaultResultFilename)} label="Saved PDF name" description="This name is used for the export and, when retained, for PDF editor History in the Results folder." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(filenameStem(value)); }} /></div>}
-        <div className="pdf-shortcuts"><Keyboard size={14} /> ←/→ rotate · ⌘/Ctrl+D duplicate · ⌘/Ctrl+Z undo · ⇧⌘/Ctrl+Z redo · Delete remove · +/- zoom · ⌘/Ctrl+S save · ⌘/Ctrl+Enter export</div>
       </div>
       <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { addPdfFiles(event.target.files); event.target.value = ""; }} />
       <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/heic,image/heif,image/tiff,image/gif,image/bmp,.png,.jpg,.jpeg,.heic,.heif,.tif,.tiff,.gif,.bmp" multiple hidden onChange={(event) => { const targetPageId = imageTargetPageIdRef.current; imageTargetPageIdRef.current = null; addImages(event.target.files, targetPageId || undefined); event.target.value = ""; }} />
       <div className={`pdf-retention-row ${processingMode !== "local" ? "pdf-retention-row-tools-only" : ""}`}>
-        {processingMode === "local" && <><label className="keep-result-check pdf-retention-check"><input type="checkbox" checked={keepResult} onChange={(event) => { keepResultTouchedRef.current = true; setKeepResult(event.target.checked); }} /><span>Keep final result on this device</span></label><div className="pdf-retention-info-control"><button className="pdf-retention-info" type="button" aria-label="Show result retention details" aria-describedby="pdf-retention-info-copy" title="Show result retention details"><Info size={15} /></button><div id="pdf-retention-info-copy" className="pdf-retention-info-popover" role="tooltip"><strong>Result retention</strong><span>{keepResult ? "The completed PDF is kept in the Local agent Results folder until you remove it." : "The completed PDF is temporary and is cleaned up after download. Select this option to keep it on this device."}</span></div></div></>}
-        <div ref={moreToolsRef} className="pdf-more-tools pdf-more-tools-bottom">
-          <button className="icon-button pdf-more-tools-trigger" type="button" aria-label="Open other PDF tools" aria-haspopup="menu" aria-expanded={moreToolsOpen} title={selectedPage ? "Other tools" : canUndo || canRedo ? "Undo or redo document changes" : "Add a page to use other tools"} disabled={!selectedPage && !canUndo && !canRedo} onClick={() => setMoreToolsOpen((current) => !current)}><MoreHorizontal size={20} /></button>
-          {moreToolsOpen && (selectedPage || canUndo || canRedo) && <div className="pdf-more-tools-menu" role="menu" aria-label="Other PDF tools">
-            <div className="pdf-more-tools-heading">History</div>
-            <button type="button" role="menuitem" disabled={!canUndo} onClick={() => { setMoreToolsOpen(false); undoDocument(); }}><Undo2 size={16} /><span>Undo</span><kbd>⌘/Ctrl+Z</kbd></button>
-            <button type="button" role="menuitem" disabled={!canRedo} onClick={() => { setMoreToolsOpen(false); redoDocument(); }}><Redo2 size={16} /><span>Redo</span><kbd>⇧⌘/Ctrl+Z</kbd></button>
-            {selectedPage && <>
-              <div className="pdf-more-tools-divider" />
-              <div className="pdf-more-tools-heading">Page tools</div>
-              <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); rotateSelectedPage(-90); }}><RotateCcw size={16} /><span>Rotate left</span><kbd>←</kbd></button>
-              <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); rotateSelectedPage(90); }}><RotateCw size={16} /><span>Rotate right</span><kbd>→</kbd></button>
-              <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); void duplicateSelectedPage(); }}><Copy size={16} /><span>Duplicate page</span><kbd>⌘/Ctrl+D</kbd></button>
-              <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); imageInputRef.current?.click(); }}><ImagePlus size={16} /><span>Add images</span></button>
-              <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); addTextBox(); }}><Type size={16} /><span>Add text box</span></button>
-              {selectedPageImages.length > 0 && <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); removeAllImages(selectedPage.id); }}><Trash2 size={16} /><span>Remove images</span></button>}
-              <div className="pdf-more-tools-divider" />
-              <button className="pdf-more-tools-danger" type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); deletePage(selectedPage.id); }}><Trash2 size={16} /><span>Delete page</span><kbd>Delete</kbd></button>
-            </>}
-          </div>}
-        </div>
+        {processingMode === "local" && <><label className="keep-result-check pdf-retention-check"><input type="checkbox" checked={keepResult} onChange={(event) => { keepResultTouchedRef.current = true; setKeepResult(event.target.checked); }} /><span>Keep final result on this device</span></label><div className="pdf-retention-info-control"><button className="pdf-retention-info" type="button" aria-label="Show result retention details" aria-describedby="pdf-retention-info-copy" title="Show result retention details"><Info size={15} /></button><div id="pdf-retention-info-copy" className="pdf-retention-info-popover" role="tooltip"><strong>Result retention</strong><span>{keepResult ? "The completed PDF is kept in the Local agent Results folder until you remove it." : "The completed PDF is temporary and is cleaned up after download. Select this option to keep it on this device."}</span></div></div><div className="pdf-retention-name"><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem || filenameStem(defaultResultFilename)} label="Saved PDF name" description="This name is used for the export and, when retained, for PDF editor History in the Results folder." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(filenameStem(value)); }} /></div></>}
+        {processingMode === "local" && <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles || Boolean(saveJob)} title="Save the current PDF to the Local agent Results folder without leaving the editor"><Save size={17} /> {saveJob ? "Saving…" : "Save to device"}</button>}
       </div>
       {!pdfFiles.length && !pages.length ? <PdfEmptyState onBrowse={() => pdfInputRef.current?.click()} onBlank={addBlankPage} loading={loadingFiles} dragActive={pdfDragActive} /> : !pages.length ? <PdfNoPagesState onBrowse={() => pdfInputRef.current?.click()} onBlank={addBlankPage} /> : <div className="pdf-editor-layout">
         <aside className="pdf-page-rail"><div className="pdf-rail-heading"><span>Pages</span><small>Pages load as you scroll</small></div><div ref={pageListRef} className="pdf-page-list" onDragOver={handlePageListDragOver} onDrop={handlePageListDrop}>{renderPageList()}</div></aside>

@@ -43,8 +43,8 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /History/);
   assert.match(shell, /undoDocument/);
   assert.match(shell, /redoDocument/);
-  assert.match(shell, /⌘\/Ctrl\+Z undo/);
   assert.match(shell, /history === "coalesce"/);
+  assert.doesNotMatch(shell, /pdf-shortcuts/);
   assert.match(shell, /Delete page/);
   assert.match(shell, /Drop here/);
   assert.match(shell, /textBoxFontName/);
@@ -118,23 +118,29 @@ test("PDF editor can export blank-page-only projects and lets users rename downl
 test("PDF editor saves to the device in place without opening the export result view", async () => {
   const shell = await read("components/pdf-editor.jsx");
   const styles = await read("styles/globals.css");
+  const toolSeoData = await read("lib/tool-seo-content.js");
   assert.match(shell, /const \[saveJob, setSaveJob\] = useState\(null\)/);
   assert.match(shell, /getProcessingJob\("local", saveJob\.id\)/);
   assert.match(shell, /setSaveJob\(\{ id: response\.jobId/);
   assert.match(shell, /setSaveJob\(null\);\s*setSaveNotice\(/);
   assert.match(shell, /without leaving the editor/);
-  assert.match(shell, /⌘\/Ctrl\+S save/);
+  assert.match(toolSeoData, /⌘\/Ctrl\+S to save to the device/);
   assert.match(shell, /className="pdf-save-progress"/);
   assert.match(shell, /className=\{saveNotice\.type === "success" \? "success-banner pdf-save-notice"/);
-  assert.match(shell, /className="pdf-editor-toolbar-name"[\s\S]*ResultFilenameField/);
-  assert.match(shell, /className="pdf-more-tools pdf-more-tools-bottom"/);
-  const toolbarActions = shell.match(/<div className="pdf-editor-actions">([\s\S]*?)<\/div>\s*\{processingMode === "local" && <div className="pdf-editor-toolbar-name">/)?.[1];
+  assert.match(shell, /className="pdf-retention-name"[\s\S]*ResultFilenameField/);
+  assert.doesNotMatch(shell, /pdf-editor-toolbar-name/);
+  assert.match(shell, /className="pdf-more-tools"/);
+  const toolbarActions = shell.match(/<div className="pdf-editor-actions">([\s\S]*?)<\/div>\s*<\/div>\s*<input ref=\{pdfInputRef\}/)?.[1];
   assert.ok(toolbarActions, "PDF editor toolbar action placement could not be located");
-  assert.doesNotMatch(toolbarActions, /pdf-more-tools/);
+  assert.match(toolbarActions, /pdf-more-tools/);
+  assert.doesNotMatch(toolbarActions, /pdf-save-button/);
+  const retentionRow = shell.match(/<div className=\{`pdf-retention-row[\s\S]*?<\/div>\s*\{!pdfFiles\.length/)?.[0];
+  assert.ok(retentionRow, "PDF retention row placement could not be located");
+  assert.match(retentionRow, /pdf-save-button/);
   assert.match(styles, /\.pdf-save-progress \{/);
   assert.match(styles, /\.pdf-save-notice \{/);
-  assert.match(styles, /\.pdf-editor-toolbar-name/);
-  assert.match(styles, /\.pdf-more-tools-bottom \.pdf-more-tools-menu/);
+  assert.match(styles, /\.pdf-retention-name/);
+  assert.doesNotMatch(styles, /\.pdf-more-tools-bottom/);
 });
 
 test("PDF result download route accepts a safe custom filename while preserving the extension", async () => {

@@ -386,7 +386,7 @@ test("history and protected PDF flows expose the new safe controls", async () =>
   assert.match(pdfEditor, /duplicateSelectedPage/);
   assert.match(pdfEditor, /previewZoom/);
   assert.match(pdfEditor, /validatePdfProject/);
-  assert.match(pdfEditor, /Keyboard/);
+  assert.match(pdfEditor, /pdf-more-tools/);
   assert.match(pdfEditor, /Export validation failed/);
   assert.match(styles, /\.pdf-image-overlay-layer \{[^}]*overflow: visible/);
   assert.match(styles, /\.pdf-page-canvas-wrap \{[^}]*overflow: auto/);

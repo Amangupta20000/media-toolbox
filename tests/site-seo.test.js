@@ -72,6 +72,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(toolSeo, /Privacy and file safety/);
   assert.match(toolSeoData, /"Which image formats are supported\?"/);
   assert.match(toolSeoData, /"Can every damaged video be repaired\?"/);
+  assert.match(toolSeoData, /"Which keyboard shortcuts are available\?"/);
   assert.match(toolSeoData, /Image processing currently runs through the Local agent/);
   assert.doesNotMatch(toolSeoData, /Server mode|server worker|Server uploads/);
   assert.match(toolSeoData, /the licensing service does not receive media files/);
