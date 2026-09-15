@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { Archive, Bot, ChevronDown, Clock3, Film, FileText, Image as ImageIcon, Menu, Moon, PanelLeftClose, PanelLeftOpen, ShieldCheck, Sparkles, Sun } from "lucide-react";
+import { Archive, Bot, ChevronDown, Clock3, Film, FileText, Image as ImageIcon, Menu, Moon, ShieldCheck, Sparkles, Sun } from "lucide-react";
 import { probeLocalAgent } from "./processing-client.js";
 
 const navigation = [
@@ -103,7 +103,7 @@ export function AppShell({ children }) {
       <div className="brand-lockup">
         <div className="brand-mark"><Sparkles size={18} strokeWidth={2.4} /></div>
         <div className="brand-copy"><span>Media</span><strong>Toolbox</strong></div>
-        <button className="icon-button sidebar-collapse" aria-label="Collapse sidebar" onClick={() => setCollapsed((value) => !value)}>{collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
+        <button className="icon-button sidebar-collapse" aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} title={collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setCollapsed((value) => !value)}><Menu size={18} aria-hidden="true" /></button>
       </div>
       <div className="sidebar-label">Workspace</div>
       <nav className="tool-nav" aria-label="Tools">
