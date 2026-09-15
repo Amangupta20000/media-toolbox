@@ -25,6 +25,8 @@ export function SeoHead() {
     <meta name="application-name" content="Media Toolbox" />
     <meta name="robots" content={robots} />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <link rel="icon" type="image/png" href="/media-toolbox-logo.png" />
+    <link rel="apple-touch-icon" href="/media-toolbox-logo.png" />
     <link rel="canonical" href={canonicalUrl} />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Media Toolbox" />

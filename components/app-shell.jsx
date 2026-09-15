@@ -100,15 +100,16 @@ export function AppShell({ children }) {
 
   const toggleSidebar = () => {
     if (window.matchMedia("(max-width: 680px)").matches) {
-      setMobileOpen(true);
+      setMobileOpen((value) => !value);
       return;
     }
     setSidebarHidden((value) => !value);
   };
 
-  return <div className={`app-shell ${sidebarHidden ? "sidebar-hidden" : ""}`}>
+  return <div className={`app-shell ${sidebarHidden ? "sidebar-hidden" : ""} ${mobileOpen ? "mobile-menu-open" : ""}`}>
     <div className={`mobile-scrim ${mobileOpen ? "visible" : ""}`} onClick={() => setMobileOpen(false)} />
     <aside id="app-sidebar" className={`sidebar ${mobileOpen ? "mobile-open" : ""}`}>
+      <button className="sidebar-menu-button" type="button" aria-label="Hide tools" title="Hide tools" aria-controls="app-sidebar" aria-expanded={!sidebarHidden || mobileOpen} onClick={toggleSidebar}><Menu size={21} aria-hidden="true" /></button>
       <nav className="tool-nav" aria-label="Tools">
         {navigation.map((item) => {
           const Icon = item.icon;
@@ -149,10 +150,10 @@ export function AppShell({ children }) {
     </aside>
     <main className="main-area">
       <header className="topbar">
-        <button className="topbar-menu-button" aria-label={sidebarHidden ? "Show tools" : "Hide tools"} title={sidebarHidden ? "Show tools" : "Hide tools"} aria-controls="app-sidebar" aria-expanded={!sidebarHidden} onClick={toggleSidebar}><Menu size={21} aria-hidden="true" /></button>
+        <button className="topbar-menu-button" type="button" aria-label={sidebarHidden || !mobileOpen ? "Show tools" : "Hide tools"} title={sidebarHidden || !mobileOpen ? "Show tools" : "Hide tools"} aria-controls="app-sidebar" aria-expanded={!sidebarHidden && mobileOpen} onClick={toggleSidebar}><Menu size={21} aria-hidden="true" /></button>
         <div className="topbar-brand" aria-label="Media Toolbox">
           <div className="topbar-brand-main">
-            <div className="brand-mark"><Sparkles size={17} strokeWidth={2.4} /></div>
+            <div className="brand-mark"><img className="brand-logo" src="/media-toolbox-logo.png" alt="" aria-hidden="true" /></div>
             <div className="brand-copy"><span>Media</span><strong>Toolbox</strong></div>
           </div>
           <span className="topbar-brand-subtitle">Secure media utilities</span>

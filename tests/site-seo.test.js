@@ -29,6 +29,8 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(footer, /href="\/sitemap\.xml"/);
   assert.match(seo, /meta name="description"/);
   assert.match(seo, /link rel="canonical"/);
+  assert.match(seo, /link rel="icon" type="image\/png" href="\/media-toolbox-logo\.png"/);
+  assert.match(seo, /link rel="apple-touch-icon" href="\/media-toolbox-logo\.png"/);
   assert.match(seo, /property="og:title"/);
   assert.match(seo, /name="twitter:card"/);
   assert.match(seo, /application\/ld\+json/);
