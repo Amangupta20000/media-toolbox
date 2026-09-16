@@ -1,4 +1,4 @@
-import { normalizeSvgOptions, validateSvgMarkup } from "../lib/svg-options.js";
+import { normalizeSvgMarkup, normalizeSvgOptions } from "../lib/svg-options.js";
 
 export const BROWSER_PDF_MAX_BYTES = 10 * 1024 * 1024;
 export const BROWSER_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
@@ -137,13 +137,57 @@ function createCanvas(width, height) {
   }
 }
 
-function drawImage(source, width, height, { background = "transparent", backgroundColor = "#ffffff", flatten = false } = {}) {
-  const { canvas, context } = createCanvas(width, height);
+function hexRgb(color) {
+  const value = String(color || "#ffffff").replace(/^#/, "");
+  return {
+    red: Number.parseInt(value.slice(0, 2), 16),
+    green: Number.parseInt(value.slice(2, 4), 16),
+    blue: Number.parseInt(value.slice(4, 6), 16),
+  };
+}
+
+function rgbaColor(color, opacity = 100) {
+  const { red, green, blue } = hexRgb(color);
+  return `rgba(${red}, ${green}, ${blue}, ${Math.max(0, Math.min(100, Number(opacity))) / 100})`;
+}
+
+function gradientPoint(angle, distance) {
+  const radians = (Number(angle || 0) - 90) * Math.PI / 180;
+  return {
+    x: 50 + Math.cos(radians) * distance,
+    y: 50 + Math.sin(radians) * distance,
+  };
+}
+
+function fillBackground(context, width, height, { background = "transparent", backgroundColor = "#ffffff", backgroundOpacity = 100, gradientStartColor = "#ffffff", gradientEndColor = "#d9f3f1", gradientAngle = 135, flatten = false } = {}) {
   if (flatten || background === "color") {
-    context.fillStyle = backgroundColor;
+    context.fillStyle = rgbaColor(backgroundColor, backgroundOpacity);
     context.fillRect(0, 0, width, height);
+    return;
   }
-  context.drawImage(source, 0, 0, width, height);
+  if (background !== "gradient") return;
+  const distance = Math.hypot(width, height) / 2;
+  const start = gradientPoint(gradientAngle, distance);
+  const end = gradientPoint(Number(gradientAngle || 0) + 180, distance);
+  const gradient = context.createLinearGradient(start.x, start.y, end.x, end.y);
+  const opacity = Math.max(0, Math.min(100, Number(backgroundOpacity)));
+  gradient.addColorStop(0, rgbaColor(gradientStartColor, opacity));
+  gradient.addColorStop(1, rgbaColor(gradientEndColor, opacity));
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, width, height);
+}
+
+function drawImage(source, width, height, { background = "transparent", backgroundColor = "#ffffff", backgroundOpacity = 100, gradientStartColor = "#ffffff", gradientEndColor = "#d9f3f1", gradientAngle = 135, preserveAspectRatio = true, flatten = false } = {}) {
+  const { canvas, context } = createCanvas(width, height);
+  fillBackground(context, width, height, { background, backgroundColor, backgroundOpacity, gradientStartColor, gradientEndColor, gradientAngle, flatten });
+  const sourceWidth = source.naturalWidth || source.width || width;
+  const sourceHeight = source.naturalHeight || source.height || height;
+  const scale = preserveAspectRatio === false ? 1 : Math.min(width / sourceWidth, height / sourceHeight);
+  const drawWidth = preserveAspectRatio === false ? width : Math.max(1, Math.round(sourceWidth * scale));
+  const drawHeight = preserveAspectRatio === false ? height : Math.max(1, Math.round(sourceHeight * scale));
+  const offsetX = preserveAspectRatio === false ? 0 : Math.round((width - drawWidth) / 2);
+  const offsetY = preserveAspectRatio === false ? 0 : Math.round((height - drawHeight) / 2);
+  context.drawImage(source, offsetX, offsetY, drawWidth, drawHeight);
   return { canvas, context, width, height };
 }
 
@@ -464,16 +508,19 @@ export async function processBrowserSvg(source, rawOptions = {}, { onProgress } 
   let options;
   let decoded;
   try {
-    const markup = validateSvgMarkup(await source.text());
+    onProgress?.(5, "Reading SVG source");
+    const markup = normalizeSvgMarkup(await source.text());
     options = normalizeSvgOptions(rawOptions);
-    onProgress?.(15, "Reading SVG");
+    onProgress?.(15, "SVG source validated");
     decoded = await decodeImage(new Blob([markup], { type: "image/svg+xml" }));
     const scale = options.scale === "custom" ? 1 : Number(options.scale) || 1;
     const width = options.scale === "custom" ? options.width : Math.max(1, Math.round(decoded.width * scale));
     const height = options.scale === "custom" ? options.height : Math.max(1, Math.round(decoded.height * scale));
-    const rendered = drawImage(decoded.image, width, height, { background: options.background, backgroundColor: options.backgroundColor });
+    onProgress?.(55, `Rendering SVG at ${width} × ${height}`);
+    const rendered = drawImage(decoded.image, width, height, { background: options.background, backgroundColor: options.backgroundColor, backgroundOpacity: options.backgroundOpacity, gradientStartColor: options.gradientStartColor, gradientEndColor: options.gradientEndColor, gradientAngle: options.gradientAngle, preserveAspectRatio: options.preserveAspectRatio });
+    onProgress?.(90, "Creating PNG output");
     const blob = await canvasBlob(rendered.canvas, "image/png");
-    onProgress?.(100, "Conversion complete");
+    onProgress?.(100, "Conversion complete.");
     return {
       blob,
       result: {
@@ -486,6 +533,9 @@ export async function processBrowserSvg(source, rawOptions = {}, { onProgress } 
         outputFormat: "png",
         scale: options.scale,
         background: options.background,
+        backgroundOpacity: options.backgroundOpacity,
+        gradientAngle: options.background === "gradient" ? options.gradientAngle : undefined,
+        preserveAspectRatio: options.preserveAspectRatio,
         method: "Browser canvas rasterization",
         warnings: [],
       },

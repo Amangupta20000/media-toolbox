@@ -13,7 +13,7 @@ import { formatAccessDuration } from "../lib/access-duration.js";
 const navigation = [
   { href: "/", label: "Home", detail: "NativeMedia Agent overview", icon: Home },
   { href: "/image-converter", label: "Image converter", detail: "Resize-free format conversion", icon: ImageIcon },
-  { href: "/svg-to-png", label: "SVG to PNG", detail: "Rasterize SVG at any scale", icon: ImageIcon, beta: true },
+  { href: "/svg-to-png", label: "SVG to PNG", detail: "Rasterize SVG at any scale", icon: ImageIcon },
   { href: "/video-repair", label: "Video repair", detail: "Layered recovery workflow", icon: Film },
 ];
 

@@ -20,11 +20,11 @@ const formatSupport = {
   },
   "svg-to-png": {
     input: { local: "SVG file or pasted SVG markup", browser: "SVG file or pasted SVG markup" },
-    output: { local: "PNG at 1×, 2×, 3×, 4×, or custom dimensions", browser: "PNG at 1×, 2×, 3×, 4×, or custom dimensions" },
+    output: { local: "PNG at 1×, 2×, 3×, 4×, or custom dimensions", browser: "PNG at 1×, 2×, 3×, or 4×; Custom uses desktop processing" },
   },
   "pdf-compressor": {
     input: { local: "PDF", browser: "PDF up to 10 MB and 100 pages" },
-    output: { local: "Compressed PDF", browser: "Compressed PDF; image-heavy pages may lose selectable text" },
+    output: { local: "Compressed PDF", browser: "Compressed PDF using the Balanced profile; image-heavy pages may lose selectable text" },
   },
   "video-repair": {
     input: { local: "MP4, M4V, MOV, 3GP, MKV, WebM, AVI, MPEG, MPG", browser: "Not supported — video repair requires the Local agent" },
@@ -60,12 +60,18 @@ function comparisonRowsFor(tool, browserSupported) {
   const browserResults = browserSupported ? "Download-only; temporary in this tab" : "Not available";
   const browserRequirements = browserSupported ? "No installation; browser memory and format support apply" : "Requires the Local agent on a desktop computer";
   const imageSizeRows = tool === "image-converter" ? [["Maximum input size", "25 MB per image", "5 MB per image"]] : [];
+  const toolSpecificRows = tool === "svg-to-png"
+    ? [["Export sizing", "1×, 2×, 3×, 4×, or Custom", "1×, 2×, 3×, or 4× (Custom uses desktop processing)"]]
+    : tool === "pdf-compressor"
+      ? [["Compression profiles", "Balanced, Smallest file, Higher quality, or Custom", "Balanced only"]]
+      : [];
   return [
     ["Best for", "Desktop users, large files, PDF editing, OCR, compression, video repair, and full native format support", browserBestFor],
     ["File handling", "Files stay on this computer", browserFiles],
     ["Results", "Can save results in the Local agent Results folder", browserResults],
     ["Requirements", "NativeMedia Agent and authorization", browserRequirements],
     ...imageSizeRows,
+    ...toolSpecificRows,
     ...supportRows,
   ];
 }

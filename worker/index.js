@@ -575,7 +575,25 @@ async function processImage(job) {
 }
 
 function svgBackground(value) {
-  return value === "color" ? value : "transparent";
+  return ["color", "gradient"].includes(value) ? value : "transparent";
+}
+
+function svgGradientPoint(angle, distance) {
+  const radians = (Number(angle || 0) - 90) * Math.PI / 180;
+  return {
+    x: 50 + Math.cos(radians) * distance,
+    y: 50 + Math.sin(radians) * distance,
+  };
+}
+
+function svgBackgroundMarkup(width, height, options) {
+  const opacity = Math.max(0, Math.min(1, Number(options.backgroundOpacity ?? 100) / 100));
+  if (svgBackground(options.background) === "color") {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="${options.backgroundColor}" fill-opacity="${opacity}"/></svg>`;
+  }
+  const start = svgGradientPoint(options.gradientAngle, 70.71);
+  const end = svgGradientPoint(Number(options.gradientAngle || 0) + 180, 70.71);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><defs><linearGradient id="background" x1="${start.x}%" y1="${start.y}%" x2="${end.x}%" y2="${end.y}%"><stop offset="0%" stop-color="${options.gradientStartColor}" stop-opacity="${opacity}"/><stop offset="100%" stop-color="${options.gradientEndColor}" stop-opacity="${opacity}"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#background)"/></svg>`;
 }
 
 async function processSvgToPng(job) {
@@ -592,12 +610,16 @@ async function processSvgToPng(job) {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 8192 || height > 8192 || width * height > 8192 * 8192) throw new Error("The requested SVG output dimensions are not supported.");
   const outputName = `${stem(job.source_name)}.png`;
   const outputPath = path.join(path.dirname(job.source_path), outputName);
-  const background = svgBackground(options.background) === "color" ? options.backgroundColor : { r: 0, g: 0, b: 0, alpha: 0 };
+  const transparent = { r: 0, g: 0, b: 0, alpha: 0 };
   update(job.id, 20, "Reading SVG", `${intrinsicWidth} × ${intrinsicHeight} vector dimensions detected.`);
-  await sharp(source, { density: 72 })
-    .resize({ width, height, fit: "contain", background })
+  const renderedSource = await sharp(source, { density: 72 })
+    .resize({ width, height, fit: options.preserveAspectRatio === false ? "fill" : "contain", background: transparent })
     .png({ compressionLevel: 9 })
-    .toFile(outputPath);
+    .toBuffer();
+  const outputPipeline = svgBackground(options.background) === "transparent"
+    ? sharp(renderedSource)
+    : sharp(Buffer.from(svgBackgroundMarkup(width, height, options))).composite([{ input: renderedSource, blend: "over" }]);
+  await outputPipeline.png({ compressionLevel: 9 }).toFile(outputPath);
   const outputMetadata = await sharp(outputPath).metadata();
   const outputBytes = await bytes(outputPath);
   const result = {
@@ -612,6 +634,9 @@ async function processSvgToPng(job) {
     outputFormat: "png",
     scale: options.scale,
     background: options.background,
+    backgroundOpacity: options.backgroundOpacity,
+    gradientAngle: options.background === "gradient" ? options.gradientAngle : undefined,
+    preserveAspectRatio: options.preserveAspectRatio,
     method: "Bundled image engine · local SVG rasterization",
   };
   appendJobLog(job.id, `Created ${outputName} successfully.`, "complete");

@@ -8,7 +8,7 @@ const toolDirectory = [
   { href: "/pdf-text-editor", label: "PDF text editor", description: "Edit searchable PDF text with OCR-assisted selection for scans.", icon: FileText, category: "PDF tools" },
   { href: "/pdf-compressor", label: "PDF compressor", description: "Shrink large PDFs with selectable quality and image settings.", icon: Archive, category: "PDF tools" },
   { href: "/image-converter", label: "Image converter", description: "Convert JPG, PNG, HEIC, TIFF, GIF, and BMP files.", icon: ImageIcon, category: "Media tools" },
-  { href: "/svg-to-png", label: "SVG to PNG", description: "Rasterize SVG files at 1×, 2×, 3×, 4×, or custom dimensions.", icon: ImageIcon, category: "Media tools" },
+  { href: "/svg-to-png", label: "SVG to PNG", description: "Rasterize SVG files with exact sizing and transparent, solid, or gradient backgrounds.", icon: ImageIcon, category: "Media tools" },
   { href: "/video-repair", label: "Video repair", description: "Recover readable video files with layered repair methods.", icon: Film, category: "Media tools" },
 ];
 

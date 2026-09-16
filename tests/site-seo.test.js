@@ -201,7 +201,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(home, /href="\/pdf-editor"/);
   assert.match(home, /href="\/image-converter"/);
   assert.match(home, /href: "\/svg-to-png", label: "SVG to PNG"/);
-  assert.match(home, /Rasterize SVG files at 1×, 2×, 3×, 4×, or custom dimensions/);
+  assert.match(home, /Rasterize SVG files with exact sizing and transparent, solid, or gradient backgrounds/);
   assert.doesNotMatch(home, /category: "Private processing"/);
   assert.doesNotMatch(home, /label: "Local agent"/);
   assert.match(home, /Process files on your computer/);

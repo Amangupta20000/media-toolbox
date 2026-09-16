@@ -23,6 +23,9 @@ test("PDF compressor is available and is not listed as coming soon", async () =>
   assert.match(route, /ToolPage tool="pdf-compressor"/);
   assert.match(toolPage, /pdf-custom-quality/);
   assert.match(toolPage, /pdf-custom-target/);
+  assert.match(toolPage, /processingMode === "browser" && value !== "balanced"/);
+  assert.match(toolPage, /Browser mode supports the Balanced PDF compression profile only/);
+  assert.match(toolPage, /<LockKeyhole size=\{10\} aria-hidden="true" \/> Local agent only/);
   assert.match(toolPage, /Estimated new file size/);
   assert.match(history, /"pdf-compressor": "PDF compression"/);
   assert.match(history, /tool === "pdf-compressor" \? "\/pdf-compressor"/);
