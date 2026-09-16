@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { Archive, Bot, ChevronDown, Clock3, Film, FileText, Image as ImageIcon, Menu, Moon, ShieldCheck, Sparkles, Sun, X } from "lucide-react";
+import { Archive, ArrowRight, BookOpen, ChevronDown, Clock3, ExternalLink, Film, FileText, Home, Image as ImageIcon, Menu, Moon, ShieldCheck, Sparkles, Sun } from "lucide-react";
 import { probeLocalAgent } from "./processing-client.js";
 import { AppFooter } from "./app-footer.jsx";
 import { FreeAccessModal } from "./free-access-modal.jsx";
@@ -11,7 +11,7 @@ import { metadataForPathname, normalizeSitePath, PRODUCT_TAGLINE } from "../lib/
 import { formatAccessDuration } from "../lib/access-duration.js";
 
 const navigation = [
-  { href: "/local-agent", label: "Local agent", detail: "Process files on this device", icon: Bot },
+  { href: "/", label: "Home", detail: "NativeMedia Agent overview", icon: Home },
   { href: "/image-converter", label: "Image converter", detail: "Resize-free format conversion", icon: ImageIcon },
   { href: "/svg-to-png", label: "SVG to PNG", detail: "Rasterize SVG at any scale", icon: ImageIcon, beta: true },
   { href: "/video-repair", label: "Video repair", detail: "Layered recovery workflow", icon: Film },
@@ -26,8 +26,6 @@ const pdfNavigation = [
 const moreNavigation = [
   { href: "/coming-soon", label: "Coming soon", detail: "More tools in progress", icon: Sparkles },
 ];
-
-const MOBILE_NOTICE_KEY = "nativemedia-mobile-support-notice-seen";
 
 function breadcrumbLabelFor(pathname) {
   const normalizedPath = normalizeSitePath(pathname);
@@ -62,23 +60,37 @@ function accessTimerFor(authorization, now, trialAvailable = false) {
   return { label: "Access", value: "Locked", state: "locked" };
 }
 
+function AgentSetupPrompt() {
+  return <div className="agent-setup-banner" role="complementary" aria-label="NativeMedia Agent setup guide">
+    <div className="agent-setup-banner-copy">
+      <BookOpen size={23} aria-hidden="true" />
+      <div>
+        <strong>New to NativeMedia Agent?</strong>
+        <span>Follow the platform-specific setup steps with visual guidance.</span>
+      </div>
+    </div>
+    <Link className="secondary-button" href="/how-to-setup-agent">Open setup guide <ExternalLink size={16} aria-hidden="true" /></Link>
+  </div>;
+}
+
 export function AppShell({ children }) {
   const { pathname } = useRouter();
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [mobileNoticeVisible, setMobileNoticeVisible] = useState(false);
+  const [mobileViewport, setMobileViewport] = useState(false);
   const [theme, setTheme] = useState("dark");
-  const [localAgentStatus, setLocalAgentStatus] = useState({ available: false, connected: false });
+  const [localAgentStatus, setLocalAgentStatus] = useState(null);
   const [timerNow, setTimerNow] = useState(() => Date.now());
   const [pdfToolsOpen, setPdfToolsOpen] = useState(false);
 
   const pdfToolActive = pdfNavigation.some((item) => pathname === item.href);
 
   useEffect(() => {
-    if (window.matchMedia("(max-width: 680px)").matches && !window.sessionStorage.getItem(MOBILE_NOTICE_KEY)) {
-      setMobileNoticeVisible(true);
-      window.sessionStorage.setItem(MOBILE_NOTICE_KEY, "1");
-    }
+    const media = window.matchMedia("(max-width: 680px)");
+    const handleViewportChange = (event) => setMobileViewport(event.matches);
+    setMobileViewport(media.matches);
+    media.addEventListener?.("change", handleViewportChange);
+    return () => media.removeEventListener?.("change", handleViewportChange);
   }, []);
 
   useEffect(() => {
@@ -106,8 +118,12 @@ export function AppShell({ children }) {
     };
   }, [pathname]);
 
-  const authorization = localAgentStatus.authorization || localAgentStatus.health?.authorization;
-  const accessTimer = accessTimerFor(authorization, timerNow, localAgentStatus.health?.trialAvailable);
+  const authorization = localAgentStatus?.authorization || localAgentStatus?.health?.authorization;
+  const accessTimer = accessTimerFor(authorization, timerNow, localAgentStatus?.health?.trialAvailable);
+  const agentSetupAttention = Boolean(localAgentStatus && !localAgentStatus.connected);
+  // The Local agent page already has its full setup card. Avoid stacking the
+  // same call-to-action there and on the setup guide destination itself.
+  const showAgentSetupPrompt = Boolean(localAgentStatus && !localAgentStatus.available && pathname !== "/local-agent" && pathname !== "/how-to-setup-agent");
 
   useEffect(() => {
     if (!authorization?.expiresAt) return undefined;
@@ -132,65 +148,68 @@ export function AppShell({ children }) {
     setSidebarHidden((value) => !value);
   };
 
+  const menuExpanded = mobileViewport ? mobileOpen : !sidebarHidden;
+  const menuLabel = menuExpanded ? "Hide tools" : "Show tools";
+
   return <div className={`app-shell ${sidebarHidden ? "sidebar-hidden" : ""} ${mobileOpen ? "mobile-menu-open" : ""}`}>
-    {mobileNoticeVisible && <div className="mobile-support-notice" role="alert"><div><strong>Mobile support is currently in progress</strong><span>To use NativeMedia Agent tools, open this website on a laptop or desktop with the NativeMedia Agent local app installed.</span></div><button type="button" aria-label="Dismiss mobile support notice" title="Dismiss" onClick={() => setMobileNoticeVisible(false)}><X size={17} aria-hidden="true" /></button></div>}
-    <div className={`mobile-scrim ${mobileOpen ? "visible" : ""}`} onClick={() => setMobileOpen(false)} />
-    <aside id="app-sidebar" className={`sidebar ${mobileOpen ? "mobile-open" : ""}`}>
-      <nav className="tool-nav" aria-label="Tools">
-        {navigation.map((item) => {
-          const Icon = item.icon;
-          const active = pathname === item.href;
-          return <Link key={item.href} href={item.href} className={`tool-nav-item ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}>
-            <span className="nav-icon"><Icon size={19} /></span>
-            <span className="nav-copy"><span className="nav-label-row"><strong>{item.label}</strong>{item.beta && <span className="nav-beta">Beta</span>}</span><small>{item.detail}</small></span>
-            {active && <span className="active-dot" />}
-          </Link>;
-        })}
-        <div className="pdf-tools-group">
-          <button type="button" className={`tool-nav-item pdf-tools-trigger ${pdfToolActive ? "active" : ""}`} aria-expanded={pdfToolsOpen} aria-haspopup="true" aria-controls="pdf-tools-subnav" onClick={() => setPdfToolsOpen((value) => !value)} title="PDF tools">
-            <span className="nav-icon"><FileText size={19} /></span>
-            <span className="nav-copy"><span className="nav-label-row"><strong>PDF tools</strong></span><small>Edit, manage, and compress PDFs</small></span>
-            <ChevronDown className="pdf-tools-chevron" size={18} aria-hidden="true" />
-          </button>
-          {pdfToolsOpen && <div id="pdf-tools-subnav" className="pdf-tools-subnav" role="group" aria-label="PDF tools">
-            {pdfNavigation.map((item) => {
-              const Icon = item.icon;
-              const active = pathname === item.href;
-              return <Link key={item.href} href={item.href} className={`tool-nav-item pdf-tool-child ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}>
-                <span className="nav-icon"><Icon size={17} /></span>
-                <span className="nav-copy"><span className="nav-label-row"><strong>{item.label}</strong>{item.beta && <span className="nav-beta">Beta</span>}</span><small>{item.detail}</small></span>
-                {active && <span className="active-dot" />}
-              </Link>;
-            })}
-          </div>}
+    <header className="topbar">
+      <button className="topbar-menu-button" type="button" aria-label={menuLabel} title={menuLabel} aria-controls="app-sidebar" aria-expanded={menuExpanded} onClick={toggleSidebar}><Menu size={21} aria-hidden="true" /></button>
+      <Link href="/" className="topbar-brand" aria-label="NativeMedia Agent home">
+        <div className="topbar-brand-main">
+          <div className="brand-mark"><img className="brand-logo" src="/media-toolbox-logo-64.png" srcSet="/media-toolbox-logo-64.png 64w, /media-toolbox-logo-128.png 128w" sizes="(max-width: 680px) 34px, 58px" width="58" height="58" decoding="async" alt="NativeMedia Agent logo" title="NativeMedia Agent" /></div>
+          <div className="brand-copy"><span>NativeMedia</span><strong>Agent</strong></div>
         </div>
-      </nav>
-      <div className="sidebar-label coming-soon-nav-label">More tools</div>
-      <nav className="tool-nav" aria-label="More tools">
-        {moreNavigation.map((item) => { const Icon = item.icon; const active = pathname === item.href; return <Link key={item.href} href={item.href} className={`tool-nav-item ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}><span className="nav-icon"><Icon size={19} /></span><span className="nav-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>{active && <span className="active-dot" />}</Link>; })}
-      </nav>
-      <button className="sidebar-menu-button" type="button" aria-label="Hide tools" title="Hide tools" aria-controls="app-sidebar" aria-expanded={!sidebarHidden || mobileOpen} onClick={toggleSidebar}><Menu size={21} aria-hidden="true" /></button>
-      <div className="sidebar-footer">
-        <div className="privacy-card"><ShieldCheck size={17} /><div><strong>Private by design</strong><span>Temporary data follows cleanup rules; local results are kept only when you choose.</span></div></div>
-        <span className="version-label">v1.0 · Local agent</span>
-      </div>
-    </aside>
-    <main className="main-area">
-      <header className="topbar">
-        <button className="topbar-menu-button" type="button" aria-label={sidebarHidden || !mobileOpen ? "Show tools" : "Hide tools"} title={sidebarHidden || !mobileOpen ? "Show tools" : "Hide tools"} aria-controls="app-sidebar" aria-expanded={!sidebarHidden && mobileOpen} onClick={toggleSidebar}><Menu size={21} aria-hidden="true" /></button>
-        <Link href="/" className="topbar-brand" aria-label="NativeMedia Agent home">
-          <div className="topbar-brand-main">
-            <div className="brand-mark"><img className="brand-logo" src="/media-toolbox-logo.png" alt="NativeMedia Agent logo" title="NativeMedia Agent" /></div>
-            <div className="brand-copy"><span>NativeMedia</span><strong>Agent</strong></div>
+        <span className="topbar-brand-subtitle">{PRODUCT_TAGLINE}</span>
+      </Link>
+      <div className="topbar-actions"><button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}<span>{theme === "dark" ? "Light mode" : "Dark mode"}</span></button><Link href="/local-agent" className={`topbar-status ${localAgentStatus?.connected ? "connected" : ""} ${agentSetupAttention ? "agent-setup-cta" : ""}`} aria-label={localAgentStatus?.connected ? "Open connected local agent" : "Open local agent connection page"} title={localAgentStatus?.connected ? "Open connected local agent" : "Open local agent connection page"}><span className={`status-pulse ${localAgentStatus?.connected ? "connected" : ""}`} /><span>{localAgentStatus?.connected ? "Agent connected" : "Agent setup"}</span>{agentSetupAttention && <ArrowRight className="topbar-setup-arrow" size={16} aria-hidden="true" />}</Link>{accessTimer && <div className={`agent-access-timer ${accessTimer.state}`} title={`${accessTimer.label}: ${accessTimer.value}`} aria-label={`${accessTimer.label} ${accessTimer.value}`}><Clock3 size={15} /><span className="timer-label">{accessTimer.label}</span><strong>{accessTimer.value}</strong></div>}</div>
+    </header>
+    <div className="app-body">
+      <div className={`mobile-scrim ${mobileOpen ? "visible" : ""}`} onClick={() => setMobileOpen(false)} />
+      <aside id="app-sidebar" className={`sidebar ${mobileOpen ? "mobile-open" : ""}`}>
+        <nav className="tool-nav" aria-label="Tools">
+          {navigation.map((item) => {
+            const Icon = item.icon;
+            const active = pathname === item.href;
+            return <Link key={item.href} href={item.href} className={`tool-nav-item ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}>
+              <span className="nav-icon"><Icon size={19} /></span>
+              <span className="nav-copy"><span className="nav-label-row"><strong>{item.label}</strong>{item.beta && <span className="nav-beta">Beta</span>}</span><small>{item.detail}</small></span>
+              {active && <span className="active-dot" />}
+            </Link>;
+          })}
+          <div className="pdf-tools-group">
+            <button type="button" className={`tool-nav-item pdf-tools-trigger ${pdfToolActive ? "active" : ""}`} aria-expanded={pdfToolsOpen} aria-haspopup="true" aria-controls="pdf-tools-subnav" onClick={() => setPdfToolsOpen((value) => !value)} title="PDF tools">
+              <span className="nav-icon"><FileText size={19} /></span>
+              <span className="nav-copy"><span className="nav-label-row"><strong>PDF tools</strong></span><small>Edit, manage, and compress PDFs</small></span>
+              <ChevronDown className="pdf-tools-chevron" size={18} aria-hidden="true" />
+            </button>
+            {pdfToolsOpen && <div id="pdf-tools-subnav" className="pdf-tools-subnav" role="group" aria-label="PDF tools">
+              {pdfNavigation.map((item) => {
+                const Icon = item.icon;
+                const active = pathname === item.href;
+                return <Link key={item.href} href={item.href} className={`tool-nav-item pdf-tool-child ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}>
+                  <span className="nav-icon"><Icon size={17} /></span>
+                  <span className="nav-copy"><span className="nav-label-row"><strong>{item.label}</strong>{item.beta && <span className="nav-beta">Beta</span>}</span><small>{item.detail}</small></span>
+                  {active && <span className="active-dot" />}
+                </Link>;
+              })}
+            </div>}
           </div>
-          <span className="topbar-brand-subtitle">{PRODUCT_TAGLINE}</span>
-        </Link>
-        <div className="topbar-actions"><button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}<span>{theme === "dark" ? "Light mode" : "Dark mode"}</span></button><Link href="/local-agent" className={`topbar-status ${localAgentStatus.connected ? "connected" : ""}`} aria-label={localAgentStatus.connected ? "Open connected local agent" : "Open local agent setup"}><span className={`status-pulse ${localAgentStatus.connected ? "connected" : ""}`} /><span>{localAgentStatus.connected ? "Agent connected" : "Agent setup"}</span></Link>{accessTimer && <div className={`agent-access-timer ${accessTimer.state}`} title={`${accessTimer.label}: ${accessTimer.value}`} aria-label={`${accessTimer.label} ${accessTimer.value}`}><Clock3 size={15} /><span className="timer-label">{accessTimer.label}</span><strong>{accessTimer.value}</strong></div>}</div>
-      </header>
-      <div className="content-wrap">{children}</div>
-      <Breadcrumbs pathname={pathname} />
-      <AppFooter />
-    </main>
+        </nav>
+        <div className="sidebar-label coming-soon-nav-label">More tools</div>
+        <nav className="tool-nav" aria-label="More tools">
+          {moreNavigation.map((item) => { const Icon = item.icon; const active = pathname === item.href; return <Link key={item.href} href={item.href} className={`tool-nav-item ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}><span className="nav-icon"><Icon size={19} /></span><span className="nav-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>{active && <span className="active-dot" />}</Link>; })}
+        </nav>
+        <div className="sidebar-footer">
+          <div className="privacy-card"><ShieldCheck size={17} /><div><strong>Private by design</strong><span>Temporary data follows cleanup rules; local results are kept only when you choose.</span></div></div>
+          <span className="version-label">v1.0 · Local agent</span>
+        </div>
+      </aside>
+      <main className="main-area">
+        <div className="content-wrap">{showAgentSetupPrompt && <AgentSetupPrompt />}{children}</div>
+        <Breadcrumbs pathname={pathname} />
+        <AppFooter />
+      </main>
+    </div>
     <FreeAccessModal pathname={pathname} />
   </div>;
 }

@@ -8,6 +8,15 @@ export function ResultDownloadNote({ result, mode = "local", keepResult = false,
   const downloadUrl = downloadUrlWithFilename(result.downloadUrl, downloadName);
 
   const retainedLocalResult = mode === "local" && (keepResult || result.retained);
+  if (mode === "browser") {
+    return <div className="result-download-note">
+      <div className="result-download-note-copy">
+        <Download size={16} aria-hidden="true" />
+        <span>This result is kept temporarily in this browser tab. Download it before closing or refreshing the tab.</span>
+      </div>
+      <a className="result-download-note-link" href={downloadUrl} download={downloadName}>Download again</a>
+    </div>;
+  }
   const location = result.location || (
     retainedLocalResult
       ? "the Local agent Results folder"

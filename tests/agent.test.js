@@ -10,6 +10,7 @@ import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import test, { after, before } from "node:test";
 import { firstAvailable, runCommand } from "../lib/command.js";
+import { AGENT_DOWNLOAD_PATHS } from "../lib/agent-downloads.js";
 
 const require = createRequire(import.meta.url);
 const projectDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -1196,9 +1197,14 @@ test("website local-agent setup exposes installers for all supported desktop pla
   const source = await fs.readFile(path.join(root, "components", "local-agent-setup.jsx"), "utf8");
   const workflow = await fs.readFile(path.join(root, ".github", "workflows", "agent-release.yml"), "utf8");
   assert.match(source, /macOS, Windows &amp; Linux/);
-  assert.match(source, /Choose the matching installer from the latest GitHub release/);
-  assert.match(source, /href=\{releasesUrl\}[^>]*>[\s\S]*Windows installer/);
-  assert.match(source, /href=\{releasesUrl\}[^>]*>[\s\S]*Linux installer/);
+  assert.match(source, /These links always redirect to the matching installer in the latest GitHub release/);
+  assert.match(source, /AGENT_DOWNLOAD_PATHS/);
+  assert.match(source, /href=\{AGENT_DOWNLOAD_PATHS\.macos\}[^>]*>[\s\S]*macOS installer/);
+  assert.match(source, /href=\{AGENT_DOWNLOAD_PATHS\.windows\}[^>]*>[\s\S]*Windows installer/);
+  assert.match(source, /href=\{AGENT_DOWNLOAD_PATHS\.linux\}[^>]*>[\s\S]*Linux installer/);
+  assert.equal(AGENT_DOWNLOAD_PATHS.macos, "/downloads/macos");
+  assert.equal(AGENT_DOWNLOAD_PATHS.windows, "/downloads/windows");
+  assert.equal(AGENT_DOWNLOAD_PATHS.linux, "/downloads/linux");
   assert.doesNotMatch(source, /agent-platform-disabled|Coming soon/);
   assert.match(workflow, /"os":"windows-latest","platform":"win","artifact":"win"/);
   assert.match(workflow, /"os":"ubuntu-latest","platform":"linux","artifact":"linux"/);

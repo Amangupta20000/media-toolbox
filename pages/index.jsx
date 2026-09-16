@@ -25,8 +25,8 @@ export default function HomePage() {
       <h1 id="home-title">Private PDF and media tools for your desktop</h1>
       <p>Convert images, repair videos, edit PDFs, and reduce document size with {PRODUCT_NAME}. {PRODUCT_TAGLINE} Connect the agent on macOS, Windows, or Linux to keep processing on your computer and your original files untouched.</p>
       <div className="home-actions">
-        <Link className="primary-button" href="/pdf-editor">Open PDF editor <ArrowRight size={17} /></Link>
-        <Link className="secondary-button" href="/image-converter">Convert an image</Link>
+        <Link className="primary-button" href="/pdf-editor" prefetch={false}>Open PDF editor <ArrowRight size={17} /></Link>
+        <Link className="secondary-button" href="/image-converter" prefetch={false}>Convert an image</Link>
       </div>
       <div className="home-trust-line"><ShieldCheck size={17} /><span>Processing location shown · source files are not overwritten</span></div>
     </section>
@@ -34,7 +34,7 @@ export default function HomePage() {
     <section className="home-section" aria-labelledby="home-tools-title">
       <div className="home-section-heading"><div><div className="section-kicker"><span className="kicker-line" /> Tool directory</div><h2 id="home-tools-title">Choose the tool for your file</h2></div><Link className="text-link" href="/coming-soon">See the roadmap <ArrowRight size={15} /></Link></div>
       <div className="home-tool-grid">
-        {toolDirectory.map(({ href, label, description, icon: Icon, category }) => <Link className="home-tool-card" href={href} key={href}>
+        {toolDirectory.map(({ href, label, description, icon: Icon, category }) => <Link className="home-tool-card" href={href} prefetch={false} key={href}>
           <span className="home-tool-icon"><Icon size={22} /></span>
           <span className="home-tool-copy"><small>{category}</small><strong>{label}</strong><span>{description}</span></span>
           <ArrowRight className="home-tool-arrow" size={17} aria-hidden="true" />
@@ -51,7 +51,7 @@ export default function HomePage() {
 
     <section className="home-cta" aria-labelledby="home-cta-title">
       <div><div className="section-kicker"><span className="kicker-line" /> Start with a file</div><h2 id="home-cta-title">Need to fix, edit, or convert something?</h2><p>Open a dedicated tool and see its supported formats, limits, and processing options before you submit.</p></div>
-      <Link className="primary-button" href="/pdf-compressor">Compress a PDF <ArrowRight size={17} /></Link>
+      <Link className="primary-button" href="/pdf-compressor" prefetch={false}>Compress a PDF <ArrowRight size={17} /></Link>
     </section>
   </AppShell>;
 }

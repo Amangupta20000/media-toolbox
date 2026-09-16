@@ -1,3 +1,5 @@
+import { browserCapabilities } from "./browser-processing.js";
+
 const DEFAULT_AGENT_URL = "http://127.0.0.1:4789";
 const SECURE_AGENT_URL = "https://127.0.0.1:4789";
 const TOKEN_KEY = "media-toolbox-agent-token";
@@ -344,10 +346,11 @@ export async function probeServer() {
   return { available: true, connected: true, health, capabilities, baseUrl: "" };
 }
 
-export async function probeProcessingLocations() {
+export async function probeProcessingLocations({ tool = "" } = {}) {
   const [local, server] = await Promise.allSettled([probeLocalAgent(), probeServer()]);
   return {
     local: local.status === "fulfilled" ? local.value : { available: false, connected: false, error: local.reason?.message || "Local agent is not running." },
+    browser: browserCapabilities(tool),
     // The website's own API and worker provide Server mode when both health
     // checks succeed. If either endpoint is unavailable, keep the mode hidden
     // rather than showing a disabled option that cannot process files.
@@ -525,7 +528,7 @@ export function isProcessingLocationReady(locations, mode) {
 }
 
 export function preferredProcessingMode(locations) {
-  return ["local", "server"].find((mode) => isProcessingLocationReady(locations, mode)) || "";
+  return ["local", "browser", "server"].find((mode) => isProcessingLocationReady(locations, mode)) || "";
 }
 
 export function resultUrlForMode(mode, result, kind = "download") {

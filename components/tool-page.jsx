@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Download, FileCheck2, Info, LoaderCircle, RotateCcw, ShieldCheck, Sparkles, Zap } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { FileDropzone, formatBytes } from "./file-dropzone.jsx";
@@ -13,6 +13,9 @@ import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { ToolFaqContent, ToolSeoContent } from "./tool-seo-content.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
 import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, preferredProcessingMode, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
+import { BROWSER_IMAGE_MAX_BYTES, BROWSER_PDF_MAX_BYTES, browserSupportsFormat, processBrowserImage, processBrowserPdfCompression } from "./browser-processing.js";
+import { ProcessingOptionsPanel } from "./processing-options.jsx";
+import { PdfResultPreview } from "./pdf-result-preview.jsx";
 
 const imageFormats = [
   ["original", "Original", "Keep encoded format"],
@@ -26,6 +29,7 @@ const imageFormats = [
 
 const imageAccept = ".jpg,.jpeg,.png,.heic,.heif,.tif,.tiff,.gif,.bmp";
 const maxImageFiles = 5;
+const LOCAL_IMAGE_MAX_BYTES = 25 * 1024 * 1024;
 
 const imageMethods = [
   ["auto", "Auto", "Use the best available worker path", "recommended"],
@@ -247,10 +251,12 @@ export function ToolPage({ tool }) {
   const [processingMode, setProcessingMode] = useState("local");
   const [keepResult, setKeepResult] = useState(false);
   const [activeView, setActiveView] = useState("tool");
+  const browserObjectUrlsRef = useRef(new Set());
+  const browserRunRef = useRef(0);
 
   useEffect(() => {
     let active = true;
-    probeProcessingLocations().then((value) => {
+    probeProcessingLocations({ tool }).then((value) => {
       if (!active) return;
       setLocations(value);
       // An authorized local agent may have no browser session yet. `ready`
@@ -263,9 +269,20 @@ export function ToolPage({ tool }) {
       setCapabilities(processingCapabilities(value, preferred));
     }).catch(() => undefined);
     return () => { active = false; };
-  }, []);
+  }, [tool]);
 
   useEffect(() => setCapabilities(processingCapabilities(locations, processingMode)), [locations, processingMode]);
+
+  useEffect(() => {
+    if (isImage && processingMode === "browser" && imageFiles.some((file) => file.size > BROWSER_IMAGE_MAX_BYTES)) {
+      setError("Browser mode supports images up to 5 MB each. Remove larger images or use the Local agent.");
+    }
+  }, [isImage, processingMode, imageFiles]);
+
+  useEffect(() => () => {
+    for (const url of browserObjectUrlsRef.current) URL.revokeObjectURL(url);
+    browserObjectUrlsRef.current.clear();
+  }, []);
 
   useEffect(() => {
     setPreviewError(false);
@@ -299,7 +316,7 @@ export function ToolPage({ tool }) {
   }, [isPdfCompressor, source, compressionProfile, customQuality, removeColor, customTargetMb]);
 
   useEffect(() => {
-    if (!jobId) return undefined;
+    if (!jobId || jobMode === "browser") return undefined;
     let active = true;
     const poll = async () => {
       try {
@@ -316,7 +333,7 @@ export function ToolPage({ tool }) {
   }, [jobId, jobMode]);
 
   useEffect(() => {
-    if (!batchJobs?.length) return undefined;
+    if (!batchJobs?.length || jobMode === "browser") return undefined;
     let active = true;
     let timer;
     const poll = async () => {
@@ -378,7 +395,10 @@ export function ToolPage({ tool }) {
     if (!incoming.length) return;
     const invalid = incoming.find((file) => !isSupportedImageFile(file));
     if (invalid) { setError(`${invalid.name || "One selected file"} is not a supported image. Choose JPG, PNG, HEIC, TIFF, GIF, or BMP.`); return; }
-    if (incoming.some((file) => file.size > 25 * 1024 * 1024)) { setError("Each image must be 25 MB or smaller."); return; }
+    const maxBytes = processingMode === "browser" ? BROWSER_IMAGE_MAX_BYTES : LOCAL_IMAGE_MAX_BYTES;
+    const maxLabel = processingMode === "browser" ? "5 MB" : "25 MB";
+    const oversized = incoming.find((file) => file.size > maxBytes);
+    if (oversized) { setError(`${oversized.name || "Each image"} must be ${maxLabel} or smaller in ${processingMode === "browser" ? "Browser mode" : "Local agent mode"}.`); return; }
     const existing = replace ? [] : imageFiles;
     const additions = incoming.filter((file) => !existing.some((current) => current.name === file.name && current.size === file.size && current.lastModified === file.lastModified));
     const next = [...existing, ...additions];
@@ -407,13 +427,32 @@ export function ToolPage({ tool }) {
       handleImageFiles([file], true);
       return;
     }
+    if (isPdfCompressor && processingMode === "browser" && file.size > BROWSER_PDF_MAX_BYTES) {
+      setError("Browser mode supports PDFs up to 10 MB. Use the Local agent for larger documents.");
+      return;
+    }
     setSource(file);
     setError("");
   };
 
+  const selectProcessingMode = (mode) => {
+    setProcessingMode(mode);
+    if (mode === "browser" && isImage && imageFiles.some((file) => file.size > BROWSER_IMAGE_MAX_BYTES)) {
+      setError("Browser mode supports images up to 5 MB each. Remove larger images or use the Local agent.");
+    } else if (mode === "browser" && isPdfCompressor && source?.size > BROWSER_PDF_MAX_BYTES) {
+      setError("This PDF is over the 10 MB Browser mode limit. Use the Local agent for this file.");
+    } else {
+      setError("");
+    }
+    setActiveView("tool");
+  };
+
   const reset = () => {
-    if (jobId && job && (job.status === "queued" || job.status === "processing")) deleteProcessingJob(jobMode, jobId).catch(() => undefined);
-    if (batchJobs) batchJobs.filter((entry) => entry.status === "queued" || entry.status === "processing").forEach((entry) => deleteProcessingJob(jobMode, entry.id).catch(() => undefined));
+    browserRunRef.current += 1;
+    for (const url of browserObjectUrlsRef.current) URL.revokeObjectURL(url);
+    browserObjectUrlsRef.current.clear();
+    if (jobMode !== "browser" && jobId && job && (job.status === "queued" || job.status === "processing")) deleteProcessingJob(jobMode, jobId).catch(() => undefined);
+    if (jobMode !== "browser" && batchJobs) batchJobs.filter((entry) => entry.status === "queued" || entry.status === "processing").forEach((entry) => deleteProcessingJob(jobMode, entry.id).catch(() => undefined));
     setSource(null); setImageFiles([]); setImageSettings([]); setActiveImageIndex(0); setSameConversion(false); setSameSize(false); setReference(null); setMethod("auto"); setCompressionProfile("balanced"); setCustomQuality(72); setRemoveColor(false); setCustomTargetMb(""); setUploadProgress(0); setJobId(null); setJob(null); setBatchJobs(null); setError(""); setPreviewUrl(""); setPreviewError(false); setKeepResult(false);
   };
 
@@ -452,11 +491,66 @@ export function ToolPage({ tool }) {
     if (!(isImage ? imageFiles.length : source)) { setError(`Choose a ${isImage ? "source image" : isPdfCompressor ? "PDF" : "video"} first.`); return; }
     if (!isProcessingLocationReady(locations, processingMode)) { setError("Admin login or activation is required in the Local agent dashboard."); return; }
     if (isImage && imageFiles.length > maxImageFiles) { setError(`Choose up to ${maxImageFiles} images per request.`); return; }
+    if (isImage && processingMode === "browser" && imageFiles.some((file) => file.size > BROWSER_IMAGE_MAX_BYTES)) { setError("Browser mode supports images up to 5 MB each. Remove larger images or use the Local agent."); return; }
     if (isImage && imageSettings.some((setting) => setting.maxSizeKb && (!/^\d+$/.test(setting.maxSizeKb) || Number(setting.maxSizeKb) <= 0))) { setError("Enter a positive whole number of KB for every image with a size target."); return; }
     if (isImage && imageSettings.some((setting) => setting.format === "jpeg" && !setting.jpegConfirmed)) { setError("Confirm the JPEG transparency warning for every JPG output."); return; }
     if (isPdfCompressor && !pdfCompressionProfiles.some(([value]) => value === compressionProfile)) { setError("Choose a supported compression level."); return; }
     if (isPdfCompressor && compressionProfile === "custom" && (!Number.isFinite(Number(customQuality)) || Number(customQuality) < 25 || Number(customQuality) > 90)) { setError("Choose a custom image quality between 25 and 90."); return; }
-    if (isPdfCompressor && compressionProfile === "custom" && customTargetMb !== "" && (!Number.isFinite(Number(customTargetMb)) || Number(customTargetMb) < 1 || Number(customTargetMb) > 200)) { setError("Choose a custom target size between 1 and 200 MB."); return; }
+    if (isPdfCompressor && compressionProfile === "custom" && customTargetMb !== "" && (!Number.isFinite(Number(customTargetMb)) || Number(customTargetMb) < 1 || Number(customTargetMb) > (processingMode === "browser" ? 10 : 200))) { setError(processingMode === "browser" ? "Choose a Browser mode target between 1 and 10 MB." : "Choose a custom target size between 1 and 200 MB."); return; }
+    if (isPdfCompressor && processingMode === "browser" && source.size > BROWSER_PDF_MAX_BYTES) { setError("Browser mode supports PDFs up to 10 MB. Use the Local agent for larger documents."); return; }
+    if (processingMode === "browser") {
+      if (isPdfCompressor) {
+        const runId = ++browserRunRef.current;
+        const logEntry = (message, level = "info") => ({ time: new Date().toISOString(), level, message });
+        setJobMode("browser");
+        setJobId(null);
+        setJob({ id: `browser-${runId}`, status: "processing", progress: 1, stage: "Reading PDF", message: "The browser is preparing the PDF.", logs: [logEntry("Browser PDF compression started.")], warnings: [], error: null, result: null });
+        try {
+          const compressed = await processBrowserPdfCompression(source, { profile: compressionProfile, customQuality, removeColor, customTargetMb }, {
+            onProgress: (progress, message) => {
+              if (browserRunRef.current === runId) setJob((current) => current ? { ...current, progress, stage: message || "Processing", logs: [...(current.logs || []).slice(-79), logEntry(message || "Browser compression progress updated.")] } : current);
+            },
+          });
+          if (browserRunRef.current !== runId) return;
+          const downloadUrl = URL.createObjectURL(compressed.blob);
+          browserObjectUrlsRef.current.add(downloadUrl);
+          setJob((current) => current ? { ...current, status: "completed", progress: 100, stage: "Complete", message: "The compressed PDF is ready to download.", logs: [...(current.logs || []).slice(-79), logEntry("Browser PDF compression completed.")], warnings: compressed.result.warnings || [], error: null, result: { ...compressed.result, downloadUrl, previewUrl: downloadUrl } } : current);
+        } catch (browserError) {
+          if (browserRunRef.current === runId) {
+            const errorMessage = browserError instanceof Error ? browserError.message : "The browser could not compress this PDF.";
+            setJob((current) => current ? { ...current, status: "failed", progress: 100, stage: "Failed", message: "Browser compression failed.", logs: [...(current.logs || []).slice(-79), logEntry(errorMessage, "error")], warnings: [], error: errorMessage, result: null } : current);
+          }
+        }
+        return;
+      }
+      if (!isImage) { setError("Browser mode is not available for this tool. Use the Local agent on a desktop computer."); return; }
+      const unsupported = imageSettings.find((setting) => !browserSupportsFormat(setting.format));
+      if (unsupported) { setError("Browser mode can create Original, PNG, or JPG files in this browser. Choose one of those formats or use the Local agent."); return; }
+      const runId = ++browserRunRef.current;
+      const entries = imageFiles.map((file, index) => ({ id: `browser-${runId}-${index}`, status: "queued", progress: 0, stage: "Queued", message: "Waiting for the browser conversion.", logs: [], warnings: [], error: null, result: null }));
+      setJobMode("browser");
+      setBatchJobs(entries);
+      setJobId(null);
+      setJob(null);
+      for (const [index, file] of imageFiles.entries()) {
+        if (browserRunRef.current !== runId) return;
+        setBatchJobs((current) => current?.map((entry, entryIndex) => entryIndex === index ? { ...entry, status: "processing", stage: "Processing", message: "Rendering in this browser." } : entry));
+        try {
+          const converted = await processBrowserImage(file, imageSettings[index] || {}, {
+            onProgress: (progress, message) => setBatchJobs((current) => current?.map((entry, entryIndex) => entryIndex === index ? { ...entry, progress, stage: message || "Processing" } : entry)),
+          });
+          if (browserRunRef.current !== runId) return;
+          const downloadUrl = URL.createObjectURL(converted.blob);
+          browserObjectUrlsRef.current.add(downloadUrl);
+          const result = { ...converted.result, downloadUrl, previewUrl: downloadUrl };
+          setBatchJobs((current) => current?.map((entry, entryIndex) => entryIndex === index ? { ...entry, status: "completed", progress: 100, stage: "Complete", message: "The image is ready to download.", warnings: result.warnings || [], result } : entry));
+        } catch (browserError) {
+          if (browserRunRef.current !== runId) return;
+          setBatchJobs((current) => current?.map((entry, entryIndex) => entryIndex === index ? { ...entry, status: "failed", progress: 100, stage: "Failed", message: "Browser conversion failed.", error: browserError instanceof Error ? browserError.message : "The browser could not process this image." } : entry));
+        }
+      }
+      return;
+    }
     const form = new FormData();
     form.append("tool", tool);
     if (isImage) imageFiles.forEach((file) => form.append("source", file, file.name));
@@ -492,12 +586,13 @@ export function ToolPage({ tool }) {
   return <AppShell>
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> {eyebrow}</div><h1>{title}</h1><p>{description}</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Original files stay untouched</span></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
-    {activeView === "history" ? <ToolHistory tool={tool} /> : activeView === "guide" ? <ToolSeoContent pathname={`/${tool}`} /> : <>
-    <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />
-    <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${capabilities?.status === "ready" ? "ready" : ""}`} /><span>{capabilities?.status === "ready" ? "Local agent worker online" : "Connecting to Local agent"}</span></div>{isImage ? <span>{heicReady ? (capabilities?.image?.heic ? "HEIC enabled" : "HEIC enabled via local fallback") : capabilities?.status === "ready" ? "HEIC unavailable" : "HEIC capability checking"}</span> : isPdfCompressor ? <span>{capabilities?.status !== "ready" ? "PDF compression capability checking" : pdfCompressorReady ? "PDF compression ready" : "PDF structural optimization fallback"}</span> : <span>{capabilities?.video?.untrunc ? (matchingReferenceReady ? "Reference recovery + fallback" : "Reference recovery · upload a reference") : capabilities?.status === "ready" ? "FFmpeg recovery enabled · reference recovery unavailable" : "Video capabilities checking"}</span>}</div>
+    <ProcessingOptionsPanel tool={tool} locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={selectProcessingMode} />
+    {activeView === "history" ? <ToolHistory tool={tool} /> : activeView === "guide" ? <ToolSeoContent pathname={`/${tool}`} /> : activeView === "processing" ? null : <>
+    <ProcessingMode value={processingMode} onChange={setProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool={tool} />
+    <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${capabilities?.status === "ready" ? "ready" : ""}`} /><span>{processingMode === "browser" ? isPdfCompressor ? "Browser compression ready" : "Browser conversion ready" : capabilities?.status === "ready" ? "Local agent worker online" : "Connecting to Local agent"}</span></div>{processingMode === "browser" ? <span>No upload · browser memory only</span> : isImage ? <span>{heicReady ? (capabilities?.image?.heic ? "HEIC enabled" : "HEIC enabled via local fallback") : capabilities?.status === "ready" ? "HEIC unavailable" : "HEIC capability checking"}</span> : isPdfCompressor ? <span>{capabilities?.status !== "ready" ? "PDF compression capability checking" : pdfCompressorReady ? "PDF compression ready" : "PDF structural optimization fallback"}</span> : <span>{capabilities?.video?.untrunc ? (matchingReferenceReady ? "Reference recovery + fallback" : "Reference recovery · upload a reference") : capabilities?.status === "ready" ? "FFmpeg recovery enabled · reference recovery unavailable" : "Video capabilities checking"}</span>}</div>
     {job ? <JobStatusCard job={job} isImage={isImage} isPdfCompressor={isPdfCompressor} mode={jobMode} keepResult={keepResult} onReset={reset} /> : batchJobs ? <BatchJobStatusCard jobs={batchJobs} mode={jobMode} onReset={reset} /> : <div className="workspace-grid">
-      <section className="tool-card primary-card"><div className="card-heading"><div><span className="card-index">01</span><h2>{isImage ? "Add up to 5 images" : isPdfCompressor ? "Add a PDF" : "Add a damaged video"}</h2></div><span className="required-label">Required</span></div><FileDropzone files={isImage ? imageFiles : undefined} file={isImage ? undefined : source} onFiles={isImage ? handleImageFiles : undefined} onFile={isImage ? undefined : (file) => { setSource(file); setError(""); }} onRemoveFile={isImage ? removeImageFile : undefined} onClear={() => { setSource(null); setImageFiles([]); setImageSettings([]); setActiveImageIndex(0); setSameConversion(false); setSameSize(false); setPreviewUrl(""); setPreviewError(false); }} multiple={isImage} variant={isImage ? "image" : isPdfCompressor ? "pdf" : "video"} accept={isImage ? imageAccept : isPdfCompressor ? ".pdf,application/pdf" : "video/*,.mkv,.webm,.avi,.3gp"} label={isImage ? "Drop up to 5 images here" : isPdfCompressor ? "Drop a PDF here" : "Drop a video here"} hint={isImage ? "or click to browse · paste an image directly" : "or click to browse from your device"} required disabled={Boolean(uploadProgress)} />{isImage && imageFiles[0] && previewUrl && <div className="image-preview-card"><div className="preview-heading"><span>First image preview</span><small>Local only · not uploaded</small></div><div className="image-preview-frame">{previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${imageFiles[0].name}-preview`}><AlertTriangle size={18} /><span>This browser cannot preview this image format, but the file can still be processed.</span></DismissibleMessage> : <img src={previewUrl} alt={`Preview of ${imageFiles[0].name}`} onError={() => setPreviewError(true)} />}</div></div>}<div className="limit-row"><span>Maximum file size</span><strong>{isImage ? "25 MB each · 5 per request" : isPdfCompressor ? "200 MB" : "2 GB"}</strong></div><div className={`keep-result-slot ${processingMode === "local" ? "visible" : ""}`} aria-hidden={processingMode !== "local"}>{processingMode === "local" && <label className="keep-result-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label>}</div></section>
-    {isImage ? <ImageSettingsCard files={imageFiles} settings={imageSettings} activeIndex={activeImageIndex} sameConversion={sameConversion} onChange={updateImageSetting} onActiveIndexChange={setActiveImageIndex} sameSize={sameSize} method={method} capabilities={capabilities} imageMagickReady={imageMagickReady} sipsReady={sipsReady} onSameConversionChange={toggleSameConversion} onSameSizeChange={toggleSameSize} onMethodChange={setMethod} /> : isPdfCompressor ? <PdfCompressionSettingsCard source={source} profile={compressionProfile} customQuality={customQuality} removeColor={removeColor} customTargetMb={customTargetMb} estimate={compressionEstimate} onChange={setCompressionProfile} onCustomQualityChange={setCustomQuality} onRemoveColorChange={setRemoveColor} onCustomTargetChange={setCustomTargetMb} capabilities={capabilities} /> : <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Reference video</h2></div><span className={matchingReferenceReady ? "optional-label" : "required-label"}>{matchingReferenceReady ? "Optional matching reference" : "Upload for damaged MP4"}</span></div><p className="card-description">A healthy recording from the same device or app can rebuild missing MP4 metadata when it was recorded with the same settings.</p><FileDropzone file={reference} onFile={setReference} onClear={() => setReference(null)} variant="video" accept="video/*,.mkv,.webm,.avi,.3gp" label="Drop a reference video" hint={matchingReferenceReady ? "or continue without one" : "required when MP4 metadata is missing"} disabled={Boolean(uploadProgress)} /><div className="info-note"><Info size={16} /><span>{capabilities?.video?.untrunc ? (matchingReferenceReady ? "Reference recovery is available. If you do not upload one, the configured matching reference will be tried." : "No matching reference is configured. Upload a healthy recording from the same device or app; readable containers can still be repaired without one.") : "FFmpeg can repair readable containers. Missing MP4 metadata requires Untrunc and a matching healthy reference."}</span></div></section>}
+      <section className="tool-card primary-card"><div className="card-heading"><div><span className="card-index">01</span><h2>{isImage ? "Add up to 5 images" : isPdfCompressor ? "Add a PDF" : "Add a damaged video"}</h2></div><span className="required-label">Required</span></div><FileDropzone files={isImage ? imageFiles : undefined} file={isImage ? undefined : source} onFiles={isImage ? handleImageFiles : undefined} onFile={isImage ? undefined : handleSourceFile} onRemoveFile={isImage ? removeImageFile : undefined} onClear={() => { setSource(null); setImageFiles([]); setImageSettings([]); setActiveImageIndex(0); setSameConversion(false); setSameSize(false); setPreviewUrl(""); setPreviewError(false); }} multiple={isImage} variant={isImage ? "image" : isPdfCompressor ? "pdf" : "video"} accept={isImage ? imageAccept : isPdfCompressor ? ".pdf,application/pdf" : "video/*,.mkv,.webm,.avi,.3gp"} label={isImage ? "Drop up to 5 images here" : isPdfCompressor ? "Drop a PDF here" : "Drop a video here"} hint={isImage ? "or click to browse · paste an image directly" : "or click to browse from your device"} required disabled={Boolean(uploadProgress)} />{isImage && imageFiles[0] && previewUrl && <div className="image-preview-card"><div className="preview-heading"><span>First image preview</span><small>Local only · not uploaded</small></div><div className="image-preview-frame">{previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${imageFiles[0].name}-preview`}><AlertTriangle size={18} /><span>This browser cannot preview this image format, but the file can still be processed.</span></DismissibleMessage> : <img src={previewUrl} alt={`Preview of ${imageFiles[0].name}`} onError={() => setPreviewError(true)} />}</div></div>}<div className="limit-row"><span>Maximum file size</span><strong>{isImage ? processingMode === "browser" ? "5 MB each · 5 per request" : "25 MB each · 5 per request" : isPdfCompressor ? processingMode === "browser" ? "10 MB · browser limit" : "200 MB" : "2 GB"}</strong></div><div className={`keep-result-slot ${processingMode === "local" ? "visible" : ""}`} aria-hidden={processingMode !== "local"}>{processingMode === "local" && <label className="keep-result-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label>}</div></section>
+    {isImage ? <ImageSettingsCard files={imageFiles} settings={imageSettings} activeIndex={activeImageIndex} sameConversion={sameConversion} onChange={updateImageSetting} onActiveIndexChange={setActiveImageIndex} sameSize={sameSize} method={method} capabilities={capabilities} processingMode={processingMode} imageMagickReady={imageMagickReady} sipsReady={sipsReady} onSameConversionChange={toggleSameConversion} onSameSizeChange={toggleSameSize} onMethodChange={setMethod} /> : isPdfCompressor ? <PdfCompressionSettingsCard source={source} profile={compressionProfile} customQuality={customQuality} removeColor={removeColor} customTargetMb={customTargetMb} estimate={compressionEstimate} onChange={setCompressionProfile} onCustomQualityChange={setCustomQuality} onRemoveColorChange={setRemoveColor} onCustomTargetChange={setCustomTargetMb} capabilities={capabilities} processingMode={processingMode} /> : <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Reference video</h2></div><span className={matchingReferenceReady ? "optional-label" : "required-label"}>{matchingReferenceReady ? "Optional matching reference" : "Upload for damaged MP4"}</span></div><p className="card-description">A healthy recording from the same device or app can rebuild missing MP4 metadata when it was recorded with the same settings.</p><FileDropzone file={reference} onFile={setReference} onClear={() => setReference(null)} variant="video" accept="video/*,.mkv,.webm,.avi,.3gp" label="Drop a reference video" hint={matchingReferenceReady ? "or continue without one" : "required when MP4 metadata is missing"} disabled={Boolean(uploadProgress)} /><div className="info-note"><Info size={16} /><span>{capabilities?.video?.untrunc ? (matchingReferenceReady ? "Reference recovery is available. If you do not upload one, the configured matching reference will be tried." : "No matching reference is configured. Upload a healthy recording from the same device or app; readable containers can still be repaired without one.") : "FFmpeg can repair readable containers. Missing MP4 metadata requires Untrunc and a matching healthy reference."}</span></div></section>}
       <section className="tool-card action-card"><div className="action-copy"><div className="action-icon"><Zap size={19} /></div><div><h2>Ready when you are</h2><p>{isImage ? "Your output will be created as a new file." : isPdfCompressor ? "The original PDF stays untouched; a smaller copy is created." : "The Local agent will try the safest recovery method first."}</p></div></div><button className="primary-button" onClick={submit} disabled={!canSubmit}>{uploadProgress ? <><LoaderCircle className="spin" size={18} /> Uploading {uploadProgress}%</> : <><Sparkles size={18} /> {isImage ? "Convert image" : isPdfCompressor ? "Compress PDF" : "Repair video"}</>}</button></section>
     </div>}
     {!job && !isImage && !isPdfCompressor && <VideoRecoverySummary hasMatchingReference={matchingReferenceReady} hasUntrunc={capabilities?.video?.untrunc} />}
@@ -508,7 +603,7 @@ export function ToolPage({ tool }) {
   </AppShell>;
 }
 
-function PdfCompressionSettingsCard({ source, profile, customQuality, removeColor, customTargetMb, estimate, onChange, onCustomQualityChange, onRemoveColorChange, onCustomTargetChange, capabilities }) {
+function PdfCompressionSettingsCard({ source, profile, customQuality, removeColor, customTargetMb, estimate, onChange, onCustomQualityChange, onRemoveColorChange, onCustomTargetChange, capabilities, processingMode }) {
   const compressionReady = capabilities?.pdf?.compressor !== false;
   const compressionEngine = capabilities?.pdf?.compressorEngine || "the bundled PDF optimizer";
   return <section className="tool-card settings-card pdf-compression-settings-card">
@@ -517,13 +612,13 @@ function PdfCompressionSettingsCard({ source, profile, customQuality, removeColo
     <div className="format-grid" aria-label="PDF compression profiles">{pdfCompressionProfiles.map(([value, label, detail]) => <button type="button" key={value} className={`format-option ${profile === value ? "selected" : ""}`} onClick={() => onChange(value)}><span className="format-radio" /><strong>{label}</strong><small>{detail}</small></button>)}</div>
     {profile === "custom" && <div className="pdf-custom-controls">
       <label className="field-label" htmlFor="pdf-custom-target"><span>Target file size</span><strong>Optional</strong></label>
-      <div className="input-with-suffix"><input id="pdf-custom-target" type="number" min="1" max="200" step="0.1" inputMode="decimal" value={customTargetMb} onChange={(event) => onCustomTargetChange(event.target.value.replace(/[^0-9.]/g, ""))} placeholder="e.g. 25" aria-label="Custom target PDF size in megabytes" /><span>MB target</span></div>
+      <div className="input-with-suffix"><input id="pdf-custom-target" type="number" min="1" max={processingMode === "browser" ? "10" : "200"} step="0.1" inputMode="decimal" value={customTargetMb} onChange={(event) => onCustomTargetChange(event.target.value.replace(/[^0-9.]/g, ""))} placeholder={processingMode === "browser" ? "e.g. 5" : "e.g. 25"} aria-label="Custom target PDF size in megabytes" /><span>MB target</span></div>
       <label className="field-label" htmlFor="pdf-custom-quality"><span>Image quality</span><strong>{customQuality} · {compressionQualityLabel(customQuality)}</strong></label>
       <input id="pdf-custom-quality" className="pdf-quality-range" type="range" min="25" max="90" step="1" value={customQuality} onChange={(event) => onCustomQualityChange(Number(event.target.value))} aria-label="Custom image quality" />
       <label className="pdf-custom-toggle"><span><strong>Remove color from images</strong><small>Convert rasterized images to grayscale for a smaller result.</small></span><input type="checkbox" checked={removeColor} onChange={(event) => onRemoveColorChange(event.target.checked)} /></label>
     </div>}
     <PdfCompressionEstimate source={source} profile={profile} customQuality={customQuality} removeColor={removeColor} customTargetMb={customTargetMb} estimate={estimate} />
-    <div className="info-note"><Info size={16} /><span>{compressionReady ? `The worker will use ${String(compressionEngine).toLowerCase()}, preserve searchable text where possible, and keep the original if the selected pass would make the file larger.` : "The worker can still create a safe structural PDF rewrite, but stronger embedded-image compression is unavailable."}</span></div>
+    <div className="info-note"><Info size={16} /><span>{processingMode === "browser" ? "Browser mode accepts PDFs up to 10 MB and rebuilds image-heavy pages in this tab. Searchable text may not remain selectable on rebuilt pages; use Local agent for larger or searchable PDFs." : compressionReady ? `The worker will use ${String(compressionEngine).toLowerCase()}, preserve searchable text where possible, and keep the original if the selected pass would make the file larger.` : "The worker can still create a safe structural PDF rewrite, but stronger embedded-image compression is unavailable."}</span></div>
   </section>;
 }
 
@@ -550,7 +645,7 @@ function PdfCompressionEstimate({ source, profile, customQuality, removeColor, c
   </div>;
 }
 
-function ImageSettingsCard({ files, settings, activeIndex, sameConversion, sameSize, method, capabilities, imageMagickReady, sipsReady, onChange, onActiveIndexChange, onSameConversionChange, onSameSizeChange, onMethodChange }) {
+function ImageSettingsCard({ files, settings, activeIndex, sameConversion, sameSize, method, capabilities, processingMode, imageMagickReady, sipsReady, onChange, onActiveIndexChange, onSameConversionChange, onSameSizeChange, onMethodChange }) {
   const activeFile = files[activeIndex];
   const activeSetting = settings[activeIndex] || { format: "original", maxSizeKb: "", jpegConfirmed: false };
   const selectImage = (index) => onActiveIndexChange(Math.max(0, Math.min(index, files.length - 1)));
@@ -570,12 +665,12 @@ function ImageSettingsCard({ files, settings, activeIndex, sameConversion, sameS
         <label><input type="checkbox" checked={sameConversion} onChange={(event) => onSameConversionChange(event.target.checked)} /><span><strong>Conversion</strong> Make it same for all images</span></label>
         <label><input type="checkbox" checked={sameSize} onChange={(event) => onSameSizeChange(event.target.checked)} /><span><strong>Size</strong> Keep it same for all images</span></label>
       </div>}
-      <div className="format-grid">{imageFormats.map(([value, label, detail]) => <button type="button" key={value} className={`format-option ${activeSetting.format === value ? "selected" : ""}`} onClick={() => onChange(activeIndex, "format", value)}><span className="format-radio" /><strong>{label}</strong><small>{detail}</small></button>)}</div>
+      <div className="format-grid">{imageFormats.map(([value, label, detail]) => { const unavailable = processingMode === "browser" && !capabilities?.image?.formats?.[value]; return <button type="button" key={value} className={`format-option ${activeSetting.format === value ? "selected" : ""} ${unavailable ? "unavailable" : ""}`} disabled={unavailable} onClick={() => onChange(activeIndex, "format", value)}><span className="format-radio" /><strong>{label}</strong><small>{unavailable ? "Use Local agent" : detail}</small></button>; })}</div>
       <label className="field-label" htmlFor="active-image-size">Target size <span>KB</span></label>
       <div className="input-with-suffix"><input id="active-image-size" type="text" inputMode="numeric" value={activeSetting.maxSizeKb} onChange={(event) => onChange(activeIndex, "maxSizeKb", event.target.value.replace(/[^0-9]/g, ""))} placeholder="Leave blank for normal quality" aria-label={`Target size for ${activeFile.name}`} /><span>KB target</span></div>
       {activeSetting.format === "jpeg" && <label className="warning-check"><input type="checkbox" checked={Boolean(activeSetting.jpegConfirmed)} onChange={(event) => onChange(activeIndex, "jpegConfirmed", event.target.checked)} /><span><AlertTriangle size={16} /><span>JPEG flattens transparent pixels.{sameConversion ? " I understand for all images." : " I understand."}</span></span></label>}
     </>}
-    {files.length > 0 && <><label className="field-label">Processing method <span>Worker engine for all images</span></label><div className="method-list">{imageMethods.map(([value, label, detail, tag]) => { const unavailable = (value === "imagemagick" && capabilities?.status === "ready" && !imageMagickReady) || (value === "sips" && capabilities?.status === "ready" && !sipsReady); return <button type="button" key={value} className={`method-option ${method === value ? "selected" : ""} ${unavailable ? "unavailable" : ""}`} disabled={unavailable} onClick={() => onMethodChange(value)}><span className="method-copy"><strong>{label}</strong><small>{detail}</small></span><span className="method-tag">{unavailable ? "Unavailable" : tag}</span></button>; })}</div></>}
+    {files.length > 0 && processingMode !== "browser" && <><label className="field-label">Processing method <span>Worker engine for all images</span></label><div className="method-list">{imageMethods.map(([value, label, detail, tag]) => { const unavailable = (value === "imagemagick" && capabilities?.status === "ready" && !imageMagickReady) || (value === "sips" && capabilities?.status === "ready" && !sipsReady); return <button type="button" key={value} className={`method-option ${method === value ? "selected" : ""} ${unavailable ? "unavailable" : ""}`} disabled={unavailable} onClick={() => onMethodChange(value)}><span className="method-copy"><strong>{label}</strong><small>{detail}</small></span><span className="method-tag">{unavailable ? "Unavailable" : tag}</span></button>; })}</div></>}
   </section>;
 }
 
@@ -656,7 +751,7 @@ export function JobStatusCard({ job, isImage, isPdfCompressor, mode, keepResult,
     {done && job.result && isImage && <ResultImagePreview result={job.result} />}
     {done && job.result && !isImage && !isPdfCompressor && <ResultVideoPreview result={job.result} />}
     {done && job.result && isPdfCompressor && <ResultPdfPreview result={job.result} />}
-    {done && job.result && <div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div>{isPdfCompressor && Number.isFinite(job.result.reductionPercent) && <div><span>Saved</span><strong>{job.result.reductionPercent > 0 ? `${job.result.reductionPercent}%` : "Already optimized"}</strong></div>}{isImage && job.result.targetSizeKb && <div><span>Size target</span><strong>{job.result.targetMet ? `Near ${job.result.targetSizeKb} KB` : "Not reached"}</strong></div>}{isImage && job.result.width && <div><span>Resolution</span><strong>{job.result.width} × {job.result.height}</strong></div>}<div><span>Method</span><strong>{job.result.method || "Completed"}</strong></div></div>}
+    {done && job.result && <div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div>{isPdfCompressor && Number.isFinite(job.result.reductionPercent) && <div><span>Saved</span><strong>{job.result.reductionPercent > 0 ? `${job.result.reductionPercent}%` : "Already optimized"}</strong></div>}{isPdfCompressor && job.result.targetSizeMb && <div><span>Size target</span><strong>{job.result.targetMet ? `Under ${job.result.targetSizeMb} MB` : "Not reached"}</strong></div>}{isImage && job.result.targetSizeKb && <div><span>Size target</span><strong>{job.result.targetMet ? `Near ${job.result.targetSizeKb} KB` : "Not reached"}</strong></div>}{isImage && job.result.width && <div><span>Resolution</span><strong>{job.result.width} × {job.result.height}</strong></div>}<div><span>Method</span><strong>{job.result.method || "Completed"}</strong></div></div>}
     {job.warnings.length > 0 && <div className="warning-list">{job.warnings.map((warning) => <DismissibleMessage key={warning} resetKey={warning}><AlertTriangle size={16} /><span>{warning}</span></DismissibleMessage>)}</div>}
     {done && job.result && <ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={filename} />} {done && job.result && <ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} />}<div className="job-actions">{done && job.result && <a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, filename)} download={filename}><Download size={18} /> Download result</a>}<button className="secondary-button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Process another file" : "Cancel"}</button></div>
   </section>;
@@ -678,11 +773,12 @@ function ConversionProgress({ conversion }) {
 
 function ResultImagePreview({ result }) {
   const [previewError, setPreviewError] = useState(false);
-  return <div className="result-image-preview"><div className="preview-heading"><span>Converted preview</span><small>Rendered from worker output</small></div><div className="result-preview-frame">{previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${result.filename}-preview`}><AlertTriangle size={18} /><span>This browser cannot preview {result.filename}, but the converted file is ready to download.</span></DismissibleMessage> : <img src={result.previewUrl || `${result.downloadUrl}?preview=1`} alt={`Converted preview of ${result.filename}`} onError={() => setPreviewError(true)} />}</div></div>;
+  const browserResult = result.method === "Browser canvas conversion";
+  return <div className="result-image-preview"><div className="preview-heading"><span>Converted preview</span><small>{browserResult ? "Rendered in this browser" : "Rendered from worker output"}</small></div><div className="result-preview-frame">{previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${result.filename}-preview`}><AlertTriangle size={18} /><span>This browser cannot preview {result.filename}, but the converted file is ready to download.</span></DismissibleMessage> : <img src={result.previewUrl || `${result.downloadUrl}?preview=1`} alt={`Converted preview of ${result.filename}`} onError={() => setPreviewError(true)} />}</div></div>;
 }
 
 function ResultPdfPreview({ result }) {
-  return <div className="result-pdf-preview"><div className="preview-heading"><span>Compressed PDF preview</span><small>Check the first page before downloading</small></div><iframe src={result.previewUrl || `${result.downloadUrl}?preview=1`} title={`Preview of ${result.filename}`} /></div>;
+  return <PdfResultPreview result={result} title="Compressed PDF preview" subtitle="Scroll to review all pages" />;
 }
 
 function ResultVideoPreview({ result }) {

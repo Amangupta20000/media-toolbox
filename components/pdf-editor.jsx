@@ -11,6 +11,7 @@ import { ResultDownloadNote } from "./result-download-note.jsx";
 import { downloadFilename, downloadUrlWithFilename, filenameStem, ResultFilenameField } from "./result-filename.jsx";
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { ToolFaqContent, ToolSeoContent } from "./tool-seo-content.jsx";
+import { ProcessingOptionsPanel } from "./processing-options.jsx";
 import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, preferredProcessingMode, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 import { MAX_PDF_COUNT, MAX_PDF_TOTAL_BYTES } from "../lib/pdf-limits.js";
 import { normalizeImageRotation, rotatedImageDrawPlacement } from "../lib/pdf-image-placement.js";
@@ -760,7 +761,7 @@ export function PdfEditor() {
     return () => { active = false; };
   }, []);
 
-  useEffect(() => { probeProcessingLocations().then((value) => { setLocations(value); setProcessingMode(preferredProcessingMode(value)); }).catch(() => undefined); }, []);
+  useEffect(() => { probeProcessingLocations({ tool: "pdf-editor" }).then((value) => { setLocations(value); setProcessingMode(preferredProcessingMode(value)); }).catch(() => undefined); }, []);
 
   // Saving to the device is a background persistence action. It still uses
   // the local worker to produce the PDF, but it must not replace the editor
@@ -1652,8 +1653,9 @@ export function PdfEditor() {
   return <AppShell>
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools · Beta <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · 200 MB total</span></div><h1>PDF editor</h1><p>Merge documents, reorder pages, remove pages, add images, or place styled text boxes on PDF pages and new blank pages.</p></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
-    {activeView === "history" ? <ToolHistory tool="pdf-editor" /> : activeView === "guide" ? <ToolSeoContent pathname="/pdf-editor" /> : <>
-    {!job && <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />}
+    <ProcessingOptionsPanel tool="pdf-editor" locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={(mode) => { setProcessingMode(mode); setActiveView("tool"); }} />
+    {activeView === "history" ? <ToolHistory tool="pdf-editor" /> : activeView === "guide" ? <ToolSeoContent pathname="/pdf-editor" /> : activeView === "processing" ? null : <>
+    {!job && <ProcessingMode value={processingMode} onChange={setProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool="pdf-editor" />}
     {job ? <PdfJobCard job={job} mode={jobMode} keepResult={jobKeepResult} onReset={reset} onContinue={continueEditing} /> : <section className={`pdf-editor-shell ${pdfDragActive ? "pdf-drop-active" : ""}`} onDragOver={handlePdfDragOver} onDragLeave={handlePdfDragLeave} onDrop={handlePdfDrop}>
       <div className="pdf-editor-toolbar">
         <div className="pdf-editor-toolbar-heading"><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDF_COUNT} PDFs · {pages.length} pages · {Math.ceil(pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0) / (1024 * 1024)) || 0} MB of 200 MB</span></div>

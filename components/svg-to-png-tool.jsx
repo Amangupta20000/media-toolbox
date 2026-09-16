@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, ClipboardPaste, Download, Info, LoaderCircle, Palette, RotateCcw, ShieldCheck, Sparkles } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { FileDropzone, formatBytes } from "./file-dropzone.jsx";
@@ -8,6 +8,8 @@ import { JobStatusCard } from "./tool-page.jsx";
 import { ProcessingMode } from "./processing-mode.jsx";
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { ToolFaqContent, ToolSeoContent } from "./tool-seo-content.jsx";
+import { ProcessingOptionsPanel } from "./processing-options.jsx";
+import { processBrowserSvg } from "./browser-processing.js";
 import { takeHistoryEdit } from "./history-edit.js";
 import { isProcessingLocationReady, getProcessingJob, preferredProcessingMode, probeProcessingLocations, uploadWithProgress, deleteProcessingJob } from "./processing-client.js";
 import { normalizeSvgOptions, validateSvgMarkup } from "../lib/svg-options.js";
@@ -41,10 +43,12 @@ export function SvgToPngTool() {
   const [job, setJob] = useState(null);
   const [error, setError] = useState("");
   const [activeView, setActiveView] = useState("tool");
+  const browserObjectUrlsRef = useRef(new Set());
+  const browserRunRef = useRef(0);
 
   useEffect(() => {
     let active = true;
-    probeProcessingLocations().then((value) => {
+    probeProcessingLocations({ tool: "svg-to-png" }).then((value) => {
       if (!active) return;
       setLocations(value);
       setProcessingMode(preferredProcessingMode(value));
@@ -52,8 +56,13 @@ export function SvgToPngTool() {
     return () => { active = false; };
   }, []);
 
+  useEffect(() => () => {
+    for (const url of browserObjectUrlsRef.current) URL.revokeObjectURL(url);
+    browserObjectUrlsRef.current.clear();
+  }, []);
+
   useEffect(() => {
-    if (!jobId) return undefined;
+    if (!jobId || jobMode === "browser") return undefined;
     let active = true;
     let timer;
     const poll = async () => {
@@ -87,8 +96,7 @@ export function SvgToPngTool() {
     return undefined;
   }, []);
 
-  const busy = Boolean(jobId && job && ["queued", "processing"].includes(job.status)) || Boolean(uploadProgress);
-  const localReady = isProcessingLocationReady(locations, "local");
+  const busy = Boolean(job && ["queued", "processing"].includes(job.status)) || Boolean(uploadProgress);
   const processingReady = isProcessingLocationReady(locations, processingMode);
 
   const applyMarkup = (markup, filename = "pasted-artwork.svg") => {
@@ -130,6 +138,9 @@ export function SvgToPngTool() {
   const updateDimension = (setter) => (event) => setter(event.target.value.replace(/[^0-9]/g, ""));
 
   const reset = () => {
+    browserRunRef.current += 1;
+    for (const url of browserObjectUrlsRef.current) URL.revokeObjectURL(url);
+    browserObjectUrlsRef.current.clear();
     if (jobId && job && ["queued", "processing"].includes(job.status)) deleteProcessingJob(jobMode, jobId).catch(() => undefined);
     setSource(null);
     setSvgCode("");
@@ -163,6 +174,26 @@ export function SvgToPngTool() {
       setError(validationError instanceof Error ? validationError.message : "Choose valid SVG conversion settings.");
       return;
     }
+    if (processingMode === "browser") {
+      const runId = ++browserRunRef.current;
+      setJobMode("browser");
+      setJobId(null);
+      setJob({ id: `browser-${runId}`, status: "processing", progress: 1, stage: "Reading SVG", message: "The browser is preparing the SVG.", logs: [], warnings: [], error: null, result: null });
+      try {
+        const converted = await processBrowserSvg(source, svgOptions, {
+          onProgress: (progress, message) => {
+            if (browserRunRef.current === runId) setJob((current) => current ? { ...current, progress, stage: message || "Processing" } : current);
+          },
+        });
+        if (browserRunRef.current !== runId) return;
+        const downloadUrl = URL.createObjectURL(converted.blob);
+        browserObjectUrlsRef.current.add(downloadUrl);
+        setJob({ id: `browser-${runId}`, status: "completed", progress: 100, stage: "Complete", message: "The PNG is ready to download.", logs: [], warnings: converted.result.warnings || [], error: null, result: { ...converted.result, downloadUrl, previewUrl: downloadUrl } });
+      } catch (browserError) {
+        if (browserRunRef.current === runId) setJob({ id: `browser-${runId}`, status: "failed", progress: 100, stage: "Failed", message: "Browser conversion failed.", logs: [], warnings: [], error: browserError instanceof Error ? browserError.message : "The browser could not process this SVG.", result: null });
+      }
+      return;
+    }
     const form = new FormData();
     form.append("tool", "svg-to-png");
     form.append("source", source, source.name);
@@ -182,11 +213,12 @@ export function SvgToPngTool() {
   };
 
   return <AppShell>
-    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> Rasterize & export <span className="beta-label">Beta</span></div><h1>SVG to PNG converter</h1><p>Upload an SVG or paste its code, then export at 1×, 2×, 3×, 4×, or a custom size with a transparent or colour-picked background.</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Local desktop processing</span></div></div>
+    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> Rasterize & export <span className="beta-label">Beta</span></div><h1>SVG to PNG converter</h1><p>Upload an SVG or paste its code, then export at 1×, 2×, 3×, 4×, or a custom size with a transparent or colour-picked background.</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Local or browser processing</span></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
-    {activeView === "history" ? <ToolHistory tool="svg-to-png" /> : activeView === "guide" ? <ToolSeoContent pathname="/svg-to-png" /> : <>
-      <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />
-      <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${processingReady ? "ready" : ""}`} /><span>{processingReady ? `${processingMode === "server" ? "Server worker" : "Local agent"} ready for SVG conversion` : processingMode === "server" ? "Server worker unavailable" : "Connect the Local agent to convert"}</span></div><span>SVG input · PNG output</span></div>
+    <ProcessingOptionsPanel tool="svg-to-png" locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={(mode) => { setProcessingMode(mode); setActiveView("tool"); }} />
+    {activeView === "history" ? <ToolHistory tool="svg-to-png" /> : activeView === "guide" ? <ToolSeoContent pathname="/svg-to-png" /> : activeView === "processing" ? null : <>
+      <ProcessingMode value={processingMode} onChange={setProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool="svg-to-png" />
+      <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${processingReady ? "ready" : ""}`} /><span>{processingReady ? `${processingMode === "browser" ? "Browser" : processingMode === "server" ? "Server worker" : "Local agent"} ready for SVG conversion` : processingMode === "browser" ? "Browser conversion unavailable" : processingMode === "server" ? "Server worker unavailable" : "Connect the Local agent to convert"}</span></div><span>SVG input · PNG output</span></div>
       {job ? <JobStatusCard job={job} isImage mode={jobMode} keepResult={false} onReset={reset} /> : <div className="workspace-grid svg-workspace-grid">
         <section className="tool-card primary-card svg-source-card"><div className="card-heading"><div><span className="card-index">01</span><h2>Add SVG source</h2></div><span className="required-label">Required</span></div><FileDropzone file={source} onFile={handleFile} onClear={() => { setSource(null); setSvgCode(""); setError(""); }} variant="image" accept=".svg,image/svg+xml" label="Drop an SVG file here" hint="or click to browse from your device" required disabled={busy} />
           <div className="svg-code-divider"><span>or paste SVG code</span><button type="button" className="text-button" onClick={pasteFromClipboard} disabled={busy}><ClipboardPaste size={14} /> Paste from clipboard</button></div>
@@ -199,7 +231,7 @@ export function SvgToPngTool() {
           <label className="field-label">Background <span>PNG canvas</span></label><div className="svg-background-options"><button type="button" className={`format-option ${background === "transparent" ? "selected" : ""}`} onClick={() => setBackground("transparent")}><span className="format-radio" /><strong>Transparent</strong><small>Preserve alpha</small></button><button type="button" className={`format-option ${background === "color" ? "selected" : ""}`} onClick={() => setBackground("color")}><Palette size={16} /><strong>Solid colour</strong><small>Choose a background</small></button></div>{background === "color" && <label className="svg-color-picker" htmlFor="svg-background-color"><span>Background colour</span><input id="svg-background-color" type="color" value={backgroundColor} onChange={(event) => setBackgroundColor(event.target.value)} /><code>{backgroundColor}</code></label>}
           <div className="svg-output-note"><CheckCircle2 size={16} /><span>{scale === "custom" ? `${customWidth || "—"} × ${customHeight || "—"} px output` : `${scale}× intrinsic SVG dimensions`} · PNG</span></div>
         </section>
-        <section className="tool-card action-card"><div className="action-copy"><div className="action-icon"><Sparkles size={19} /></div><div><h2>Ready to rasterize?</h2><p>{processingMode === "server" ? "The server worker will create a new PNG." : "The Local agent will create a new PNG on this computer."}</p></div></div><button className="primary-button" type="button" onClick={submit} disabled={busy || !source || !processingReady}>{uploadProgress ? <><LoaderCircle className="spin" size={18} /> Uploading {uploadProgress}%</> : <><Download size={18} /> Convert to PNG</>}</button></section>
+        <section className="tool-card action-card"><div className="action-copy"><div className="action-icon"><Sparkles size={19} /></div><div><h2>Ready to rasterize?</h2><p>{processingMode === "browser" ? "This browser will create a new PNG without uploading the SVG." : processingMode === "server" ? "The server worker will create a new PNG." : "The Local agent will create a new PNG on this computer."}</p></div></div><button className="primary-button" type="button" onClick={submit} disabled={busy || !source || !processingReady}>{uploadProgress ? <><LoaderCircle className="spin" size={18} /> Uploading {uploadProgress}%</> : <><Download size={18} /> Convert to PNG</>}</button></section>
       </div>}
       {error && <div className="error-banner"><Info size={17} /><span>{error}</span></div>}
       {!job && <div className="trust-row"><div><CheckCircle2 size={16} /> Source stays untouched</div><div><ShieldCheck size={16} /> Local agent pipeline</div><div><Sparkles size={16} /> Transparent PNG support</div></div>}

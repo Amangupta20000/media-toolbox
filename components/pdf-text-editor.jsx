@@ -9,6 +9,8 @@ import { ResultDownloadNote } from "./result-download-note.jsx";
 import { downloadFilename, downloadUrlWithFilename, filenameStem, ResultFilenameField } from "./result-filename.jsx";
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { ToolFaqContent, ToolSeoContent } from "./tool-seo-content.jsx";
+import { ProcessingOptionsPanel } from "./processing-options.jsx";
+import { PdfResultPreview } from "./pdf-result-preview.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
 import { deleteProcessingJob, getProcessingJob, inspectPdfWithOcr, isProcessingLocationReady, preferredProcessingMode, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 import { applyRasterTextEdits, inferRasterTextAppearance } from "../lib/pdf-ocr-raster.js";
@@ -972,7 +974,7 @@ function PdfTextJobCard({ initialJob, mode, onReset, onContinue, keepResult }) {
       setPrintError(error instanceof Error ? error.message : "The PDF could not be opened for printing.");
     } finally { setPrinting(false); }
   };
-  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be edited" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<PdfTextJobLog logs={job.logs || []} />{job.warnings?.length > 0 && <DismissibleMessage className="pdf-text-export-warnings" resetKey={job.warnings.join("\n")}><AlertTriangle size={16} /><div>{job.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div></DismissibleMessage>}{done && job.result && <><div className="pdf-text-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>{job.result.pageCount} pages</small></div><iframe src={`${job.result.downloadUrl}${job.result.downloadUrl.includes("?") ? "&" : "?"}preview=1`} title={`Preview of ${job.result.filename}`} /></div><div className="result-summary"><div><span>Output</span><strong title={job.result.filename}>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Edits</span><strong>{job.result.editCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div><ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={downloadName} /><ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} /></>}{printError && <DismissibleMessage className="error-banner" resetKey={printError}><AlertTriangle size={17} /><span>{printError}</span></DismissibleMessage>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, downloadName)} download={downloadName}><Download size={17} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button></>}{(done || failed) && <button className="secondary-button" type="button" onClick={onContinue}><Pencil size={17} /> Continue editing</button>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
+  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be edited" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<PdfTextJobLog logs={job.logs || []} />{job.warnings?.length > 0 && <DismissibleMessage className="pdf-text-export-warnings" resetKey={job.warnings.join("\n")}><AlertTriangle size={16} /><div>{job.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div></DismissibleMessage>}{done && job.result && <PdfResultPreview result={job.result} title="Edited PDF preview" subtitle={`Scroll to review all ${job.result.pageCount} pages`} />}{done && job.result && <><div className="result-summary"><div><span>Output</span><strong title={job.result.filename}>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Edits</span><strong>{job.result.editCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div><ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={downloadName} /><ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} /></>}{printError && <DismissibleMessage className="error-banner" resetKey={printError}><AlertTriangle size={17} /><span>{printError}</span></DismissibleMessage>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, downloadName)} download={downloadName}><Download size={17} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button></>}{(done || failed) && <button className="secondary-button" type="button" onClick={onContinue}><Pencil size={17} /> Continue editing</button>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
 }
 
 export function PdfTextEditor() {
@@ -1075,7 +1077,7 @@ export function PdfTextEditor() {
   };
 
   useEffect(() => { loadPdfLibrary().then(setPdfLibrary).catch(() => setError("PDF preview support could not be loaded. Refresh and try again.")); }, []);
-  useEffect(() => { probeProcessingLocations().then((value) => { setLocations(value); const preferred = preferredProcessingMode(value); setProcessingMode(preferred); setCapabilities(processingCapabilities(value, preferred)); }).catch(() => undefined); }, []);
+  useEffect(() => { probeProcessingLocations({ tool: "pdf-text-editor" }).then((value) => { setLocations(value); const preferred = preferredProcessingMode(value); setProcessingMode(preferred); setCapabilities(processingCapabilities(value, preferred)); }).catch(() => undefined); }, []);
   const defaultResultFilename = useMemo(() => source?.name ? `${filenameStem(source.name)}_edited.pdf` : "edited.pdf", [source?.name]);
   useEffect(() => {
     if (!resultFilenameTouchedRef.current) setResultFilenameStem(filenameStem(defaultResultFilename));
@@ -1388,7 +1390,7 @@ export function PdfTextEditor() {
       setError("");
       setCheckingLocation(true);
       try {
-        exportLocations = await probeProcessingLocations();
+      exportLocations = await probeProcessingLocations({ tool: "pdf-text-editor" });
         setLocations(exportLocations);
       } catch (probeError) {
         setCheckingLocation(false);
@@ -1430,9 +1432,10 @@ export function PdfTextEditor() {
         <div className="heading-note"><ShieldCheck size={16} /><span>Only selected text operators change</span></div>
       </div>
       <ToolViewTabs value={activeView} onChange={setActiveView} />
-      {activeView === "history" ? <ToolHistory tool="pdf-text-editor" /> : activeView === "guide" ? <ToolSeoContent pathname="/pdf-text-editor" /> : (
+      <ProcessingOptionsPanel tool="pdf-text-editor" locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={(mode) => { setProcessingMode(mode); setActiveView("tool"); }} />
+      {activeView === "history" ? <ToolHistory tool="pdf-text-editor" /> : activeView === "guide" ? <ToolSeoContent pathname="/pdf-text-editor" /> : activeView === "processing" ? null : (
         <>
-          <ProcessingMode value={processingMode} onChange={setProcessingMode} locations={locations} />
+          <ProcessingMode value={processingMode} onChange={setProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool="pdf-text-editor" />
           <div className="capability-strip">
             <div className="capability-main">
               <span className={`capability-dot ${capabilities?.status === "ready" ? "ready" : ""}`} />
