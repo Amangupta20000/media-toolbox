@@ -33,7 +33,7 @@ test("SVG to PNG is exposed as a beta tool with crawlable SEO metadata", async (
   assert.match(tool, /getProcessingJob\(jobMode, jobId\)/);
   assert.match(tool, /setJobMode\(processingMode\)/);
   assert.match(tool, /ToolFaqContent pathname="\/svg-to-png"/);
-  assert.match(comingSoon, /\["SVG to PNG converter"[^\n]+"Beta", "\/svg-to-png"\]/);
+  assert.doesNotMatch(comingSoon, /\["SVG to PNG converter"/);
   assert.match(seo, /"\/svg-to-png": \{/);
   assert.match(content, /"\/svg-to-png": \{/);
   assert.ok(PUBLIC_ROUTES.some(({ path: routePath }) => routePath === "/svg-to-png"));

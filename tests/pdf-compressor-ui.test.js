@@ -17,11 +17,8 @@ test("PDF compressor is available and is not listed as coming soon", async () =>
   assert.match(navigation, /href: "\/pdf-compressor"[^\n]+icon: Archive \}/);
   assert.doesNotMatch(navigation, /href: "\/pdf-compressor"[^\n]+beta: true/);
   assert.doesNotMatch(comingSoon, /\["PDF compressor"/);
-  const svgToPngPosition = comingSoon.indexOf('["SVG to PNG converter"');
   const signPosition = comingSoon.indexOf('["Sign images & PDFs"');
-  assert.ok(svgToPngPosition >= 0 && signPosition > svgToPngPosition, "SVG to PNG converter should be the third Coming soon tool");
-  assert.match(comingSoon, /\["SVG to PNG converter"[^\n]+1×, 2×, 3×, 4×/);
-  assert.match(comingSoon, /transparent or color-picked background/);
+  assert.ok(signPosition >= 0, "Sign images & PDFs should remain in Coming soon");
   assert.match(comingSoon, /\["Sign images & PDFs"[^\n]+PenLine\]/);
   assert.match(route, /ToolPage tool="pdf-compressor"/);
   assert.match(toolPage, /pdf-custom-quality/);
