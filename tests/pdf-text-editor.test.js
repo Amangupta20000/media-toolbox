@@ -4,6 +4,7 @@ import { degrees, PDFArray, PDFDict, PDFDocument, PDFName, StandardFonts, decode
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { applyPdfTextEdits, extractPdfTextRuns } from "../lib/pdf-text-editor.js";
 import { createPdfTextPreview } from "../lib/pdf-text-preview.js";
+import { processBrowserPdfTextEdits } from "../components/browser-processing.js";
 import { mergeAdjacentTextRuns } from "../lib/pdf-text-runs.js";
 import { normalizeTextFormat, scaleTextFormat, textFormatDefaults } from "../lib/pdf-text-format.js";
 
@@ -385,6 +386,35 @@ test("live PDF preview rewrites native text instead of drawing over the original
   const after = await extractPdfTextRuns(preview);
   assert.equal(after.pages[0].runs.some((item) => item.text === "Changed heading"), true);
   assert.equal(after.pages[0].runs.some((item) => item.text === "First occurrence"), false);
+});
+
+test("Browser PDF text export rewrites plain native replacements and reports progress", async () => {
+  const source = await createFixture();
+  const extracted = await extractPdfTextRuns(source);
+  const run = extracted.pages[0].runs.find((item) => item.text === "First occurrence");
+  const progress = [];
+  const file = {
+    name: "source.pdf",
+    size: source.byteLength,
+    arrayBuffer: async () => source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength),
+  };
+  const browserOutput = await processBrowserPdfTextEdits(file, [{
+    pageIndex: run.pageIndex,
+    operatorOrdinal: run.ordinal,
+    operatorOrdinals: run.operatorOrdinals,
+    operatorGroups: run.operatorGroups,
+    runId: run.runId,
+    originalText: run.text,
+    originalTextHash: run.originalTextHash,
+    replacementText: "Browser replacement",
+    mode: "native",
+  }], { onProgress: (value) => progress.push(value) });
+  assert.equal(browserOutput.result.pageCount, 2);
+  assert.equal(browserOutput.result.editCount, 1);
+  assert.equal(browserOutput.result.method, "Browser PDF text replacement");
+  assert.match((await searchableText(await browserOutput.blob.arrayBuffer()))[0], /Browser replacement/);
+  assert.doesNotMatch((await searchableText(await browserOutput.blob.arrayBuffer()))[0], /First occurrence/);
+  assert.equal(progress.at(-1), 100);
 });
 
 test("live PDF preview rebuilds all native edits and restores the source when edits are cleared", async () => {

@@ -4,7 +4,9 @@ export const BROWSER_PDF_MAX_BYTES = 10 * 1024 * 1024;
 export const BROWSER_PDF_EDITOR_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 export const BROWSER_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 export const BROWSER_PDF_EDITOR_IMAGE_MAX_BYTES = 1 * 1024 * 1024;
-export const BROWSER_SUPPORTED_TOOLS = new Set(["image-converter", "svg-to-png", "pdf-compressor", "pdf-editor"]);
+export const BROWSER_PDF_TEXT_EDITOR_MAX_BYTES = 25 * 1024 * 1024;
+export const BROWSER_PDF_TEXT_EDITOR_MAX_PAGES = 100;
+export const BROWSER_SUPPORTED_TOOLS = new Set(["image-converter", "svg-to-png", "pdf-compressor", "pdf-editor", "pdf-text-editor"]);
 
 const BROWSER_OUTPUT_MIME = {
   jpeg: "image/jpeg",
@@ -39,7 +41,7 @@ export function browserCapabilities(tool) {
       status: supported ? "ready" : "unavailable",
       browser: true,
       image: { browser: supported, formats },
-      pdf: { browser: supported && ["pdf-compressor", "pdf-editor"].includes(tool) },
+      pdf: { browser: supported && ["pdf-compressor", "pdf-editor", "pdf-text-editor"].includes(tool) },
     },
     error: supported ? "" : "This browser does not support the required local conversion features.",
   };
@@ -316,6 +318,74 @@ async function renderBrowserPdfPage(page, settings) {
 function browserPdfOutputName(filename) {
   const stem = String(filename || "document.pdf").replace(/\.pdf$/i, "").replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "document";
   return `${stem}_compressed.pdf`;
+}
+
+function browserPdfTextOutputName(filename) {
+  return `${safeStem(filename || "document.pdf")}_edited.pdf`;
+}
+
+function browserPdfTextEditIsPlain(edit) {
+  if (!edit || edit.mode === "ocr" || edit.moveOnly || edit.format) return false;
+  if (Object.prototype.hasOwnProperty.call(edit, "offsetX") || Object.prototype.hasOwnProperty.call(edit, "offsetY")) return false;
+  if (Object.prototype.hasOwnProperty.call(edit, "scale") || Object.prototype.hasOwnProperty.call(edit, "scaleX") || Object.prototype.hasOwnProperty.call(edit, "scaleY") || Object.prototype.hasOwnProperty.call(edit, "rotation")) return false;
+  return typeof edit.replacementText === "string";
+}
+
+/**
+ * Rewrite only native, selectable PDF text in Browser mode. This deliberately
+ * accepts a small plain-text payload so formatting, placement, OCR, and
+ * password handling cannot accidentally fall through to the Local-agent
+ * export path.
+ */
+export async function processBrowserPdfTextEdits(source, edits = [], { onProgress } = {}) {
+  if (!source || Number(source.size) > BROWSER_PDF_TEXT_EDITOR_MAX_BYTES) {
+    throw new Error("Browser mode supports PDF text editing for PDFs up to 25 MB. Use the Local agent for larger PDFs.");
+  }
+  if (!Array.isArray(edits) || !edits.length || edits.some((edit) => !browserPdfTextEditIsPlain(edit))) {
+    throw new Error("This project contains Local-agent-only text styling or placement changes. Switch to Local agent to export it.");
+  }
+  onProgress?.(5, "Reading PDF");
+  let pdf;
+  try {
+    const [pdfjs, previewModule] = await Promise.all([
+      import("pdfjs-dist/legacy/build/pdf.mjs"),
+      import("../lib/pdf-text-preview.js"),
+    ]);
+    if (pdfjs.GlobalWorkerOptions) pdfjs.GlobalWorkerOptions.workerSrc = "/api/pdf/worker";
+    const sourceBytes = new Uint8Array(await source.arrayBuffer());
+    const pdfBytes = sourceBytes.slice();
+    const task = pdfjs.getDocument({ data: pdfBytes, useSystemFonts: true });
+    task.onPassword = (callback) => callback(null);
+    pdf = await task.promise;
+    onProgress?.(18, "Validating selectable text");
+    if (pdf.numPages > BROWSER_PDF_TEXT_EDITOR_MAX_PAGES) {
+      throw new Error(`Browser mode supports PDFs with up to ${BROWSER_PDF_TEXT_EDITOR_MAX_PAGES} pages. Use the Local agent for longer documents.`);
+    }
+    onProgress?.(72, "Writing edited PDF");
+    const outputBytes = await previewModule.createPdfTextPreview(sourceBytes, edits);
+    const blob = new Blob([outputBytes], { type: "application/pdf" });
+    onProgress?.(100, "PDF text export complete");
+    return {
+      blob,
+      result: {
+        filename: browserPdfTextOutputName(source.name),
+        bytes: blob.size,
+        inputBytes: source.size,
+        pageCount: pdf.numPages,
+        editCount: edits.length,
+        method: "Browser PDF text replacement",
+        warnings: [],
+      },
+    };
+  } catch (error) {
+    if (error?.name === "PasswordException" || /password|encrypted/i.test(error?.message || "")) {
+      throw new Error("Password-protected PDFs require Local agent. Switch to Local agent to continue.");
+    }
+    throw browserProcessingError(error);
+  } finally {
+    await pdf?.cleanup?.();
+    await pdf?.destroy?.();
+  }
 }
 
 /**

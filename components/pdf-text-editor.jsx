@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Bold, CheckCircle2, Download, FileText, Italic, Keyboard, LoaderCircle, Pencil, Printer, Redo2, RotateCcw, Save, ShieldCheck, Underline, Undo2, UploadCloud, X, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertTriangle, Bold, CheckCircle2, Download, FileText, Italic, Keyboard, LoaderCircle, LockKeyhole, Pencil, Printer, Redo2, RotateCcw, Save, ShieldCheck, Underline, Undo2, UploadCloud, X, ZoomIn, ZoomOut } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { FileDropzone, formatBytes } from "./file-dropzone.jsx";
 import { ProcessingMode } from "./processing-mode.jsx";
@@ -13,6 +13,7 @@ import { ProcessingOptionsPanel } from "./processing-options.jsx";
 import { PdfResultPreview } from "./pdf-result-preview.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
 import { deleteProcessingJob, getProcessingJob, inspectPdfWithOcr, isProcessingLocationReady, preferredProcessingMode, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
+import { BROWSER_PDF_TEXT_EDITOR_MAX_BYTES, BROWSER_PDF_TEXT_EDITOR_MAX_PAGES, processBrowserPdfTextEdits } from "./browser-processing.js";
 import { applyRasterTextEdits, inferRasterTextAppearance } from "../lib/pdf-ocr-raster.js";
 import { MAX_PDF_BYTES } from "../lib/pdf-limits.js";
 import { mergeAdjacentTextRuns } from "../lib/pdf-text-runs.js";
@@ -74,6 +75,18 @@ function hasTextOffset(value) {
 function hasTextTransform(value) {
   const transform = textTransform(value);
   return Math.abs(transform.scaleX - 1) > 0.001 || Math.abs(transform.scaleY - 1) > 0.001 || Math.abs(transform.rotation) > 0.01;
+}
+
+const BROWSER_TEXT_LOCAL_ONLY_ERROR = "This project contains Local-agent-only text styling or placement changes. Switch to Local agent to export it.";
+const BROWSER_TEXT_OCR_ERROR = "Browser mode edits selectable embedded text only. Use Local agent for OCR or scanned PDF editing.";
+const BROWSER_TEXT_PASSWORD_ERROR = "Password-protected PDFs require Local agent. Switch to Local agent to continue.";
+
+function browserTextEditorRestriction(state, pages) {
+  if (Object.keys(state?.textFormats || {}).some((runId) => hasTextFormat(state.textFormats[runId]))) return BROWSER_TEXT_LOCAL_ONLY_ERROR;
+  if (Object.values(state?.textOffsets || {}).some((offset) => hasTextOffset(offset)) || Object.values(state?.textTransforms || {}).some((transform) => hasTextTransform(transform))) return BROWSER_TEXT_LOCAL_ONLY_ERROR;
+  const runsById = new Map((pages || []).flatMap((page) => page.runs || []).map((run) => [run.runId, run]));
+  if (Object.keys(state?.edits || {}).some((runId) => runsById.get(runId)?.mode === "ocr")) return BROWSER_TEXT_OCR_ERROR;
+  return "";
 }
 
 function textOrigin(model, run, pdfLibrary) {
@@ -508,7 +521,7 @@ function TextResizeHandle({ run, appearance, surfaceRef, handle, position, onPre
   return <button type="button" className={`pdf-text-resize-handle ${handle}`} style={position} aria-label={`Resize selected text ${run.text} from the ${handle} handle`} title="Drag to resize" onPointerDown={startResize} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={endResize} />;
 }
 
-function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms, textFormats, pdfLibrary, previewZoom, onSelectRun, onMoveRun, onMoveRunEnd, onAppearanceChange, onInferredTextFormat, pageRef }) {
+function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms, textFormats, pdfLibrary, previewZoom, onSelectRun, onMoveRun, onMoveRunEnd, onAppearanceChange, onInferredTextFormat, pageRef, browserMode = false }) {
   const frameRef = useRef(null);
   const surfaceRef = useRef(null);
   const canvasRef = useRef(null);
@@ -694,6 +707,7 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
     onSelectRun(run);
   };
   const startTextDrag = (event, run) => {
+    if (browserMode) return;
     if ((!run.editable && !run.graphic) || event.button !== 0 || event.pointerType !== "mouse") return;
     event.preventDefault();
     event.stopPropagation();
@@ -743,17 +757,17 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
     const transformable = run.editable || run.graphic;
     const selected = selectedRunId === run.runId && transformable;
     const selectionFrame = selected ? <div className="pdf-text-selection-frame" style={{ left: run.left, top: run.top, width: Math.max(4, run.width || 0), height: Math.max(7, run.height || 0), transform: `rotate(${displayAppearance.rotation}deg)`, transformOrigin: "center center" }}>
-      {Object.keys(resizeHandleDirections).map((handle) => <TextResizeHandle key={handle} run={run} appearance={displayAppearance} surfaceRef={surfaceRef} handle={handle} position={{ ...selectionHandlePoint(run, displayAppearance, handle), transform: "translate(-50%, -50%)" }} onPreviewChange={previewTransform} onChange={commitTransform} />)}
-      <TextRotationHandle run={run} appearance={displayAppearance} surfaceRef={surfaceRef} onPreviewChange={previewTransform} onChange={commitTransform} position={{ ...selectionHandlePoint(run, displayAppearance, "top", 23), transform: "translate(-50%, -50%)" }} />
+      {!browserMode && Object.keys(resizeHandleDirections).map((handle) => <TextResizeHandle key={handle} run={run} appearance={displayAppearance} surfaceRef={surfaceRef} handle={handle} position={{ ...selectionHandlePoint(run, displayAppearance, handle), transform: "translate(-50%, -50%)" }} onPreviewChange={previewTransform} onChange={commitTransform} />)}
+      {!browserMode && <TextRotationHandle run={run} appearance={displayAppearance} surfaceRef={surfaceRef} onPreviewChange={previewTransform} onChange={commitTransform} position={{ ...selectionHandlePoint(run, displayAppearance, "top", 23), transform: "translate(-50%, -50%)" }} />}
       <button
         type="button"
         className={`pdf-text-run ${run.mode === "ocr" ? "ocr" : ""} ${run.graphic ? "graphic" : ""} selected ${edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]) || hasTextFormat(textFormats[run.runId]) ? "edited" : ""}`}
         style={{ left: 0, top: 0, width: "100%", height: "100%", transform: `scale(${displayAppearance.scaleX}, ${displayAppearance.scaleY})`, transformOrigin: "center center" }}
         onClick={() => selectTextRun(run)}
-        onPointerDown={(event) => startTextDrag(event, run)}
-        onPointerMove={(event) => moveTextDrag(event, run)}
-        onPointerUp={(event) => endTextDrag(event, run)}
-        onPointerCancel={(event) => endTextDrag(event, run)}
+        onPointerDown={browserMode ? undefined : (event) => startTextDrag(event, run)}
+        onPointerMove={browserMode ? undefined : (event) => moveTextDrag(event, run)}
+        onPointerUp={browserMode ? undefined : (event) => endTextDrag(event, run)}
+        onPointerCancel={browserMode ? undefined : (event) => endTextDrag(event, run)}
         onLostPointerCapture={(event) => { if (dragRef.current?.pointerId === event.pointerId) { dragRef.current = null; suppressClickRef.current = false; } }}
         title={run.graphic ? `Select graphic “${run.text}”` : `Edit “${run.text}”`}
         aria-label={run.graphic ? `Select graphic ${run.text}` : `Edit text ${run.text}`}
@@ -763,10 +777,10 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
       className={`pdf-text-run ${run.mode === "ocr" ? "ocr" : ""} ${run.graphic ? "graphic" : ""} ${edits[run.runId] !== undefined || hasTextOffset(textOffsets[run.runId]) || hasTextTransform(textTransforms[run.runId]) || hasTextFormat(textFormats[run.runId]) ? "edited" : ""} ${!run.editable && !run.graphic ? "not-editable" : ""}`}
       style={{ left: run.left, top: run.top, width: run.width || undefined, height: run.height || undefined, transform: `rotate(${displayAppearance.rotation}deg) scale(${displayAppearance.scaleX}, ${displayAppearance.scaleY})`, transformOrigin: "center center" }}
       onClick={() => selectTextRun(run)}
-      onPointerDown={(event) => startTextDrag(event, run)}
-      onPointerMove={(event) => moveTextDrag(event, run)}
-      onPointerUp={(event) => endTextDrag(event, run)}
-      onPointerCancel={(event) => endTextDrag(event, run)}
+      onPointerDown={browserMode ? undefined : (event) => startTextDrag(event, run)}
+      onPointerMove={browserMode ? undefined : (event) => moveTextDrag(event, run)}
+      onPointerUp={browserMode ? undefined : (event) => endTextDrag(event, run)}
+      onPointerCancel={browserMode ? undefined : (event) => endTextDrag(event, run)}
       onLostPointerCapture={(event) => { if (dragRef.current?.pointerId === event.pointerId) { dragRef.current = null; suppressClickRef.current = false; } }}
       title={run.graphic ? `Select graphic “${run.text}”` : run.editable ? `Edit “${run.text}”` : run.reason}
       aria-label={run.graphic ? `Select graphic ${run.text}` : run.editable ? `Edit text ${run.text}` : `Text not editable: ${run.reason}`}
@@ -785,7 +799,7 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
   </article>;
 }
 
-const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview({ pages, selectedRunId, edits, textOffsets, textTransforms, textFormats, pdfLibrary, previewZoom, previewRevision, onSelectRun, onMoveRun, onMoveRunEnd, onAppearanceChange, onInferredTextFormat, onPinchZoom }, ref) {
+const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview({ pages, selectedRunId, edits, textOffsets, textTransforms, textFormats, pdfLibrary, previewZoom, previewRevision, onSelectRun, onMoveRun, onMoveRunEnd, onAppearanceChange, onInferredTextFormat, onPinchZoom, browserMode = false }, ref) {
   const scrollRef = useRef(null);
   const previewZoomRef = useRef(previewZoom);
   const pageHeight = useEstimatedPreviewPageHeight(previewZoom);
@@ -847,7 +861,7 @@ const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview(
       {pages.slice(windowed.start, windowed.end).map((model, offset) => {
         const index = windowed.start + offset;
         return <div key={`${model.pageIndex}-${previewRevision}`} className="pdf-text-virtual-item" style={{ top: `${index * stride}px`, left: 0, width: "100%", height: `${pageHeight}px` }}>
-          <PdfTextPage model={model} selectedRunId={selectedRunId} edits={edits} textOffsets={textOffsets} textTransforms={textTransforms} textFormats={textFormats} pdfLibrary={pdfLibrary} previewZoom={previewZoom} onSelectRun={onSelectRun} onMoveRun={onMoveRun} onMoveRunEnd={onMoveRunEnd} onAppearanceChange={onAppearanceChange} onInferredTextFormat={onInferredTextFormat} />
+          <PdfTextPage model={model} selectedRunId={selectedRunId} edits={edits} textOffsets={textOffsets} textTransforms={textTransforms} textFormats={textFormats} pdfLibrary={pdfLibrary} previewZoom={previewZoom} onSelectRun={onSelectRun} onMoveRun={onMoveRun} onMoveRunEnd={onMoveRunEnd} onAppearanceChange={onAppearanceChange} onInferredTextFormat={onInferredTextFormat} browserMode={browserMode} />
         </div>;
       })}
     </div>
@@ -878,36 +892,38 @@ function VirtualizedPdfTextRail({ pages, onSelect }) {
   </aside>;
 }
 
-function TextEditPopover({ run, value, onChange, onSave, onCancel, onRestore, format, onFormatChange }) {
+function TextEditPopover({ run, value, onChange, onSave, onCancel, onRestore, format, onFormatChange, browserMode = false }) {
   if (!run) return null;
   if (!run.editable) {
     const graphic = Boolean(run.graphic);
     return <div className="pdf-text-edit-popover pdf-text-graphic-popover" role="dialog" aria-label={`${graphic ? "Selected graphic" : "Selected non-editable run"} on page ${run.pageIndex + 1}`}>
       <div className="pdf-text-edit-heading"><div><span>{graphic ? "Selected graphic" : "Selected non-editable run"} · Page {run.pageIndex + 1}</span><strong title={run.text}>{run.text}</strong></div><button className="icon-button" type="button" onClick={onCancel} aria-label="Close selection" title="Close"><X size={17} /></button></div>
-      <div className="pdf-text-graphic-note"><FileText size={18} /><span>{graphic ? "This OCR-detected symbol or icon is preserved as artwork. Drag it to move it, or use the selection handles to resize and rotate it. Text replacement is disabled." : (run.reason || "This run cannot be edited safely.")}</span></div>
+      <div className="pdf-text-graphic-note"><FileText size={18} /><span>{graphic ? (browserMode ? "This artwork is not editable in Browser mode. Use Local agent to move, resize, or rotate it." : "This OCR-detected symbol or icon is preserved as artwork. Drag it to move it, or use the selection handles to resize and rotate it. Text replacement is disabled.") : (browserMode ? BROWSER_TEXT_OCR_ERROR : (run.reason || "This run cannot be edited safely."))}</span></div>
       <div className="pdf-text-edit-actions"><button className="secondary-button" type="button" onClick={onCancel}>Done</button></div>
     </div>;
   }
   const overflow = graphemeCount(value) > graphemeCount(run.text);
   const appearance = textFormat(format, run);
-  const styleButton = (key, Icon, label) => <button className="pdf-text-format-button" type="button" aria-label={`${label} selected PDF text`} aria-pressed={Boolean(appearance[key])} title={label} onClick={() => onFormatChange?.({ [key]: !appearance[key] })}><Icon size={14} /></button>;
+  const localOnlyMessage = "Text formatting and placement (font, size, colour, move, resize, and rotate) are Local agent only.";
+  const styleButton = (key, Icon, label) => <button className="pdf-text-format-button" type="button" aria-label={`${label} selected PDF text`} aria-pressed={Boolean(appearance[key])} title={label} disabled={browserMode} onClick={() => onFormatChange?.({ [key]: !appearance[key] })}><Icon size={14} /></button>;
   return <div className="pdf-text-edit-popover" role="dialog" aria-label={`Edit ${run.text} on page ${run.pageIndex + 1}`}>
     <div className="pdf-text-edit-heading"><div><span>Selected text · Page {run.pageIndex + 1}</span><strong title={run.text}>{run.text}</strong></div><button className="icon-button" type="button" onClick={onCancel} aria-label="Close text editor" title="Close"><X size={17} /></button></div>
     <input autoFocus value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onSave(); if (event.key === "Escape") onCancel(); }} aria-label="Replacement text" />
-    <div className="pdf-text-format-panel" aria-label="Format existing PDF text">
+    <div className={`pdf-text-format-panel${browserMode ? " is-locked" : ""}`} aria-label="Format existing PDF text" aria-disabled={browserMode}>
       <strong>Format selected text</strong>
+      {browserMode && <div className="pdf-text-local-only-note"><LockKeyhole size={16} aria-hidden="true" /><span>{localOnlyMessage}</span></div>}
       <div className="pdf-text-format-row">
-        <select value={appearance.fontFamily} aria-label="Font family for selected PDF text" title="Font family" onChange={(event) => onFormatChange?.({ fontFamily: event.target.value })}>{PDF_TEXT_BOX_FONTS.map((font) => <option key={font.value} value={font.value}>{font.label}</option>)}</select>
-        <input type="number" min="1" max="500" step="1" value={appearance.fontSize} aria-label="Font size for selected PDF text" title="Font size" onChange={(event) => onFormatChange?.({ fontSize: Math.max(1, Math.min(500, Number(event.target.value) || 1)) })} />
+        <select value={appearance.fontFamily} aria-label="Font family for selected PDF text" title="Font family" disabled={browserMode} onChange={(event) => onFormatChange?.({ fontFamily: event.target.value })}>{PDF_TEXT_BOX_FONTS.map((font) => <option key={font.value} value={font.value}>{font.label}</option>)}</select>
+        <input type="number" min="1" max="500" step="1" value={appearance.fontSize} aria-label="Font size for selected PDF text" title="Font size" disabled={browserMode} onChange={(event) => onFormatChange?.({ fontSize: Math.max(1, Math.min(500, Number(event.target.value) || 1)) })} />
         {styleButton("bold", Bold, "Bold")}{styleButton("italic", Italic, "Italic")}{styleButton("underline", Underline, "Underline")}
-        <label className="pdf-text-format-color" title="Text color"><span className="sr-only">Text color</span><input type="color" value={appearance.color} aria-label="Text color for selected PDF text" onChange={(event) => onFormatChange?.({ color: event.target.value })} /></label>
+        <label className="pdf-text-format-color" title="Text color"><span className="sr-only">Text color</span><input type="color" value={appearance.color} aria-label="Text color for selected PDF text" disabled={browserMode} onChange={(event) => onFormatChange?.({ color: event.target.value })} /></label>
       </div>
       <div className="pdf-text-format-row pdf-text-format-secondary-row">
-        <label>Align <select value={appearance.alignment} aria-label="Alignment for selected PDF text" onChange={(event) => onFormatChange?.({ alignment: event.target.value })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
-        <label>Character spacing <input type="number" min="-100" max="100" step="0.1" value={appearance.characterSpacing} aria-label="Character spacing for selected PDF text" onChange={(event) => onFormatChange?.({ characterSpacing: Math.max(-100, Math.min(100, Number(event.target.value) || 0)) })} /></label>
-        <label>Line spacing <input type="number" min="0.1" max="10" step="0.1" value={appearance.lineSpacing} aria-label="Line spacing for selected PDF text" onChange={(event) => onFormatChange?.({ lineSpacing: Math.max(0.1, Math.min(10, Number(event.target.value) || 0.1)) })} /></label>
+        <label>Align <select value={appearance.alignment} aria-label="Alignment for selected PDF text" disabled={browserMode} onChange={(event) => onFormatChange?.({ alignment: event.target.value })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+        <label>Character spacing <input type="number" min="-100" max="100" step="0.1" value={appearance.characterSpacing} aria-label="Character spacing for selected PDF text" disabled={browserMode} onChange={(event) => onFormatChange?.({ characterSpacing: Math.max(-100, Math.min(100, Number(event.target.value) || 0)) })} /></label>
+        <label>Line spacing <input type="number" min="0.1" max="10" step="0.1" value={appearance.lineSpacing} aria-label="Line spacing for selected PDF text" disabled={browserMode} onChange={(event) => onFormatChange?.({ lineSpacing: Math.max(0.1, Math.min(10, Number(event.target.value) || 0.1)) })} /></label>
       </div>
-      <small>Formatting applies to this PDF text run and is preserved on export. Alignment and line spacing affect replacement text within its original run.</small>
+      {browserMode ? <small>These controls are shown for reference and are disabled in Browser mode.</small> : <small>Formatting applies to this PDF text run and is preserved on export. Alignment and line spacing affect replacement text within its original run.</small>}
     </div>
     <div className="pdf-text-edit-actions"><button className="primary-button" type="button" onClick={onSave}><Save size={15} /> Save text</button><button className="secondary-button" type="button" onClick={onRestore}><RotateCcw size={15} /> Restore original</button><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button></div>{overflow && <DismissibleMessage className="pdf-text-overflow-warning" resetKey={run.runId}><AlertTriangle size={15} /><span>This replacement is longer. It will overflow if necessary; surrounding content will not reflow.</span></DismissibleMessage>}
   </div>;
@@ -918,8 +934,8 @@ function formatLogTime(value) {
   return Number.isNaN(date.getTime()) ? "--:--:--" : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function PdfTextJobLog({ logs }) {
-  return <div className="job-log-panel"><div className="job-log-heading"><span><span className="log-live-dot" /> Worker log</span><span>{logs.length} events</span></div><div className="job-log-list" aria-live="polite">{logs.length ? logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{formatLogTime(entry.time)}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for the worker to report progress…</div>}</div></div>;
+function PdfTextJobLog({ logs, mode }) {
+  return <div className="job-log-panel"><div className="job-log-heading"><span><span className="log-live-dot" /> {mode === "browser" ? "Browser log" : "Worker log"}</span><span>{logs.length} events</span></div><div className="job-log-list" aria-live="polite">{logs.length ? logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{formatLogTime(entry.time)}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for the {mode === "browser" ? "browser" : "worker"} to report progress…</div>}</div></div>;
 }
 
 function PdfTextJobCard({ initialJob, mode, onReset, onContinue, keepResult }) {
@@ -928,6 +944,10 @@ function PdfTextJobCard({ initialJob, mode, onReset, onContinue, keepResult }) {
   const [printError, setPrintError] = useState("");
   const [filenameStemValue, setFilenameStemValue] = useState("");
   useEffect(() => {
+    if (mode === "browser") setJob(initialJob);
+  }, [initialJob, mode]);
+  useEffect(() => {
+    if (mode === "browser") return undefined;
     let active = true;
     let timer;
     const schedulePoll = () => { timer = window.setTimeout(poll, 1000); };
@@ -974,7 +994,7 @@ function PdfTextJobCard({ initialJob, mode, onReset, onContinue, keepResult }) {
       setPrintError(error instanceof Error ? error.message : "The PDF could not be opened for printing.");
     } finally { setPrinting(false); }
   };
-  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be edited" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<PdfTextJobLog logs={job.logs || []} />{job.warnings?.length > 0 && <DismissibleMessage className="pdf-text-export-warnings" resetKey={job.warnings.join("\n")}><AlertTriangle size={16} /><div>{job.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div></DismissibleMessage>}{done && job.result && <PdfResultPreview result={job.result} title="Edited PDF preview" subtitle={`Scroll to review all ${job.result.pageCount} pages`} />}{done && job.result && <><div className="result-summary"><div><span>Output</span><strong title={job.result.filename}>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Edits</span><strong>{job.result.editCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div><ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={downloadName} /><ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} /></>}{printError && <DismissibleMessage className="error-banner" resetKey={printError}><AlertTriangle size={17} /><span>{printError}</span></DismissibleMessage>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, downloadName)} download={downloadName}><Download size={17} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button></>}{(done || failed) && <button className="secondary-button" type="button" onClick={onContinue}><Pencil size={17} /> Continue editing</button>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
+  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be edited" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<PdfTextJobLog logs={job.logs || []} mode={mode} />{job.warnings?.length > 0 && <DismissibleMessage className="pdf-text-export-warnings" resetKey={job.warnings.join("\n")}><AlertTriangle size={16} /><div>{job.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div></DismissibleMessage>}{done && job.result && <PdfResultPreview result={job.result} title="Edited PDF preview" subtitle={`Scroll to review all ${job.result.pageCount} pages`} />}{done && job.result && <><div className="result-summary"><div><span>Output</span><strong title={job.result.filename}>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Edits</span><strong>{job.result.editCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div><ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={downloadName} /><ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} /></>}{printError && <DismissibleMessage className="error-banner" resetKey={printError}><AlertTriangle size={17} /><span>{printError}</span></DismissibleMessage>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, downloadName)} download={downloadName}><Download size={17} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button></>}{(done || failed) && <button className="secondary-button" type="button" onClick={onContinue}><Pencil size={17} /> Continue editing</button>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
 }
 
 export function PdfTextEditor() {
@@ -1021,6 +1041,10 @@ export function PdfTextEditor() {
   const sourceBytesRef = useRef(null);
   const sourcePasswordRef = useRef("");
   const resultFilenameTouchedRef = useRef(false);
+  const browserResultUrlRef = useRef("");
+  useEffect(() => () => {
+    if (browserResultUrlRef.current) URL.revokeObjectURL(browserResultUrlRef.current);
+  }, []);
 
   const syncTextEditorState = (next) => {
     textEditorStateRef.current = next;
@@ -1076,6 +1100,21 @@ export function PdfTextEditor() {
     refreshEditedPreview(target.edits, target.textOffsets, target.textTransforms, target.textFormats).catch(() => undefined);
   };
 
+  const selectProcessingMode = (mode) => {
+    setError("");
+    if (mode === "browser") {
+      const restriction = browserTextEditorRestriction(textEditorStateRef.current, pages);
+      if (restriction) setError(restriction);
+    }
+    setProcessingMode(mode);
+    setActiveView("tool");
+  };
+  const useLocalAgent = () => {
+    setError("");
+    setProcessingMode("local");
+    setActiveView("processing");
+  };
+
   useEffect(() => { loadPdfLibrary().then(setPdfLibrary).catch(() => setError("PDF preview support could not be loaded. Refresh and try again.")); }, []);
   useEffect(() => { probeProcessingLocations({ tool: "pdf-text-editor" }).then((value) => { setLocations(value); const preferred = preferredProcessingMode(value); setProcessingMode(preferred); setCapabilities(processingCapabilities(value, preferred)); }).catch(() => undefined); }, []);
   const defaultResultFilename = useMemo(() => source?.name ? `${filenameStem(source.name)}_edited.pdf` : "edited.pdf", [source?.name]);
@@ -1120,8 +1159,16 @@ export function PdfTextEditor() {
     setError("");
     if (!file) return;
     if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) { setError("Choose a PDF file."); return; }
-    if (file.size > MAX_PDF_BYTES) { setError("The PDF must be 200 MB or smaller."); return; }
+    const maxBytes = processingMode === "browser" ? BROWSER_PDF_TEXT_EDITOR_MAX_BYTES : MAX_PDF_BYTES;
+    if (file.size > maxBytes) {
+      setError(processingMode === "browser" ? "Browser mode supports PDFs up to 25 MB. Use Local agent for larger PDFs." : "The PDF must be 200 MB or smaller.");
+      return;
+    }
     if (!pdfLibrary) { setError("PDF preview support is still loading. Try again in a moment."); return; }
+    if (processingMode === "browser") {
+      loadFile(file, "embedded").catch(() => undefined);
+      return;
+    }
     previewRequestRef.current += 1;
     setPendingOcrFile(file);
     setOcrMode(null);
@@ -1133,6 +1180,10 @@ export function PdfTextEditor() {
   const loadFile = async (file, requestedOcrMode = "auto") => {
     setError("");
     if (!file) return;
+    if (processingMode === "browser" && file.size > BROWSER_PDF_TEXT_EDITOR_MAX_BYTES) {
+      setError("Browser mode supports PDFs up to 25 MB. Use Local agent for larger PDFs.");
+      return;
+    }
     previewRequestRef.current += 1;
     setPendingOcrFile(null);
     setLoading(true); setSource(file); setPages([]); clearTextEditorHistory(); setSelectedRun(null); setOcrProgress(0); setLoadingMessage("Reading PDF text and building previews…"); sourcePasswordRef.current = "";
@@ -1145,13 +1196,27 @@ export function PdfTextEditor() {
       const digest = await hashBytes(data);
       const task = pdfLibrary.getDocument({ data });
       task.onPassword = (callback, reason) => {
+        if (processingMode === "browser") {
+          callback(null);
+          return;
+        }
         const password = window.prompt(reason === 2 ? "That PDF password was incorrect. Enter it again." : "Enter the password to open this PDF.");
         if (password === null) callback(null); else { pdfPassword = password; sourcePasswordRef.current = password; callback(password); }
       };
       const loaded = await task.promise;
+      if (processingMode === "browser" && loaded.numPages > BROWSER_PDF_TEXT_EDITOR_MAX_PAGES) {
+        throw new Error(`Browser mode supports PDFs with up to ${BROWSER_PDF_TEXT_EDITOR_MAX_PAGES} pages. Use Local agent for longer documents.`);
+      }
       const models = [];
       for (let pageIndex = 0; pageIndex < loaded.numPages; pageIndex += 1) models.push(await inspectPage(await loaded.getPage(pageIndex + 1), pageIndex, pdfLibrary, digest));
       setSourceHash(digest);
+      if (processingMode === "browser") {
+        setPages(models);
+        setOcrMode("embedded");
+        if (!models.some((model) => model.runs.some((run) => run.editable))) setError(BROWSER_TEXT_OCR_ERROR);
+        else if (models.some((model) => model.requiresOcr || !model.runs.some((run) => run.editable))) setError("Some scanned pages are unavailable in Browser mode. Use Local agent to edit them with OCR.");
+        return;
+      }
       if (requestedOcrMode === "embedded") {
         setPages(models);
         setOcrMode("embedded");
@@ -1206,7 +1271,7 @@ export function PdfTextEditor() {
       }
     } catch (loadError) {
       setSource(null); setPages([]);
-      setError(loadError?.name === "PasswordException" ? "The PDF password was incorrect or the encrypted PDF cannot be edited safely." : loadError instanceof Error ? loadError.message : "The PDF could not be opened for text editing.");
+      setError(loadError?.name === "PasswordException" ? (processingMode === "browser" ? BROWSER_TEXT_PASSWORD_ERROR : "The PDF password was incorrect or the encrypted PDF cannot be edited safely.") : loadError instanceof Error ? loadError.message : "The PDF could not be opened for text editing.");
     } finally { setLoading(false); setOcrProgress(0); }
   };
 
@@ -1247,6 +1312,9 @@ export function PdfTextEditor() {
       const textChanged = edits[run.runId] !== undefined;
       return { runId: run.runId, ...(textChanged || formatting ? { replacementText: edits[run.runId] ?? run.text } : { moveOnly: true }), ...(formatting ? { format: formatting } : {}), ...textTransform(textTransforms[run.runId]) };
     }));
+  const browserRestriction = processingMode === "browser"
+    ? sourcePasswordRef.current ? BROWSER_TEXT_PASSWORD_ERROR : browserTextEditorRestriction(textEditorStateRef.current, pages)
+    : "";
   const canSubmit = Boolean(source && sourceHash && changedEdits.length && !loading && !uploadProgress && !checkingLocation);
 
   const chooseRun = (run) => {
@@ -1257,6 +1325,12 @@ export function PdfTextEditor() {
     const currentRun = pages
       .find((page) => page.pageIndex === run.pageIndex)
       ?.runs.find((candidate) => candidate.runId === run.runId) || run;
+    if (processingMode === "browser" && currentRun.mode === "ocr") {
+      setSelectedRun(null);
+      setEditorValue("");
+      setError(BROWSER_TEXT_OCR_ERROR);
+      return;
+    }
     setSelectedRun(currentRun);
     setEditorValue(currentRun.editable ? (edits[currentRun.runId] ?? currentRun.text) : "");
     setError(currentRun.editable || currentRun.graphic ? "" : currentRun.reason);
@@ -1286,7 +1360,12 @@ export function PdfTextEditor() {
       }));
     setPreviewUpdating(true);
     try {
-      const nativePreviewEdits = previewEdits.filter((edit) => edit.mode !== "ocr");
+      const nativePreviewEdits = processingMode === "browser"
+        ? previewEdits.filter((edit) => edit.mode !== "ocr" && typeof edit.replacementText === "string").map((edit) => {
+          const { format, moveOnly, offsetX, offsetY, scale, scaleX, scaleY, rotation, originX, originY, ...plainEdit } = edit;
+          return { ...plainEdit, mode: "native" };
+        })
+        : previewEdits.filter((edit) => edit.mode !== "ocr");
       const { createPdfTextPreview } = await import("../lib/pdf-text-preview.js");
       // An empty native edit list intentionally rebuilds from the source too.
       // This is required when the user restores the original text; simply
@@ -1317,18 +1396,29 @@ export function PdfTextEditor() {
       if (requestId === previewRequestRef.current) setPreviewUpdating(false);
     }
   };
-  const moveRun = (runId, offset) => updateWorkingTextEditorState({ ...textEditorStateRef.current, textOffsets: { ...textEditorStateRef.current.textOffsets, [runId]: textOffset(offset) } });
+  const rejectBrowserPlacementEdit = () => {
+    if (processingMode !== "browser") return false;
+    setError(BROWSER_TEXT_LOCAL_ONLY_ERROR);
+    return true;
+  };
+  const moveRun = (runId, offset) => {
+    if (rejectBrowserPlacementEdit()) return;
+    updateWorkingTextEditorState({ ...textEditorStateRef.current, textOffsets: { ...textEditorStateRef.current.textOffsets, [runId]: textOffset(offset) } });
+  };
   const finishMovingRun = (runId, offset) => {
+    if (rejectBrowserPlacementEdit()) return;
     const next = { ...textEditorStateRef.current, textOffsets: { ...textEditorStateRef.current.textOffsets, [runId]: textOffset(offset) } };
     commitTextEditorState(next);
     refreshEditedPreview(next.edits, next.textOffsets, next.textTransforms, next.textFormats).catch(() => undefined);
   };
   const updateTextTransform = (runId, value) => {
+    if (rejectBrowserPlacementEdit()) return;
     const next = { ...textEditorStateRef.current, textTransforms: { ...textEditorStateRef.current.textTransforms, [runId]: textTransform(value) } };
     commitTextEditorState(next);
     refreshEditedPreview(next.edits, next.textOffsets, next.textTransforms, next.textFormats).catch(() => undefined);
   };
   const updateTextFormat = (runId, changes) => {
+    if (processingMode === "browser") { setError(BROWSER_TEXT_LOCAL_ONLY_ERROR); return; }
     const run = pages.flatMap((page) => page.runs).find((item) => item.runId === runId);
     if (!run) return;
     const current = textFormat(textEditorStateRef.current.textFormats[runId] || inferredTextFormats[runId], run);
@@ -1337,6 +1427,7 @@ export function PdfTextEditor() {
     refreshEditedPreview(next.edits, next.textOffsets, next.textTransforms, next.textFormats).catch(() => undefined);
   };
   const updateInferredTextFormat = (runId, changes) => {
+    if (processingMode === "browser") return;
     const run = pages.flatMap((page) => page.runs).find((item) => item.runId === runId);
     if (!run || textEditorStateRef.current.textFormats[runId]) return;
     setInferredTextFormats((currentFormats) => {
@@ -1374,19 +1465,29 @@ export function PdfTextEditor() {
   };
   const reset = () => {
     previewRequestRef.current += 1;
-    if (job && ["queued", "processing"].includes(job.status)) deleteProcessingJob(jobMode, job.id).catch(() => undefined);
+    if (job && jobMode !== "browser" && ["queued", "processing"].includes(job.status)) deleteProcessingJob(jobMode, job.id).catch(() => undefined);
+    if (browserResultUrlRef.current) URL.revokeObjectURL(browserResultUrlRef.current);
+    browserResultUrlRef.current = "";
     resultFilenameTouchedRef.current = false;
     setPendingOcrFile(null); setOcrMode(null); setSource(null); setSourceHash(""); setPages([]); clearTextEditorHistory(); setSelectedRun(null); setJob(null); setJobKeepResult(false); setResultFilenameStem(""); setError(""); setUploadProgress(0); setPreviewUpdating(false); setCheckingLocation(false); sourceBytesRef.current = null; sourcePasswordRef.current = "";
   };
-  const continueEditing = () => { setJob(null); setJobKeepResult(false); setSelectedRun(null); setError(""); setUploadProgress(0); };
+  const continueEditing = () => {
+    if (browserResultUrlRef.current) URL.revokeObjectURL(browserResultUrlRef.current);
+    browserResultUrlRef.current = "";
+    setJob(null); setJobKeepResult(false); setSelectedRun(null); setError(""); setUploadProgress(0);
+  };
   const submit = async ({ saveToDevice = false } = {}) => {
+    if (processingMode === "browser" && browserRestriction) {
+      setError(browserRestriction);
+      return;
+    }
     if (!canSubmit) { setError(!source ? "Add a PDF first." : !changedEdits.length ? "Select and save at least one text replacement." : "The PDF is still being prepared. Try again in a moment."); return; }
     // The initial location probe can finish after the PDF has loaded. Probe
     // once more at export time so a worker that has just started is not left
     // behind a stale disabled state, while still reporting a useful error when
     // the selected processing location is genuinely unavailable.
     let exportLocations = locations;
-    if (!isProcessingLocationReady(exportLocations, processingMode)) {
+    if (processingMode !== "browser" && !isProcessingLocationReady(exportLocations, processingMode)) {
       setError("");
       setCheckingLocation(true);
       try {
@@ -1413,7 +1514,30 @@ export function PdfTextEditor() {
       const transform = textTransform(textTransforms[run.runId]);
       const model = pages.find((page) => page.pageIndex === run.pageIndex);
       const origin = textOrigin(model, run, pdfLibrary);
-      editPayload.push({ pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), runId: run.runId, originalText: run.text || run.originalText, originalTextHash: run.originalTextHash, ...(moveOnly ? { moveOnly: true } : { replacementText: replacementText ?? run.text }), ...(format ? { format } : {}), ...(run.item?.width ? { boxWidth: Number(run.item.width) } : {}), mode: run.mode || "native", offsetX: offset.x, offsetY: offset.y, scale: transform.scale, scaleX: transform.scaleX, scaleY: transform.scaleY, rotation: transform.rotation, ...(origin ? { originX: origin.x, originY: origin.y } : {}), ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) });
+      if (processingMode === "browser") {
+        editPayload.push({ pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), runId: run.runId, originalText: run.text || run.originalText, originalTextHash: run.originalTextHash, replacementText: replacementText ?? run.text ?? run.originalText, mode: "native" });
+      } else {
+        editPayload.push({ pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), runId: run.runId, originalText: run.text || run.originalText, originalTextHash: run.originalTextHash, ...(moveOnly ? { moveOnly: true } : { replacementText: replacementText ?? run.text }), ...(format ? { format } : {}), ...(run.item?.width ? { boxWidth: Number(run.item.width) } : {}), mode: run.mode || "native", offsetX: offset.x, offsetY: offset.y, scale: transform.scale, scaleX: transform.scaleX, scaleY: transform.scaleY, rotation: transform.rotation, ...(origin ? { originX: origin.x, originY: origin.y } : {}), ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) });
+      }
+    }
+    if (processingMode === "browser") {
+      setJobMode("browser");
+      setJobKeepResult(false);
+      const browserId = `browser-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      setJob({ id: browserId, status: "processing", progress: 0, stage: "Preparing browser export", message: "Your PDF is staying in this browser.", logs: [{ time: new Date().toISOString(), level: "info", message: "Browser PDF text export started." }], warnings: [], error: null, result: null });
+      try {
+        const result = await processBrowserPdfTextEdits(source, editPayload, {
+          onProgress: (progress, message) => setJob((current) => current ? { ...current, progress, stage: message, logs: [...(current.logs || []), { time: new Date().toISOString(), level: "info", message: `Browser export progress: ${progress}% · ${message}.` }] } : current),
+        });
+        if (browserResultUrlRef.current) URL.revokeObjectURL(browserResultUrlRef.current);
+        const downloadUrl = URL.createObjectURL(result.blob);
+        browserResultUrlRef.current = downloadUrl;
+        const completedResult = { ...result.result, downloadUrl, previewUrl: downloadUrl };
+        setJob((current) => current ? { ...current, status: "completed", progress: 100, stage: "Complete", message: "The edited PDF was created in this browser.", logs: [...(current.logs || []), { time: new Date().toISOString(), level: "info", message: "Browser PDF text export completed." }], result: completedResult } : current);
+      } catch (browserError) {
+        setJob((current) => current ? { ...current, status: "failed", stage: "Needs attention", error: browserError instanceof Error ? browserError.message : "The PDF text edit could not be completed in this browser.", logs: [...(current.logs || []), { time: new Date().toISOString(), level: "error", message: browserError instanceof Error ? browserError.message : "The browser export failed." }] } : current);
+      }
+      return;
     }
     const effectiveKeepResult = processingMode === "local" && saveToDevice;
     const form = new FormData();
@@ -1431,17 +1555,17 @@ export function PdfTextEditor() {
         </div>
         <div className="heading-note"><ShieldCheck size={16} /><span>Only selected text operators change</span></div>
       </div>
-      <ToolViewTabs value={activeView} onChange={setActiveView} />
-      <ProcessingOptionsPanel tool="pdf-text-editor" locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={(mode) => { setProcessingMode(mode); setActiveView("tool"); }} />
+      <ToolViewTabs value={activeView} onChange={setActiveView} disabledTabs={processingMode === "browser" ? ["history"] : []} />
+      <ProcessingOptionsPanel tool="pdf-text-editor" locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={selectProcessingMode} />
       {activeView === "history" ? <ToolHistory tool="pdf-text-editor" /> : activeView === "guide" ? <ToolSeoContent pathname="/pdf-text-editor" /> : activeView === "processing" ? null : (
         <>
-          <ProcessingMode value={processingMode} onChange={setProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool="pdf-text-editor" />
+          <ProcessingMode value={processingMode} onChange={selectProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool="pdf-text-editor" />
           <div className="capability-strip">
             <div className="capability-main">
               <span className={`capability-dot ${capabilities?.status === "ready" ? "ready" : ""}`} />
               <span>{capabilities?.status === "ready" ? "Local agent worker online" : "Connecting to Local agent"}</span>
             </div>
-            <span>One PDF · 200 MB maximum · OCR fallback · Browser mode disabled</span>
+            <span>{processingMode === "browser" ? "One PDF · 25 MB maximum · 100 pages · selectable text only · download-only" : "One PDF · 200 MB maximum · OCR fallback"}</span>
           </div>
           {job ? <PdfTextJobCard initialJob={job} mode={jobMode} onReset={reset} onContinue={continueEditing} keepResult={jobKeepResult} /> : (
             <>
@@ -1450,9 +1574,9 @@ export function PdfTextEditor() {
                   <div><span className="card-index">01</span><h2>Add one PDF</h2></div>
                   <span className="required-label">Required</span>
                 </div>
-                <FileDropzone file={source || pendingOcrFile} onFile={selectFile} onClear={reset} variant="pdf" accept="application/pdf,.pdf" label="Drop a PDF here" hint="or click to browse · choose automatic, embedded text, or OCR after upload" disabled={loading || Boolean(job)} />
-                <div className="limit-row"><span>Maximum file size</span><strong>200 MB</strong></div>
-                {pendingOcrFile && <div className="pdf-text-ocr-choice" role="dialog" aria-labelledby="pdf-text-ocr-choice-title">
+                <FileDropzone file={source || pendingOcrFile} onFile={selectFile} onClear={reset} variant="pdf" accept="application/pdf,.pdf" label="Drop a PDF here" hint={processingMode === "browser" ? "or click to browse · selectable embedded text only in Browser mode" : "or click to browse · choose automatic, embedded text, or OCR after upload"} disabled={loading || Boolean(job)} />
+                <div className="limit-row"><span>Maximum file size</span><strong>{processingMode === "browser" ? "25 MB" : "200 MB"}</strong></div>
+                {pendingOcrFile && processingMode !== "browser" && <div className="pdf-text-ocr-choice" role="dialog" aria-labelledby="pdf-text-ocr-choice-title">
                   <div className="pdf-text-ocr-choice-copy"><strong id="pdf-text-ocr-choice-title">How should this PDF be read?</strong><span>Automatic keeps usable embedded text and runs OCR only on pages that need visual text detection.</span></div>
                   <div className="pdf-text-ocr-choice-actions"><button className="primary-button" type="button" onClick={() => chooseOcrMode("auto")}><FileText size={16} /> Automatic</button><button className="secondary-button" type="button" onClick={() => chooseOcrMode("ocr")}><Pencil size={16} /> Use OCR</button><button className="secondary-button" type="button" onClick={() => chooseOcrMode("embedded")}><FileText size={16} /> Use embedded text only</button></div>
                   <small>OCR makes detected words and symbol-like graphics selectable. Symbols stay artwork and can be moved, resized, or rotated, but their text cannot be replaced.</small>
@@ -1485,16 +1609,16 @@ export function PdfTextEditor() {
                 <div className="pdf-text-editor-layout">
                   <VirtualizedPdfTextRail pages={pages} onSelect={scrollToPage} />
                   <section className="pdf-text-workspace">
-                    {source && !loading && <TextEditPopover run={selectedRun} value={editorValue} onChange={setEditorValue} onSave={saveEdit} onCancel={() => setSelectedRun(null)} onRestore={restoreEdit} format={selectedRun ? { ...inferredTextFormats[selectedRun.runId], ...textFormats[selectedRun.runId] } : undefined} onFormatChange={(value) => selectedRun && updateTextFormat(selectedRun.runId, value)} appearance={selectedRun ? textTransforms[selectedRun.runId] : undefined} onAppearanceChange={(value) => selectedRun && updateTextTransform(selectedRun.runId, value)} />}
+                    {source && !loading && <TextEditPopover run={selectedRun} value={editorValue} onChange={setEditorValue} onSave={saveEdit} onCancel={() => setSelectedRun(null)} onRestore={restoreEdit} browserMode={processingMode === "browser"} format={selectedRun ? { ...inferredTextFormats[selectedRun.runId], ...textFormats[selectedRun.runId] } : undefined} onFormatChange={(value) => selectedRun && updateTextFormat(selectedRun.runId, value)} appearance={selectedRun ? textTransforms[selectedRun.runId] : undefined} onAppearanceChange={(value) => selectedRun && updateTextTransform(selectedRun.runId, value)} />}
                     {loading && <div className="pdf-text-loading"><LoaderCircle className="spin" size={23} /><strong>{loadingMessage}</strong>{ocrProgress > 0 && <span>OCR progress: {ocrProgress}%</span>}</div>}
                     {!loading && !pages.length && <div className="pdf-text-empty"><UploadCloud size={27} /><strong>Upload a PDF to start editing</strong><span>Click a detected text run in the page preview to replace it.</span></div>}
-                    {pages.length > 0 && <VirtualizedPdfTextPreview ref={previewVirtualizerRef} pages={pages} selectedRunId={selectedRun?.runId} edits={edits} textOffsets={textOffsets} textTransforms={textTransforms} textFormats={textFormats} pdfLibrary={pdfLibrary} previewZoom={previewZoom} previewRevision={previewRevision} onSelectRun={chooseRun} onMoveRun={moveRun} onMoveRunEnd={finishMovingRun} onAppearanceChange={updateTextTransform} onInferredTextFormat={updateInferredTextFormat} onPinchZoom={setPreviewZoom} />}
+                    {pages.length > 0 && <VirtualizedPdfTextPreview ref={previewVirtualizerRef} pages={pages} selectedRunId={selectedRun?.runId} edits={edits} textOffsets={textOffsets} textTransforms={textTransforms} textFormats={textFormats} pdfLibrary={pdfLibrary} previewZoom={previewZoom} previewRevision={previewRevision} onSelectRun={chooseRun} onMoveRun={moveRun} onMoveRunEnd={finishMovingRun} onAppearanceChange={updateTextTransform} onInferredTextFormat={updateInferredTextFormat} onPinchZoom={setPreviewZoom} browserMode={processingMode === "browser"} />}
                   </section>
                 </div>
               </div>
             </>
           )}
-          {error && <DismissibleMessage className="error-banner" resetKey={error}><AlertTriangle size={17} /><span>{error}</span></DismissibleMessage>}
+          {error && <DismissibleMessage className="error-banner" resetKey={error}><AlertTriangle size={17} /><span>{error}</span>{processingMode === "browser" && error.includes("Local agent") && <button className="secondary-button error-banner-action" type="button" onClick={useLocalAgent}>Use Local agent</button>}</DismissibleMessage>}
           {!job && <div className="trust-row"><div><FileText size={16} /> {ocrDetected && !nativePages ? "OCR regions are visual reconstructions" : ocrDetected ? "Native text stays searchable" : "Searchable text stays searchable"}</div><div><ShieldCheck size={16} /> {ocrDetected ? "Original untouched pages stay unchanged" : "No rasterization or white masking"}</div><div><Pencil size={16} /> Longer text may overflow</div></div>}
           <ToolFaqContent pathname="/pdf-text-editor" />
         </>

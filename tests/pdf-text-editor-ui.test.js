@@ -90,13 +90,23 @@ test("PDF text editor is exposed as a dedicated tool with history navigation", a
   assert.match(comingSoon, /\["PDF text editor"[^\n]+"Beta", "\/pdf-text-editor"\]/);
 });
 
-test("PDF text editor keeps browser mode disabled and submits identity-checked edits", async () => {
+test("PDF text editor supports constrained browser replacement and identity-checked local edits", async () => {
   const shell = await read("components/pdf-text-editor.jsx");
   const ocr = await read("lib/pdf-ocr.js");
   const intake = await read("lib/job-intake.js");
   const worker = await read("worker/index.js");
-  assert.match(shell, /Browser mode disabled/);
-  assert.doesNotMatch(shell, /value="browser"/);
+  const processingOptions = await read("components/processing-options.jsx");
+  assert.doesNotMatch(shell, /Browser mode disabled/);
+  assert.match(shell, /BROWSER_PDF_TEXT_EDITOR_MAX_BYTES/);
+  assert.match(shell, /BROWSER_PDF_TEXT_EDITOR_MAX_PAGES/);
+  assert.match(shell, /processBrowserPdfTextEdits/);
+  assert.match(shell, /browserMode={processingMode === "browser"}/);
+  assert.match(shell, /BROWSER_TEXT_LOCAL_ONLY_ERROR/);
+  assert.match(shell, /This project contains Local-agent-only text styling or placement changes/);
+  assert.match(processingOptions, /\["Text replacement", "Available", "Available"\]/);
+  assert.match(processingOptions, /\["Text formatting", "Available", "Local agent only", true\]/);
+  assert.match(processingOptions, /\["Text placement", "Available", "Local agent only", true\]/);
+  assert.match(processingOptions, /25 MB and 100 pages/);
   assert.match(shell, /200 MB/);
   assert.match(shell, /originalTextHash/);
   assert.match(shell, /replacementText/);
@@ -135,13 +145,18 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /form\.append\("filename"/);
   assert.match(intake, /outputFilename/);
   assert.match(worker, /safePdfOutputFilename\(options\.outputFilename/);
-  assert.match(shell, /PdfTextJobLog logs=\{job\.logs \|\| \[\]\}/);
+  assert.match(shell, /PdfTextJobLog logs=\{job\.logs \|\| \[\]\} mode=\{mode\}/);
   assert.match(shell, /error\?\.code === "request_timeout"/);
   assert.match(shell, /takeHistoryEdit\("pdf-text-editor"\)/);
   assert.match(shell, /undoTextEdit/);
   assert.match(shell, /redoTextEdit/);
   assert.match(shell, /textFormats/);
   assert.match(shell, /Format existing PDF text/);
+  assert.match(shell, /className=\{`pdf-text-format-panel\$\{browserMode \? " is-locked" : ""\}`\}/);
+  assert.match(shell, /aria-disabled=\{browserMode\}/);
+  assert.match(shell, /disabled=\{browserMode\}/);
+  assert.match(shell, /const localOnlyMessage = "Text formatting and placement \(font, size, colour, move, resize, and rotate\) are Local agent only\."/);
+  assert.match(shell, /pdf-text-local-only-note/);
   assert.match(shell, /Font family for selected PDF text/);
   assert.match(shell, /Font size for selected PDF text/);
   assert.match(shell, /styleButton\("bold"/);
@@ -173,7 +188,7 @@ test("PDF text editor keeps browser mode disabled and submits identity-checked e
   assert.match(shell, /VirtualizedPdfTextPreview/);
   assert.match(shell, /VirtualizedPdfTextRail/);
   assert.match(shell, /scrollToIndex/);
-  assert.match(shell, /onPointerDown=\{\(event\) => startTextDrag/);
+  assert.match(shell, /onPointerDown=\{browserMode \? undefined : \(event\) => startTextDrag/);
   assert.match(shell, /const selectTextRun = \(run\) =>/);
   assert.match(shell, /onClick=\{\(\) => selectTextRun\(run\)\}/);
   assert.match(shell, /onMoveRunEnd/);

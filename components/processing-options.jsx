@@ -35,8 +35,8 @@ const formatSupport = {
     output: { local: "PDF", browser: "Download-only PDF from imported or blank pages" },
   },
   "pdf-text-editor": {
-    input: { local: "PDF with selectable text or OCR-detectable scans", browser: "Not supported — PDF text editing requires the Local agent" },
-    output: { local: "PDF", browser: "Not supported" },
+    input: { local: "PDF with selectable text or OCR-detectable scans", browser: "One PDF up to 25 MB and 100 pages; selectable embedded text only" },
+    output: { local: "PDF", browser: "Download-only edited PDF; original styling and placement preserved" },
   },
 };
 
@@ -56,6 +56,7 @@ function comparisonRowsFor(tool, browserSupported) {
   const browserBestFor = browserSupported
     ? tool === "pdf-compressor" ? "Quick PDF compression up to 10 MB and 100 pages"
       : tool === "pdf-editor" ? "Quick PDF import, merging, and page arrangement with PNG/JPG/JPEG images up to 1 MB each"
+        : tool === "pdf-text-editor" ? "Quick replacement of selectable embedded PDF text up to 25 MB and 100 pages"
         : "Quick conversions on mobile or desktop"
     : "Not supported for this tool";
   const browserFiles = browserSupported ? "Files stay in this browser; nothing is uploaded" : "Requires the Local agent";
@@ -78,6 +79,19 @@ function comparisonRowsFor(tool, browserSupported) {
           ["Browser image limit", "25 MB per image", "1 MB per image"],
           ["Browser image formats", "PNG, JPG/JPEG, HEIC/HEIF, TIFF/TIF, GIF, BMP", "PNG, JPG, JPEG only"],
           ["Browser PDF total", "200 MB total", "50 MB total"],
+          ["Browser result", "Local result workflow", "Download-only; temporary in this tab"],
+        ]
+      : tool === "pdf-text-editor"
+        ? [
+          ["Open and preview one PDF", "Available", "Available"],
+          ["Select embedded text", "Available", "Available"],
+          ["Text replacement", "Available", "Available"],
+          ["Text formatting", "Available", "Local agent only", true],
+          ["Text placement", "Available", "Local agent only", true],
+          ["OCR and scanned PDF editing", "Available", "Local agent only", true],
+          ["Password-protected PDFs", "Available where supported", "Local agent only", true],
+          ["PDF size limit", "200 MB per PDF", "25 MB per PDF"],
+          ["PDF page limit", "Local agent limit applies", "100 pages"],
           ["Browser result", "Local result workflow", "Download-only; temporary in this tab"],
         ]
       : [];

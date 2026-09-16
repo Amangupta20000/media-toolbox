@@ -7,6 +7,7 @@ import { FREE_ACCESS_CODE } from "../lib/free-access.js";
 import { PRODUCT_NAME } from "../lib/site-metadata.js";
 
 const SESSION_COOKIE = "media_toolbox_free_access_seen";
+const SESSION_COOKIE_MAX_AGE_SECONDS = 30 * 60;
 
 function hasSessionCookie() {
   return document.cookie.split(";").some((part) => part.trim().startsWith(`${SESSION_COOKIE}=`));
@@ -14,7 +15,7 @@ function hasSessionCookie() {
 
 function markSessionCookie() {
   const secure = window.location.protocol === "https:" ? "; Secure" : "";
-  document.cookie = `${SESSION_COOKIE}=1; Path=/; SameSite=Lax${secure}`;
+  document.cookie = `${SESSION_COOKIE}=1; Max-Age=${SESSION_COOKIE_MAX_AGE_SECONDS}; Path=/; SameSite=Lax${secure}`;
 }
 
 async function copyText(value) {
@@ -89,7 +90,7 @@ export function FreeAccessModal({ pathname }) {
       <h2 id="free-access-title">Try {PRODUCT_NAME} free until {expiryText}</h2>
       <p id="free-access-description">New here? Use our launch code to explore the toolbox on your desktop. No account is needed, and the Local agent keeps your files on your own computer.</p>
       <div className="free-access-code-row"><code>{FREE_ACCESS_CODE}</code><button className="primary-button" type="button" onClick={copy}>{copied ? <Check size={16} /> : <Copy size={16} />} {copied ? "Copied" : "Copy code"}</button></div>
-      <p className="free-access-note">Each activation gives 7 days. You can redeem the code until {expiryText}.</p>
+      <p className="free-access-note">Each activation gives 7 days. You can redeem the code unlimited times until {expiryText}.</p>
       {copyError && <p className="free-access-copy-error" role="status">{copyError}</p>}
       <div className="free-access-actions"><Link className="text-link" href="/local-agent" onClick={close}>Open Local agent setup</Link><button className="secondary-button" type="button" onClick={close}>Maybe later</button></div>
     </section>

@@ -10,9 +10,11 @@ async function loadPdfLibrary() {
   return library;
 }
 
-function previewPdfUrl(downloadUrl) {
-  if (!downloadUrl) return "";
-  return `${downloadUrl}${downloadUrl.includes("?") ? "&" : "?"}preview=1`;
+function previewPdfUrl(result) {
+  const previewUrl = result?.previewUrl || result?.downloadUrl;
+  if (!previewUrl) return "";
+  if (/^(blob:|data:)/i.test(previewUrl)) return previewUrl;
+  return `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}preview=1`;
 }
 
 export function PdfResultPreview({ result, title = "PDF preview", subtitle = "Scroll to review all pages", maxPages = null }) {
@@ -31,7 +33,7 @@ export function PdfResultPreview({ result, title = "PDF preview", subtitle = "Sc
 
     const loadPreview = async () => {
       try {
-        const sourceUrl = previewPdfUrl(result?.downloadUrl);
+        const sourceUrl = previewPdfUrl(result);
         if (!sourceUrl) throw new Error("The generated PDF preview URL is unavailable.");
         const response = await fetch(sourceUrl, { cache: "no-store", signal: controller.signal });
         if (!response.ok) {
@@ -81,7 +83,7 @@ export function PdfResultPreview({ result, title = "PDF preview", subtitle = "Sc
       active = false;
       controller.abort();
     };
-  }, [maxPages, result?.downloadUrl, result?.pageCount]);
+  }, [maxPages, result?.downloadUrl, result?.previewUrl, result?.pageCount]);
 
   const showingAllPages = totalPages > 0 && pages.length >= totalPages;
   return <div className="pdf-result-preview">

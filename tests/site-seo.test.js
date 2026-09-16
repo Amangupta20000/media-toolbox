@@ -108,6 +108,8 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(toolPage, /BROWSER_PDF_MAX_BYTES/);
   assert.match(pdfResultPreview, /pdf-result-preview-scroll/);
   assert.match(pdfResultPreview, /pdfjs-dist\/legacy\/build\/pdf\.mjs/);
+  assert.match(pdfResultPreview, /const previewUrl = result\?\.previewUrl \|\| result\?\.downloadUrl/);
+  assert.match(pdfResultPreview, /if \(\/\^\(blob:\|data:\)\/i\.test\(previewUrl\)\) return previewUrl/);
   assert.match(toolPage, /<PdfResultPreview result=\{result\} title="Compressed PDF preview" subtitle=/);
   assert.match(pdfEditor, /activeView === "guide" \? <ToolSeoContent pathname="\/pdf-editor" \/>/);
   assert.match(pdfEditor, /ToolFaqContent pathname="\/pdf-editor" \/>/);
@@ -223,6 +225,8 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(freeAccessModal, /🎉/u);
   assert.match(freeAccessModal, /free until \{expiryText\}/);
   assert.match(freeAccessModal, /\/api\/license\/v1\/free-access/);
+  assert.match(freeAccessModal, /const SESSION_COOKIE_MAX_AGE_SECONDS = 30 \* 60/);
+  assert.match(freeAccessModal, /Max-Age=\$\{SESSION_COOKIE_MAX_AGE_SECONDS\}/);
   assert.doesNotMatch(freeAccessModal, /Try \{PRODUCT_NAME\} free for 7 days/);
   assert.match(freeAccessModal, /document\.cookie/);
   assert.match(styles, /\.free-access-backdrop \{ position: fixed/);
