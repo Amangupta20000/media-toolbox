@@ -5,12 +5,21 @@ export default function Robots() {
 }
 
 export function getServerSideProps({ res }) {
-  const body = [
-    "User-agent: *",
-    "Allow: /",
+  const privatePaths = [
     "Disallow: /admin",
     "Disallow: /license-admin",
     "Disallow: /api/",
+  ];
+  const crawlerRules = (userAgent) => [
+    `User-agent: ${userAgent}`,
+    "Allow: /",
+    ...privatePaths,
+    "",
+  ];
+  const body = [
+    ...crawlerRules("Mediapartners-Google"),
+    ...crawlerRules("Google-Display-Ads-Bot"),
+    ...crawlerRules("*"),
     `Sitemap: ${absoluteSiteUrl("/sitemap.xml")}`,
     "",
   ].join("\n");

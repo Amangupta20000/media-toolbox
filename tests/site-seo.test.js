@@ -266,6 +266,9 @@ test("sitemap and robots routes expose only public pages", async () => {
   assert.match(sitemap, /getServerSideProps/);
   assert.match(robots, /Disallow: \/admin/);
   assert.match(robots, /Disallow: \/api\//);
+  assert.match(robots, /Mediapartners-Google/);
+  assert.match(robots, /Google-Display-Ads-Bot/);
+  assert.match(robots, /"Allow: \/"/);
   assert.match(robots, /sitemap\.xml/);
   assert.ok(!PUBLIC_ROUTES.some(({ path: route }) => route.startsWith("/admin") || route.startsWith("/api")));
   assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/"));
