@@ -42,7 +42,7 @@ export function FreeAccessModal({ pathname }) {
   const [codeExpiryLabel, setCodeExpiryLabel] = useState("");
 
   useEffect(() => {
-    if (["/admin", "/license-admin"].includes(pathname) || hasSessionCookie()) return undefined;
+    if (["/admin", "/license-admin", "/offers"].includes(pathname) || hasSessionCookie()) return undefined;
     const showOnScroll = () => {
       if (window.scrollY <= 0) return;
       markSessionCookie();

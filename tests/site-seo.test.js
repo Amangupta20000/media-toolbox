@@ -32,6 +32,8 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   const terms = await read("pages/terms.jsx");
   const contact = await read("pages/contact.jsx");
   const home = await read("pages/index.jsx");
+  const offersPage = await read("pages/offers.jsx");
+  const offersComponent = await read("components/offers-page.jsx");
   const freeAccessModal = await read("components/free-access-modal.jsx");
   const styles = await read("styles/globals.css");
 
@@ -52,6 +54,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(shell, /<Link href="\/" title="Home">Home<\/Link>/);
   assert.match(shell, /<Link href="\/" className="topbar-brand" aria-label="NativeMedia Agent home">/);
   assert.match(shell, /href: "\/", label: "Home", detail: "NativeMedia Agent overview", icon: Home/);
+  assert.match(shell, /href: "\/offers", label: "Offers", detail: "Local agent codes and promotions", icon: Gift/);
   assert.doesNotMatch(shell, /href: "\/local-agent", label: "Local agent"/);
   assert.match(shell, /<Link href="\/local-agent" className=\{`topbar-status/);
   assert.match(shell, /agentSetupAttention/);
@@ -69,6 +72,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(footer, /href="\/privacy" title="Privacy Policy"/);
   assert.match(footer, /href="\/terms" title="Terms and Conditions"/);
   assert.match(footer, /href="\/contact" title="Contact Us"/);
+  assert.match(footer, /href="\/offers" title="Local agent offers">Offers<\/Link>/);
   assert.match(footer, /href="\/sitemap\.xml" title="Sitemap"/);
   assert.match(footer, /href="\/privacy"/);
   assert.match(footer, /href="\/terms"/);
@@ -214,6 +218,14 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(home, /processes files locally on your Mac, Windows, or Linux computer/);
   assert.doesNotMatch(home, /browser where supported/);
   assert.match(home, /Choose the tool for your file/);
+  assert.match(offersPage, /OffersPage/);
+  assert.match(offersComponent, /FREE_ACCESS_CODE/);
+  assert.match(offersComponent, /Unlimited redemptions/);
+  assert.match(offersComponent, /One redemption per person/);
+  assert.match(offersComponent, /redemptionPolicy: "unlimited"/);
+  assert.match(offersComponent, /statusEndpoint: "\/api\/license\/v1\/free-access"/);
+  assert.match(styles, /\.offer-card \{/);
+  assert.match(styles, /@keyframes offer-card-reveal/);
   assert.match(freeAccessModal, /FREE_ACCESS_CODE/);
   assert.match(freeAccessModal, /media_toolbox_free_access_seen/);
   assert.match(freeAccessModal, /window\.addEventListener\("scroll", showOnScroll, \{ passive: true \}\)/);
@@ -279,6 +291,7 @@ test("sitemap and robots routes expose only public pages", async () => {
   assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/privacy"));
   assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/terms"));
   assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/contact"));
+  assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/offers"));
   assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/how-to-setup-agent"));
   assert.equal(SITE_URL, "https://native-media-agent.vercel.app");
 });
@@ -292,6 +305,7 @@ test("SEO metadata is route-specific and normalizes query strings", () => {
   assert.equal(metadataForPathname("/pdf-editor?tab=history").title, "Desktop PDF Editor | NativeMedia Agent");
   assert.equal(metadataForPathname("/privacy/").title, "Privacy Policy | NativeMedia Agent");
   assert.equal(metadataForPathname("/contact/").title, "Contact Us | NativeMedia Agent");
+  assert.equal(metadataForPathname("/offers").breadcrumbLabel, "Offers");
   assert.equal(metadataForPathname("/how-to-setup-agent").breadcrumbLabel, "How to set up the agent");
   assert.equal(metadataForPathname("/").title, "Private Desktop PDF & Media Tools | NativeMedia Agent");
   assert.equal(metadataForPathname("/unknown").title, "Private Desktop PDF & Media Tools | NativeMedia Agent");

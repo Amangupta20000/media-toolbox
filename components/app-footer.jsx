@@ -9,6 +9,7 @@ export function AppFooter() {
         <Link href="/privacy" title="Privacy Policy">Privacy Policy</Link>
         <Link href="/terms" title="Terms and Conditions">Terms and Conditions</Link>
         <Link href="/contact" title="Contact Us">Contact Us</Link>
+        <Link href="/offers" title="Local agent offers">Offers</Link>
         <a href="/sitemap.xml" title="Sitemap">Sitemap</a>
       </nav>
     </div>

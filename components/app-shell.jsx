@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { Archive, ArrowRight, BookOpen, ChevronDown, Clock3, ExternalLink, Film, FileText, Home, Image as ImageIcon, Menu, Moon, ShieldCheck, Sparkles, Sun } from "lucide-react";
+import { Archive, ArrowRight, BookOpen, ChevronDown, Clock3, ExternalLink, Film, FileText, Gift, Home, Image as ImageIcon, Menu, Moon, ShieldCheck, Sparkles, Sun } from "lucide-react";
 import { probeLocalAgent } from "./processing-client.js";
 import { AppFooter } from "./app-footer.jsx";
 import { FreeAccessModal } from "./free-access-modal.jsx";
@@ -24,6 +24,7 @@ const pdfNavigation = [
 ];
 
 const moreNavigation = [
+  { href: "/offers", label: "Offers", detail: "Local agent codes and promotions", icon: Gift },
   { href: "/coming-soon", label: "Coming soon", detail: "More tools in progress", icon: Sparkles },
 ];
 
