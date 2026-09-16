@@ -1,6 +1,6 @@
 "use client";
 
-import { Globe2, Laptop, ShieldCheck } from "lucide-react";
+import { Globe2, Laptop, LockKeyhole, ShieldCheck } from "lucide-react";
 import { browserSupportsTool } from "./browser-processing.js";
 import { isProcessingLocationReady } from "./processing-client.js";
 
@@ -31,8 +31,8 @@ const formatSupport = {
     output: { local: "Repaired video in the recovered format", browser: "Not supported" },
   },
   "pdf-editor": {
-    input: { local: "PDF; added images: PNG, JPG/JPEG, HEIC/HEIF, TIFF/TIF, GIF, BMP", browser: "Not supported — PDF editing requires the Local agent" },
-    output: { local: "PDF", browser: "Not supported" },
+    input: { local: "PDF; added images: PNG, JPG/JPEG, HEIC/HEIF, TIFF/TIF, GIF, BMP", browser: "PDFs up to 50 MB total; added images: PNG, JPG, or JPEG up to 1 MB each" },
+    output: { local: "PDF", browser: "Download-only PDF from imported or blank pages" },
   },
   "pdf-text-editor": {
     input: { local: "PDF with selectable text or OCR-detectable scans", browser: "Not supported — PDF text editing requires the Local agent" },
@@ -54,7 +54,9 @@ function formatRowsFor(tool) {
 function comparisonRowsFor(tool, browserSupported) {
   const supportRows = formatRowsFor(tool);
   const browserBestFor = browserSupported
-    ? tool === "pdf-compressor" ? "Quick PDF compression up to 10 MB and 100 pages" : "Quick conversions on mobile or desktop"
+    ? tool === "pdf-compressor" ? "Quick PDF compression up to 10 MB and 100 pages"
+      : tool === "pdf-editor" ? "Quick PDF import, merging, and page arrangement with PNG/JPG/JPEG images up to 1 MB each"
+        : "Quick conversions on mobile or desktop"
     : "Not supported for this tool";
   const browserFiles = browserSupported ? "Files stay in this browser; nothing is uploaded" : "Requires the Local agent";
   const browserResults = browserSupported ? "Download-only; temporary in this tab" : "Not available";
@@ -64,6 +66,20 @@ function comparisonRowsFor(tool, browserSupported) {
     ? [["Export sizing", "1×, 2×, 3×, 4×, or Custom", "1×, 2×, 3×, or 4× (Custom uses desktop processing)"]]
     : tool === "pdf-compressor"
       ? [["Compression profiles", "Balanced, Smallest file, Higher quality, or Custom", "Balanced only"]]
+      : tool === "pdf-editor"
+        ? [
+          ["Import existing PDFs", "Available", "Available"],
+          ["Merge existing PDFs", "Available", "Available"],
+          ["Duplicate page", "Available", "Local agent only", true],
+          ["Text boxes", "Available", "Local agent only", true],
+          ["Password-protected PDFs", "Available where supported", "Local agent only", true],
+          ["OCR and searchable text editing", "Available", "Local agent only", true],
+          ["Save to device and History", "Available", "Local agent only", true],
+          ["Browser image limit", "25 MB per image", "1 MB per image"],
+          ["Browser image formats", "PNG, JPG/JPEG, HEIC/HEIF, TIFF/TIF, GIF, BMP", "PNG, JPG, JPEG only"],
+          ["Browser PDF total", "200 MB total", "50 MB total"],
+          ["Browser result", "Local result workflow", "Download-only; temporary in this tab"],
+        ]
       : [];
   return [
     ["Best for", "Desktop users, large files, PDF editing, OCR, compression, video repair, and full native format support", browserBestFor],
@@ -92,7 +108,7 @@ export function ProcessingOptionsPanel({ tool, locations, value, onSelect, hidde
       <table className="processing-format-table">
         <caption>How processing modes differ</caption>
         <thead><tr><th scope="col">Comparison</th><th scope="col"><span className="processing-format-heading"><Laptop size={13} aria-hidden="true" /><span className="processing-format-mode"><strong>Local agent</strong><em className="processing-recommended">Recommended</em></span></span></th><th scope="col"><span className="processing-format-heading"><Globe2 size={13} aria-hidden="true" /><span className="processing-format-mode"><strong>Browser mode</strong><em className={browserSupported ? "processing-available" : "processing-unavailable"}>{browserSupported ? "Available for quick tools" : "Not available for this tool"}</em></span></span></th></tr></thead>
-        <tbody>{comparisonRowsFor(tool, browserSupported).map(([label, local, browser], index) => <tr key={label} style={{ animationDelay: `${index * 55}ms` }}><th scope="row">{label}</th><td>{local}</td><td>{browser}</td></tr>)}<tr className="processing-format-actions" style={{ animationDelay: `${comparisonRowsFor(tool, browserSupported).length * 55}ms` }}><th scope="row">Choose mode</th><td><button className="secondary-button processing-format-action" type="button" disabled={!localReady} aria-pressed={value === "local"} onClick={() => onSelect("local")}>{value === "local" ? "Currently selected" : localReady ? "Use Local agent" : "Start the Local agent"}</button></td><td><button className="secondary-button processing-format-action" type="button" disabled={!browserReady} aria-pressed={value === "browser"} onClick={() => onSelect("browser")}>{value === "browser" ? "Currently selected" : browserReady ? "Use Browser mode" : "Not supported here"}</button></td></tr></tbody>
+        <tbody>{comparisonRowsFor(tool, browserSupported).map(([label, local, browser, browserLocked = false], index) => <tr key={label} style={{ animationDelay: `${index * 55}ms` }}><th scope="row">{label}</th><td>{local}</td><td>{browserLocked ? <span className="processing-locked"><LockKeyhole size={11} aria-hidden="true" /> {browser}</span> : browser}</td></tr>)}<tr className="processing-format-actions" style={{ animationDelay: `${comparisonRowsFor(tool, browserSupported).length * 55}ms` }}><th scope="row">Choose mode</th><td><button className="secondary-button processing-format-action" type="button" disabled={!localReady} aria-pressed={value === "local"} onClick={() => onSelect("local")}>{value === "local" ? "Currently selected" : localReady ? "Use Local agent" : "Start the Local agent"}</button></td><td><button className="secondary-button processing-format-action" type="button" disabled={!browserReady} aria-pressed={value === "browser"} onClick={() => onSelect("browser")}>{value === "browser" ? "Currently selected" : browserReady ? "Use Browser mode" : "Not supported here"}</button></td></tr></tbody>
       </table>
     </div>
     <div className="processing-options-note"><ShieldCheck size={16} /><span>{browserSupported ? "For the best reliability, use Local agent for large or advanced jobs. Browser mode is intended for quick conversions in supported tools." : "Local agent is required for this tool because the browser cannot reliably provide its advanced processing features."}</span></div>

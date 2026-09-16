@@ -165,7 +165,8 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(toolSeoData, /Browser mode is available for quick conversions/);
   assert.match(toolSeoData, /Should I use Browser mode or Local agent/);
   assert.match(toolSeoData, /Is Browser mode supported for video repair/);
-  assert.match(toolSeoData, /Is Browser mode supported for PDF editing/);
+  assert.match(toolSeoData, /What can Browser mode do/);
+  assert.match(toolSeoData, /password-protected PDFs, OCR, searchable text editing/);
   assert.match(toolSeoData, /Can I compress a PDF in Browser mode/);
   assert.match(toolSeoData, /PDFs up to 10 MB/);
   assert.doesNotMatch(toolSeoData, /server worker|Server mode|Server uploads/);
@@ -181,6 +182,9 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(processingOptions, /Maximum input size/);
   assert.match(processingOptions, /25 MB per image/);
   assert.match(processingOptions, /5 MB per image/);
+  assert.match(processingOptions, /Password-protected PDFs/);
+  assert.match(processingOptions, /OCR and searchable text editing/);
+  assert.match(processingOptions, /Save to device and History/);
   assert.doesNotMatch(processingOptions, /processing-option-card/);
   assert.match(processingOptions, /JPG\/JPEG, PNG, HEIC\/HEIF, TIFF\/TIF, GIF, BMP/);
   assert.match(processingOptions, /Original copy, PNG, JPG/);

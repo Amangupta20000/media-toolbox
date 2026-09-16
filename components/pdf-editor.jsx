@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Bold, CheckCircle2, Copy, Download, FilePlus2, FileText, GripVertical, ImagePlus, Italic, LoaderCircle, Lock, MoreHorizontal, Plus, Printer, Redo2, RotateCcw, RotateCw, Save, Trash2, Type, Underline, Undo2, Unlock, UploadCloud, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertTriangle, Bold, CheckCircle2, Copy, Download, FilePlus2, FileText, GripVertical, ImagePlus, Italic, LoaderCircle, Lock, LockKeyhole, MoreHorizontal, Plus, Printer, Redo2, RotateCcw, RotateCw, Save, Trash2, Type, Underline, Undo2, Unlock, UploadCloud, WandSparkles, X, ZoomIn, ZoomOut } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
 import { formatBytes } from "./file-dropzone.jsx";
@@ -12,13 +12,21 @@ import { downloadFilename, downloadUrlWithFilename, filenameStem, ResultFilename
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { ToolFaqContent, ToolSeoContent } from "./tool-seo-content.jsx";
 import { ProcessingOptionsPanel } from "./processing-options.jsx";
+import { BROWSER_PDF_EDITOR_IMAGE_MAX_BYTES, BROWSER_PDF_EDITOR_MAX_TOTAL_BYTES } from "./browser-processing.js";
 import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, preferredProcessingMode, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 import { MAX_PDF_COUNT, MAX_PDF_TOTAL_BYTES } from "../lib/pdf-limits.js";
 import { normalizeImageRotation, rotatedImageDrawPlacement } from "../lib/pdf-image-placement.js";
-import { PDF_TEXT_BOX_FONTS, layoutPdfTextRuns, textBoxColor, textBoxCssFontFamily, textBoxDrawPlacement, textBoxFontDefinition, textBoxFontName, textBoxTextRuns, wrapPdfTextLines } from "../lib/pdf-text-box.js";
+import { PDF_TEXT_BOX_FONTS, textBoxCssFontFamily, textBoxTextRuns } from "../lib/pdf-text-box.js";
 
 const MAX_IMAGE_COORDINATE = 100000;
 const ACCEPTED_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".heic", ".heif", ".tif", ".tiff", ".gif", ".bmp"]);
+const BROWSER_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg"]);
+const BROWSER_TEXT_BOX_ERROR = "Styled text boxes require Local agent. Switch to Local agent to continue.";
+const BROWSER_DUPLICATE_PAGE_ERROR = "Duplicating pages requires Local agent. Switch to Local agent to continue.";
+const BROWSER_PASSWORD_PDF_ERROR = "Password-protected PDFs require Local agent. Switch to Local agent to continue.";
+const BROWSER_IMAGE_FORMAT_ERROR = "Browser mode accepts PNG, JPG, and JPEG images only. Use Local agent for other formats.";
+const BROWSER_IMAGE_SIZE_ERROR = "Browser mode accepts images up to 1 MB each. Use Local agent for larger images.";
+const BROWSER_PROJECT_ERROR = "This project contains a Local-agent-only feature. Switch to Local agent to export it.";
 const A4 = { width: 595.28, height: 841.89, rotation: 0 };
 
 function getPageImages(page) {
@@ -332,6 +340,28 @@ function isImage(file) {
   return file && ((file.type || "").startsWith("image/") || ACCEPTED_IMAGE_EXTENSIONS.has(fileExtension(file.name)));
 }
 
+function isBrowserPdfEditorImage(file) {
+  const type = String(file?.type || "").toLowerCase().split(";", 1)[0];
+  const extension = fileExtension(file?.name);
+  return (type === "image/png" || type === "image/jpeg" || !type) && BROWSER_IMAGE_EXTENSIONS.has(extension);
+}
+
+function browserPdfProjectError({ pages, pdfFiles = [] }) {
+  const totalPdfBytes = pdfFiles.reduce((total, record) => total + Number(record?.file?.size || 0), 0);
+  if (totalPdfBytes > BROWSER_PDF_EDITOR_MAX_TOTAL_BYTES) return "Browser mode accepts PDFs up to 50 MB total. Switch to Local agent for larger projects.";
+  if ((pages || []).some((page) => page?.kind === "raster")) return BROWSER_PASSWORD_PDF_ERROR;
+  for (const page of pages || []) {
+    if (getPageTextBoxes(page).length) return BROWSER_TEXT_BOX_ERROR;
+    for (const image of getPageImages(page)) {
+      const file = image?.file;
+      if (!file) return BROWSER_PROJECT_ERROR;
+      if (!isBrowserPdfEditorImage(file)) return BROWSER_IMAGE_FORMAT_ERROR;
+      if (Number(file.size) > BROWSER_PDF_EDITOR_IMAGE_MAX_BYTES) return BROWSER_IMAGE_SIZE_ERROR;
+    }
+  }
+  return "";
+}
+
 function clipboardImageFile(blob, index) {
   const type = String(blob?.type || "image/png").toLowerCase();
   const subtype = type.split("/")[1]?.split(";")[0] || "png";
@@ -403,7 +433,7 @@ async function loadPdfDocumentWithPassword(pdfLibrary, data, filename) {
   }
 }
 
-async function loadPdfFile(file, pdfLibrary, { allowServerFallback = false } = {}) {
+async function loadPdfFile(file, pdfLibrary, { allowServerFallback = false, browserOnly = false } = {}) {
   const data = new Uint8Array(await file.arrayBuffer());
   let browserError = null;
   if (pdfLibrary) {
@@ -413,6 +443,11 @@ async function loadPdfFile(file, pdfLibrary, { allowServerFallback = false } = {
     } catch (error) {
       browserError = error;
     }
+  }
+  if (browserOnly) {
+    throw new Error(browserError instanceof Error
+      ? `This PDF could not be rendered in Browser mode: ${browserError.message}`
+      : "This PDF could not be rendered in Browser mode. Switch to Local agent for this file.");
   }
   try {
     const { PDFDocument } = await import("pdf-lib");
@@ -495,6 +530,14 @@ function withTimeout(promise, timeoutMs, message) {
   });
 }
 
+function dataUrlToBytes(dataUrl) {
+  const encoded = String(dataUrl || "").split(",", 2)[1] || "";
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
 async function renderPdfPageToJpeg(pdfPage) {
   const baseViewport = pdfPage.getViewport({ scale: 1, rotation: 0 });
   const scale = Math.min(1, 1200 / Math.max(1, baseViewport.width));
@@ -503,120 +546,122 @@ async function renderPdfPageToJpeg(pdfPage) {
   canvas.width = Math.max(1, Math.ceil(viewport.width));
   canvas.height = Math.max(1, Math.ceil(viewport.height));
   await withTimeout(pdfPage.render({ canvasContext: canvas.getContext("2d"), viewport }).promise, 15000, "A PDF page took too long to render in Browser mode.");
-  const blob = await withTimeout(new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92)), 30000, "The browser could not encode a PDF page.");
-  if (!blob) throw new Error("The browser could not encode a PDF page.");
-  return blob.arrayBuffer();
+  return dataUrlToBytes(canvas.toDataURL("image/jpeg", 0.92));
 }
 
-async function rasterizeBrowserPages(pages, sourceDocuments, preparedPages, onProgress) {
-  const rasterPages = [];
-  for (const [index, page] of pages.entries()) {
-    const preparedPage = preparedPages[index];
-    if (page.kind === "source") {
-      const documentProxy = sourceDocuments?.[page.pdfIndex];
-      if (!documentProxy) throw new Error("This PDF page cannot be rendered in Browser mode. Connect the Local agent for this file.");
-      onProgress?.(17);
-      const pdfPage = page.pdfPage || await withTimeout(documentProxy.getPage(page.pageIndex + 1), 60000, "A PDF page took too long to load in Browser mode.");
-      onProgress?.(18);
-      const bytes = await renderPdfPageToJpeg(pdfPage);
-      rasterPages.push({ kind: "raster", width: page.width, height: page.height, rotation: page.rotation || 0, baseImage: { extension: ".jpg", bytes }, images: preparedPage.images || [], textBoxes: preparedPage.textBoxes || [] });
-    } else {
-      rasterPages.push({ kind: "blank", width: page.width, height: page.height, rotation: page.rotation || 0, images: preparedPage.images || [], textBoxes: preparedPage.textBoxes || [] });
-    }
-    onProgress?.(18 + Math.round(((index + 1) / Math.max(1, pages.length)) * 44));
-  }
-  return rasterPages;
+async function rasterizeBrowserPage(page, sourceDocuments, preparedPage) {
+  if (page.kind !== "source") return { kind: "blank", width: page.width, height: page.height, rotation: page.rotation || 0, images: preparedPage.images || [], textBoxes: preparedPage.textBoxes || [] };
+  const documentProxy = sourceDocuments?.[page.pdfIndex];
+  if (!documentProxy) throw new Error("This PDF page cannot be rendered in Browser mode. Connect the Local agent for this file.");
+  const pdfPage = page.pdfPage || await withTimeout(documentProxy.getPage(page.pageIndex + 1), 60000, "A PDF page took too long to load in Browser mode.");
+  const bytes = await renderPdfPageToJpeg(pdfPage);
+  return { kind: "raster", width: page.width, height: page.height, rotation: page.rotation || 0, baseImage: { extension: ".jpg", bytes }, images: preparedPage.images || [], textBoxes: preparedPage.textBoxes || [] };
 }
 
-let browserFontkitPromise;
-
-async function loadBrowserFontkit() {
-  if (!browserFontkitPromise) browserFontkitPromise = import("fontkit").then((module) => module.default || module);
-  return browserFontkitPromise;
+function browserPdfNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "0";
+  return number.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
 }
 
-async function embedBrowserTextBoxFont(pdf, textBox, fontCache) {
-  const definition = textBoxFontDefinition(textBox.fontFamily);
-  const fontName = textBoxFontName(textBox);
-  if (definition.kind === "standard") return pdf.embedFont(fontName);
-  let font = fontCache.get(fontName);
-  if (font) return font;
-  if (!fontCache.has("__fontkit__")) {
-    pdf.registerFontkit(await loadBrowserFontkit());
-    fontCache.set("__fontkit__", true);
-  }
-  let bytes = fontCache.get(`__bytes:${fontName}`);
-  if (!bytes) {
-    const response = await fetch(`/fonts/${fontName}`, { cache: "force-cache" });
-    if (!response.ok) throw new Error(`The bundled ${definition.family} font could not be loaded.`);
-    bytes = new Uint8Array(await response.arrayBuffer());
-    fontCache.set(`__bytes:${fontName}`, bytes);
-  }
-  font = await pdf.embedFont(bytes);
-  fontCache.set(fontName, font);
-  return font;
-}
-
-async function drawBrowserPdfTextBoxes(pdf, outputPage, operation, fontCache, operators = {}) {
-  const textBoxes = Array.isArray(operation.textBoxes) ? operation.textBoxes : [];
-  if (!textBoxes.length) return;
-  const pageHeight = Number(operation.height) || outputPage.getHeight();
-  for (const [index, textBox] of textBoxes.entries()) {
-    let transformed = false;
-    try {
-      const placement = textBoxDrawPlacement(textBox, pageHeight);
-      const rotation = Number(textBox.rotation) || 0;
-      if (rotation && operators.pushGraphicsState && operators.concatTransformationMatrix) {
-        const radians = rotation * Math.PI / 180;
-        const a = Math.cos(radians);
-        const b = Math.sin(radians);
-        const c = -Math.sin(radians);
-        const d = Math.cos(radians);
-        const centerX = placement.x + placement.width / 2;
-        const centerY = placement.y + placement.height / 2;
-        outputPage.pushOperators(operators.pushGraphicsState(), operators.concatTransformationMatrix(a, b, c, d, centerX - a * centerX - c * centerY, centerY - b * centerX - d * centerY));
-        transformed = true;
-      }
-      if (textBox.backgroundColor !== "transparent") {
-        const background = textBoxColor(textBox.backgroundColor, "#ffffff");
-        outputPage.drawRectangle({ x: placement.x, y: placement.y, width: placement.width, height: placement.height, color: pdf.rgb(background.r, background.g, background.b), borderWidth: 0 });
-      }
-      if (!String(textBox.text ?? "")) continue;
-      const fontCacheForBox = new Map();
-      const fontForRun = (run) => fontCacheForBox.get(textBoxFontName(run));
-      for (const run of textBoxTextRuns(textBox)) {
-        const fontName = textBoxFontName(run);
-        if (!fontCacheForBox.has(fontName)) fontCacheForBox.set(fontName, await embedBrowserTextBoxFont(pdf, run, fontCache));
-      }
-      const lines = layoutPdfTextRuns(textBoxTextRuns(textBox), fontForRun, Math.max(1, placement.width - 8));
-      let baseline = placement.y + placement.height - (lines[0]?.height || 21.6) - 4;
-      for (const line of lines) {
-        let textX = placement.x + 4;
-        for (const run of line.items) {
-          const color = textBoxColor(run.color);
-          if (run.backgroundColor !== "transparent") {
-            const background = textBoxColor(run.backgroundColor, "#ffffff");
-            outputPage.drawRectangle({ x: textX, y: baseline - run.fontSize * 0.22, width: run.width, height: run.fontSize * 1.2, color: pdf.rgb(background.r, background.g, background.b), borderWidth: 0 });
-          }
-          outputPage.drawText(run.text, { x: textX, y: baseline, size: run.fontSize, font: run.font, color: pdf.rgb(color.r, color.g, color.b) });
-          if (run.underline) outputPage.drawLine({ start: { x: textX, y: baseline - run.fontSize * 0.08 }, end: { x: textX + run.width, y: baseline - run.fontSize * 0.08 }, thickness: Math.max(0.5, run.fontSize * 0.06), color: pdf.rgb(color.r, color.g, color.b) });
-          textX += run.width;
-        }
-        baseline -= line.height;
-      }
-    } catch (error) {
-      throw new Error(`Text box ${index + 1} could not be exported with the selected font. Use a supported PDF font and text.`);
-    } finally {
-      if (transformed && operators.popGraphicsState) outputPage.pushOperators(operators.popGraphicsState());
-    }
+async function loadBrowserImage(bytes, mime, name) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+  try {
+    const image = new Image();
+    await withTimeout(new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error(`The image ${name || "file"} could not be decoded in this browser.`));
+      image.src = url;
+    }), 30000, `The image ${name || "file"} took too long to decode in Browser mode.`);
+    return image;
+  } finally {
+    URL.revokeObjectURL(url);
   }
 }
 
-async function exportPdfInBrowser(pdfFiles, pages, sourceDocuments, pdfLibrary, onProgress) {
+async function composeBrowserPageJpeg(page, sourceDocuments, preparedPage) {
+  const width = Math.max(1, Number(page.width) || A4.width);
+  const height = Math.max(1, Number(page.height) || A4.height);
+  if (page.kind !== "source" && !(preparedPage.images || []).length) return { bytes: null, width: 0, height: 0 };
+  const scale = Math.min(1, 1600 / width, 1600 / height);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.ceil(width * scale));
+  canvas.height = Math.max(1, Math.ceil(height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("The browser could not prepare a PDF page canvas.");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  if (page.kind === "source") {
+    const rasterPage = await rasterizeBrowserPage(page, sourceDocuments, preparedPage);
+    const baseImage = await loadBrowserImage(rasterPage.baseImage.bytes, "image/jpeg", page.sourceName);
+    context.drawImage(baseImage, 0, 0, canvas.width, canvas.height);
+  }
+
+  for (const image of preparedPage.images || []) {
+    const mime = image.extension === ".png" ? "image/png" : "image/jpeg";
+    const decoded = await loadBrowserImage(image.bytes, mime, image.name);
+    const placement = rotatedImageDrawPlacement(image, height);
+    context.save();
+    context.translate((placement.x + placement.width / 2) * scale, canvas.height - (placement.y + placement.height / 2) * scale);
+    context.rotate(-placement.rotation * Math.PI / 180);
+    context.drawImage(decoded, -placement.width * scale / 2, -placement.height * scale / 2, placement.width * scale, placement.height * scale);
+    context.restore();
+  }
+
+  return { bytes: dataUrlToBytes(canvas.toDataURL("image/jpeg", 0.92)), width: canvas.width, height: canvas.height };
+}
+
+function buildBrowserPdf(pageOutputs) {
+  const pageObjectNumbers = pageOutputs.map((_, index) => 3 + index * 3);
+  const objects = [
+    { parts: ["<< /Type /Catalog /Pages 2 0 R >>"] },
+    { parts: [`<< /Type /Pages /Kids [${pageObjectNumbers.map((number) => `${number} 0 R`).join(" ")}] /Count ${pageOutputs.length} >>`] },
+  ];
+  for (const [index, page] of pageOutputs.entries()) {
+    const pageObjectNumber = 3 + index * 3;
+    const contentObjectNumber = pageObjectNumber + 1;
+    const imageObjectNumber = pageObjectNumber + 2;
+    const hasImage = Boolean(page.bytes?.byteLength);
+    const content = hasImage ? `q\n${browserPdfNumber(page.width)} 0 0 ${browserPdfNumber(page.height)} 0 0 cm\n/Im0 Do\nQ\n` : "q\nQ\n";
+    const resources = hasImage ? `<< /XObject << /Im0 ${imageObjectNumber} 0 R >> >>` : "<< >>";
+    objects.push({ parts: [`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${browserPdfNumber(page.width)} ${browserPdfNumber(page.height)}]${page.rotation ? ` /Rotate ${normalizeRotation(page.rotation)}` : ""} /Resources ${resources} /Contents ${contentObjectNumber} 0 R >>`] });
+    objects.push({ parts: [`<< /Length ${new TextEncoder().encode(content).byteLength} >>\nstream\n`, content, "endstream"] });
+    objects.push(hasImage ? { parts: [`<< /Type /XObject /Subtype /Image /Width ${page.imageWidth} /Height ${page.imageHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${page.bytes.byteLength} >>\nstream\n`, page.bytes, "\nendstream"] } : { parts: ["<< >>"] });
+  }
+
+  const encoder = new TextEncoder();
+  const chunks = [];
+  const offsets = [0];
+  let byteLength = 0;
+  const append = (value) => {
+    const chunk = typeof value === "string" ? encoder.encode(value) : value;
+    chunks.push(chunk);
+    byteLength += chunk.byteLength;
+  };
+  append("%PDF-1.4\n%\xFF\xFF\xFF\xFF\n");
+  for (const [index, object] of objects.entries()) {
+    offsets.push(byteLength);
+    append(`${index + 1} 0 obj\n`);
+    object.parts.forEach(append);
+    append("\nendobj\n");
+  }
+  const xrefOffset = byteLength;
+  append(`xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`);
+  offsets.slice(1).forEach((offset) => append(`${String(offset).padStart(10, "0")} 00000 n \n`));
+  append(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+  const result = new Uint8Array(byteLength);
+  let cursor = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, cursor);
+    cursor += chunk.byteLength;
+  }
+  return result;
+}
+
+async function exportPdfInBrowser(pdfFiles, pages, sourceDocuments, onProgress) {
   onProgress?.(1);
-  for (const [index, record] of pdfFiles.entries()) {
-    onProgress?.(Math.max(2, Math.round(((index + 1) / Math.max(1, pdfFiles.length)) * 8)));
-  }
+  for (const [index] of pdfFiles.entries()) onProgress?.(Math.max(2, Math.round(((index + 1) / Math.max(1, pdfFiles.length)) * 8)));
 
   const preparedPages = [];
   for (const [index, page] of pages.entries()) {
@@ -625,71 +670,44 @@ async function exportPdfInBrowser(pdfFiles, pages, sourceDocuments, pdfLibrary, 
       const extension = fileExtension(image.file?.name);
       if (![".png", ".jpg", ".jpeg"].includes(extension)) throw new Error("Browser PDF mode supports PNG, JPG, and JPEG images. Connect the Local agent for HEIC and other image formats.");
       const bytes = image.sourceBytes
-        ? image.sourceBytes.slice(0)
-        : await withTimeout(image.file.arrayBuffer(), 30000, `Timed out while reading ${image.file.name}. Connect the Local agent for this file.`);
-      images.push({ x: image.x, y: image.y, width: image.width, height: image.height, rotation: normalizeImageRotation(image.rotation), extension, bytes });
+        ? new Uint8Array(image.sourceBytes).slice()
+        : new Uint8Array(await withTimeout(image.file.arrayBuffer(), 30000, `Timed out while reading ${image.file.name}. Connect the Local agent for this file.`));
+      images.push({ x: image.x, y: image.y, width: image.width, height: image.height, rotation: normalizeImageRotation(image.rotation), extension, bytes, name: image.file?.name });
     }
     preparedPages.push({ kind: page.kind, pdfIndex: page.pdfIndex, pageIndex: page.pageIndex, width: page.width, height: page.height, rotation: page.rotation, images, textBoxes: getPageTextBoxes(page) });
     onProgress?.(10 + Math.round(((index + 1) / Math.max(1, pages.length)) * 6));
   }
 
   onProgress?.(16);
-  const rasterPages = await rasterizeBrowserPages(pages, sourceDocuments, preparedPages, onProgress);
+  const pageOutputs = [];
+  for (const [index, page] of pages.entries()) {
+    const preparedPage = preparedPages[index];
+    onProgress?.(17);
+    if (page.kind !== "source" && !(preparedPage.images || []).length) {
+      pageOutputs.push({ bytes: null, imageWidth: 0, imageHeight: 0, width: page.width, height: page.height, rotation: page.rotation });
+      onProgress?.(20 + Math.round(((index + 1) / Math.max(1, pages.length)) * 44));
+      continue;
+    }
+    const output = await composeBrowserPageJpeg(page, sourceDocuments, preparedPage);
+    pageOutputs.push({ bytes: output.bytes, imageWidth: output.width, imageHeight: output.height, width: page.width, height: page.height, rotation: page.rotation });
+    onProgress?.(20 + Math.round(((index + 1) / Math.max(1, pages.length)) * 44));
+  }
   onProgress?.(64);
-  const { PDFDocument, concatTransformationMatrix, degrees, popGraphicsState, pushGraphicsState } = await import("pdf-lib");
-  const output = await PDFDocument.create();
-  // Keep the helper's output API small while allowing browser-mode exports to
-  // use pdf-lib's colour factory without changing the worker implementation.
-  const browserFontCache = new Map();
-  for (const [index, page] of rasterPages.entries()) {
-    const target = output.addPage([page.width, page.height]);
-    if (page.rotation) target.setRotation(degrees(page.rotation));
-    if (page.baseImage) {
-      const embeddedPage = await output.embedJpg(new Uint8Array(page.baseImage.bytes));
-      target.drawImage(embeddedPage, { x: 0, y: 0, width: target.getWidth(), height: target.getHeight() });
-    }
-    for (const image of page.images || []) {
-      const embedded = image.extension === ".png"
-        ? await output.embedPng(new Uint8Array(image.bytes))
-        : await output.embedJpg(new Uint8Array(image.bytes));
-      const placement = rotatedImageDrawPlacement(image, page.height);
-      target.drawImage(embedded, {
-        x: placement.x,
-        y: placement.y,
-        width: placement.width,
-        height: placement.height,
-        rotate: degrees(placement.rotation),
-      });
-    }
-    await drawBrowserPdfTextBoxes(output, target, page, browserFontCache, { concatTransformationMatrix, popGraphicsState, pushGraphicsState });
-    onProgress?.(64 + Math.round(((index + 1) / Math.max(1, rasterPages.length)) * 8));
-  }
-  const bytes = new Uint8Array(await withTimeout(output.save(), 120000, "Browser PDF export took too long while saving the file. Try the Local agent for this file."));
+  const bytes = buildBrowserPdf(pageOutputs);
+  onProgress?.(72);
+  // Do not render the output preview as part of export. In some embedded browsers
+  // PDF.js never settles after loading an in-memory PDF, which used to leave a
+  // valid export stuck on the processing screen. PdfResultPreview renders the
+  // same download URL independently after the job completes.
   const previewImages = [];
-  let previewError = null;
-  if (pdfLibrary) {
-    try {
-      await withTimeout((async () => {
-        const documentProxy = await pdfLibrary.getDocument({ data: bytes }).promise;
-        for (let pageNumber = 1; pageNumber <= documentProxy.numPages; pageNumber += 1) {
-          const pdfPage = await documentProxy.getPage(pageNumber);
-          const viewport = pdfPage.getViewport({ scale: Math.min(1.1, 720 / pdfPage.getViewport({ scale: 1 }).width) });
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.max(1, Math.ceil(viewport.width));
-          canvas.height = Math.max(1, Math.ceil(viewport.height));
-          await pdfPage.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-          previewImages.push(canvas.toDataURL("image/jpeg", 0.84));
-          onProgress?.(70 + Math.round((pageNumber / documentProxy.numPages) * 30));
-        }
-      })(), 120000, "The browser preview took too long to render.");
-    } catch (error) {
-      previewError = error instanceof Error ? error.message : "The output preview could not be rendered.";
-    }
-  }
+  const previewError = null;
   onProgress?.(100);
   const blob = new Blob([bytes], { type: "application/pdf" });
   const downloadUrl = URL.createObjectURL(blob);
-  return { filename: pdfFiles.length === 1 ? `${pdfFiles[0].name.replace(/\.pdf$/i, "")}_edited.pdf` : "merged_edited.pdf", bytes: bytes.byteLength, pageCount: pages.length, method: "Browser PDF editor", downloadUrl, previewUrl: downloadUrl, previewImages, previewError };
+  const filename = pdfFiles.length === 1
+    ? `${pdfFiles[0].name.replace(/\.pdf$/i, "")}_edited.pdf`
+    : pdfFiles.length > 1 ? "merged_edited.pdf" : "blank_pages_edited.pdf";
+  return { filename, bytes: bytes.byteLength, pageCount: pages.length, method: "Browser PDF editor", downloadUrl, previewUrl: downloadUrl, previewImages, previewError };
 }
 
 export function PdfEditor() {
@@ -744,6 +762,26 @@ export function PdfEditor() {
   const historyRef = useRef({ past: [], future: [] });
   const pendingHistoryRef = useRef(null);
   const historyTimerRef = useRef(null);
+
+  const useLocalAgent = () => {
+    setError("");
+    setProcessingMode("local");
+    setActiveView("processing");
+  };
+
+  const selectProcessingMode = (mode) => {
+    if (mode === "browser") {
+      const restriction = browserPdfProjectError({ pages: pagesRef.current, pdfFiles: pdfFilesRef.current });
+      if (restriction) {
+        setError(restriction);
+        setActiveView("tool");
+        return;
+      }
+    }
+    setError("");
+    setProcessingMode(mode);
+    setActiveView("tool");
+  };
 
   const ensurePdfLibrary = () => {
     if (!pdfLibraryPromiseRef.current) {
@@ -945,6 +983,10 @@ export function PdfEditor() {
 
   const duplicateSelectedPage = async () => {
     if (!selectedPage) return;
+    if (processingMode === "browser") {
+      setError(BROWSER_DUPLICATE_PAGE_ERROR);
+      return;
+    }
     const clonedImages = await Promise.all(getPageImages(selectedPage).map(async (image) => {
       const clone = { ...image, id: makeId() };
       if (image.file) {
@@ -990,8 +1032,9 @@ export function PdfEditor() {
     }
     const existingPdfBytes = pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0);
     const selectedPdfBytes = selectedFiles.reduce((total, file) => total + Number(file.size || 0), 0);
-    if (existingPdfBytes + selectedPdfBytes > MAX_PDF_TOTAL_BYTES) {
-      setError("The combined PDF upload must be 200 MB or smaller. Remove a PDF before adding another.");
+    const pdfTotalLimit = processingMode === "browser" ? BROWSER_PDF_EDITOR_MAX_TOTAL_BYTES : MAX_PDF_TOTAL_BYTES;
+    if (existingPdfBytes + selectedPdfBytes > pdfTotalLimit) {
+      setError(processingMode === "browser" ? "Browser mode accepts PDFs up to 50 MB total. Use Local agent for larger projects." : "The combined PDF upload must be 200 MB or smaller. Remove a PDF before adding another.");
       return;
     }
 
@@ -1017,7 +1060,9 @@ export function PdfEditor() {
       let serverFallbacks = 0;
       let passwordProtectedFiles = 0;
       for (const file of selectedFiles) {
-      const loaded = await loadPdfFile(file, activePdfLibrary, { allowServerFallback: processingMode === "server" });
+      const loaded = await loadPdfFile(file, activePdfLibrary, { allowServerFallback: processingMode === "server", browserOnly: processingMode === "browser" });
+      if (processingMode === "browser" && !loaded.documentProxy) throw new Error("This PDF could not be rendered in Browser mode. Switch to Local agent for this file.");
+      if (processingMode === "browser" && loaded.passwordProtected) throw new Error(BROWSER_PASSWORD_PDF_ERROR);
       const pdfDocument = loaded.documentProxy;
         documentsRef.current[pdfIndex] = pdfDocument;
         if (loaded.fallbackDocument) browserFallbacks += 1;
@@ -1066,6 +1111,10 @@ export function PdfEditor() {
     }
   };
 
+  const openPdfPicker = () => {
+    pdfInputRef.current?.click();
+  };
+
   useEffect(() => {
     if (!continuingFile || loadingFiles || pdfFiles.length || pages.length || job) return;
     const file = continuingFile;
@@ -1102,7 +1151,12 @@ export function PdfEditor() {
   const handlePdfDrop = (event) => {
     event.preventDefault();
     setPdfDragActive(false);
-    addPdfFiles(event.dataTransfer.files);
+    const droppedFiles = Array.from(event.dataTransfer?.files || []);
+    if (processingMode === "browser" && droppedFiles.length && !droppedFiles.some((file) => isPdf(file))) {
+      void addImages(droppedFiles, selectedPage?.id);
+      return;
+    }
+    addPdfFiles(droppedFiles);
   };
 
   const updatePage = (pageId, changes, history = "discrete") => commitDocument(pagesRef.current.map((page) => page.id === pageId ? { ...page, ...changes } : page), pdfFilesRef.current, { history });
@@ -1390,8 +1444,13 @@ export function PdfEditor() {
     const targetPage = pagesRef.current.find((page) => page.id === targetPageId) || selectedPage;
     if (!targetPage) { setError("Select a PDF page before adding images."); return; }
     for (const file of files) {
-      if (!isImage(file)) { setError(`${file.name} is not a supported image. Choose PNG, JPG, JPEG, HEIC, TIFF, GIF, or BMP.`); return; }
-      if (file.size > 25 * 1024 * 1024) { setError(`${file.name} is larger than the 25 MB image limit.`); return; }
+      if (processingMode === "browser") {
+        if (!isBrowserPdfEditorImage(file)) { setError(BROWSER_IMAGE_FORMAT_ERROR); return; }
+        if (file.size > BROWSER_PDF_EDITOR_IMAGE_MAX_BYTES) { setError(BROWSER_IMAGE_SIZE_ERROR); return; }
+      } else {
+        if (!isImage(file)) { setError(`${file.name} is not a supported image. Choose PNG, JPG, JPEG, HEIC, TIFF, GIF, or BMP.`); return; }
+        if (file.size > 25 * 1024 * 1024) { setError(`${file.name} is larger than the 25 MB image limit.`); return; }
+      }
     }
     const addedImages = [];
     try {
@@ -1454,6 +1513,10 @@ export function PdfEditor() {
   };
 
   const addTextBox = () => {
+    if (processingMode === "browser") {
+      setError(BROWSER_TEXT_BOX_ERROR);
+      return;
+    }
     if (!selectedPage) {
       setError("Select a PDF page before adding a text box.");
       return;
@@ -1511,9 +1574,8 @@ export function PdfEditor() {
     const validationError = validatePdfProject({ pages, pdfFiles, processingMode });
     if (validationError) { setError(`Export validation failed: ${validationError}`); return; }
     if (processingMode === "browser") {
-      setProcessingMode("local");
-      setError("Browser mode is temporarily unavailable. Choose Local agent.");
-      return;
+      const browserError = browserPdfProjectError({ pages, pdfFiles });
+      if (browserError) { setError(browserError); return; }
     }
     if (processingMode !== "browser" && !isProcessingLocationReady(locations, processingMode)) { setError("Admin login or activation is required in the Local agent dashboard."); return; }
     setError("");
@@ -1523,8 +1585,8 @@ export function PdfEditor() {
         const activePdfLibrary = pdfLibrary || await ensurePdfLibrary();
         if (!pdfLibrary) setPdfLibrary(activePdfLibrary);
         const browserId = `browser-${makeId()}`;
-        setJob({ id: browserId, status: "processing", progress: 0, stage: "Creating PDF in this browser", message: "The source PDFs are staying in this browser.", logs: [{ time: new Date().toISOString(), level: "info", message: "Browser PDF export started." }], warnings: [], error: null, result: null });
-        const result = await exportPdfInBrowser(pdfFiles, pages, documentsRef.current, activePdfLibrary, (progress) => setJob((current) => current ? { ...current, progress, stage: progress < 15 ? "Loading source PDFs" : progress < 70 ? "Copying and arranging pages" : progress < 75 ? "Creating final PDF" : "Rendering output preview", logs: [...(current.logs || []), { time: new Date().toISOString(), level: "info", message: `Browser export progress: ${progress}%.` }] } : current));
+        setJob({ id: browserId, status: "processing", progress: 0, stage: "Creating PDF in this browser", message: "Your PDF project is staying in this browser.", logs: [{ time: new Date().toISOString(), level: "info", message: "Browser PDF export started." }], warnings: [], error: null, result: null });
+        const result = await exportPdfInBrowser(pdfFiles, pages, documentsRef.current, (progress) => setJob((current) => current ? { ...current, progress, stage: progress < 15 ? "Loading source PDFs" : progress < 20 ? "Preparing browser pages" : progress < 64 ? "Rendering and arranging pages" : progress < 75 ? "Creating final PDF" : "Preparing download", logs: [...(current.logs || []), { time: new Date().toISOString(), level: "info", message: `Browser export progress: ${progress}%.` }] } : current));
         browserResultUrlRef.current = result.downloadUrl;
         setJob((current) => current ? { ...current, status: "completed", progress: 100, stage: "Complete", message: result.previewError ? "The PDF was created in this browser. Its download is ready; the on-page preview could not be rendered." : "The PDF was created in this browser.", logs: [...(current.logs || []), ...(result.previewError ? [{ time: new Date().toISOString(), level: "warn", message: "The PDF was created successfully, but the browser preview could not be rendered." }] : []), { time: new Date().toISOString(), level: "info", message: "Browser PDF export completed." }], result } : current);
       } catch (browserError) {
@@ -1651,16 +1713,16 @@ export function PdfEditor() {
   }, [activeView, job, saveJob, loadingFiles, selectedPage, previewZoom, pages, pdfFiles, processingMode, canRedo, canUndo]);
 
   return <AppShell>
-    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools · Beta <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · 200 MB total</span></div><h1>PDF editor</h1><p>Merge documents, reorder pages, remove pages, add images, or place styled text boxes on PDF pages and new blank pages.</p></div></div>
+    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools · Beta <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · {processingMode === "browser" ? "50 MB total" : "200 MB total"}</span></div><h1>PDF editor</h1><p>{processingMode === "browser" ? "Import, merge, reorder, rotate, and remove PDF pages in this browser, or start with blank pages. Duplicating pages, styled text boxes, and password-protected PDFs require Local agent." : "Merge documents, reorder pages, remove pages, add images, or place styled text boxes on PDF pages and new blank pages."}</p></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
-    <ProcessingOptionsPanel tool="pdf-editor" locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={(mode) => { setProcessingMode(mode); setActiveView("tool"); }} />
+    <ProcessingOptionsPanel tool="pdf-editor" locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={selectProcessingMode} />
     {activeView === "history" ? <ToolHistory tool="pdf-editor" /> : activeView === "guide" ? <ToolSeoContent pathname="/pdf-editor" /> : activeView === "processing" ? null : <>
-    {!job && <ProcessingMode value={processingMode} onChange={setProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool="pdf-editor" />}
+    {!job && <ProcessingMode value={processingMode} onChange={selectProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool="pdf-editor" />}
     {job ? <PdfJobCard job={job} mode={jobMode} keepResult={jobKeepResult} onReset={reset} onContinue={continueEditing} /> : <section className={`pdf-editor-shell ${pdfDragActive ? "pdf-drop-active" : ""}`} onDragOver={handlePdfDragOver} onDragLeave={handlePdfDragLeave} onDrop={handlePdfDrop}>
       <div className="pdf-editor-toolbar">
-        <div className="pdf-editor-toolbar-heading"><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDF_COUNT} PDFs · {pages.length} pages · {Math.ceil(pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0) / (1024 * 1024)) || 0} MB of 200 MB</span></div>
+        <div className="pdf-editor-toolbar-heading"><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDF_COUNT} PDFs · {pages.length} pages · {Math.ceil(pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0) / (1024 * 1024)) || 0} MB of {processingMode === "browser" ? 50 : 200} MB</span></div>
         <div className="pdf-editor-actions">
-          <button className="secondary-button" type="button" onClick={() => pdfInputRef.current?.click()} disabled={loadingFiles || pdfFiles.length >= MAX_PDF_COUNT}><Plus size={17} /> Add PDF</button>
+          <button className="secondary-button" type="button" onClick={openPdfPicker} disabled={loadingFiles || pdfFiles.length >= MAX_PDF_COUNT} title="Add PDF"><Plus size={17} /> Add PDF</button>
           <button className="secondary-button" type="button" onClick={addBlankPage}><FilePlus2 size={17} /> Blank page</button>
           <div className="pdf-zoom-controls" aria-label="Preview zoom"><button className="icon-button" type="button" onClick={() => changePreviewZoom(-0.1)} aria-label="Zoom out" title="Zoom out (-)"><ZoomOut size={16} /></button><button className="pdf-zoom-value" type="button" onClick={resetPreviewZoom} title="Reset zoom (0)">{Math.round(previewZoom * 100)}%</button><button className="icon-button" type="button" onClick={() => changePreviewZoom(0.1)} aria-label="Zoom in" title="Zoom in (+)"><ZoomIn size={16} /></button></div>
           <div ref={moreToolsRef} className="pdf-more-tools">
@@ -1674,9 +1736,9 @@ export function PdfEditor() {
                 <div className="pdf-more-tools-heading">Page tools</div>
                 <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); rotateSelectedPage(-90); }}><RotateCcw size={16} /><span>Rotate left</span><kbd>←</kbd></button>
                 <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); rotateSelectedPage(90); }}><RotateCw size={16} /><span>Rotate right</span><kbd>→</kbd></button>
-                <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); void duplicateSelectedPage(); }}><Copy size={16} /><span>Duplicate page</span><kbd>⌘/Ctrl+D</kbd></button>
+                <button className={processingMode === "browser" ? "pdf-local-only-menu-item" : ""} type="button" role="menuitem" aria-disabled={processingMode === "browser"} onClick={() => { setMoreToolsOpen(false); void duplicateSelectedPage(); }}><Copy size={16} /><span>Duplicate page{processingMode === "browser" ? " · Local agent only" : ""}</span>{processingMode === "browser" && <LockKeyhole size={12} aria-hidden="true" />}<kbd>⌘/Ctrl+D</kbd></button>
                 <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); imageInputRef.current?.click(); }}><ImagePlus size={16} /><span>Add images</span></button>
-                <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); addTextBox(); }}><Type size={16} /><span>Add text box</span></button>
+                <button className={processingMode === "browser" ? "pdf-local-only-menu-item" : ""} type="button" role="menuitem" aria-disabled={processingMode === "browser"} onClick={() => { setMoreToolsOpen(false); addTextBox(); }}><Type size={16} /><span>Add text box{processingMode === "browser" ? " · Local agent only" : ""}</span>{processingMode === "browser" && <LockKeyhole size={12} aria-hidden="true" />}</button>
                 {selectedPageImages.length > 0 && <button type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); removeAllImages(selectedPage.id); }}><Trash2 size={16} /><span>Remove images</span></button>}
                 <div className="pdf-more-tools-divider" />
                 <button className="pdf-more-tools-danger" type="button" role="menuitem" onClick={() => { setMoreToolsOpen(false); deletePage(selectedPage.id); }}><Trash2 size={16} /><span>Delete page</span><kbd>Delete</kbd></button>
@@ -1687,30 +1749,30 @@ export function PdfEditor() {
         </div>
       </div>
       <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { addPdfFiles(event.target.files); event.target.value = ""; }} />
-      <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/heic,image/heif,image/tiff,image/gif,image/bmp,.png,.jpg,.jpeg,.heic,.heif,.tif,.tiff,.gif,.bmp" multiple hidden onChange={(event) => { const targetPageId = imageTargetPageIdRef.current; imageTargetPageIdRef.current = null; addImages(event.target.files, targetPageId || undefined); event.target.value = ""; }} />
+      <input ref={imageInputRef} type="file" accept={processingMode === "browser" ? "image/png,image/jpeg,.png,.jpg,.jpeg" : "image/png,image/jpeg,image/heic,image/heif,image/tiff,image/gif,image/bmp,.png,.jpg,.jpeg,.heic,.heif,.tif,.tiff,.gif,.bmp"} multiple hidden onChange={(event) => { const targetPageId = imageTargetPageIdRef.current; imageTargetPageIdRef.current = null; addImages(event.target.files, targetPageId || undefined); event.target.value = ""; }} />
       <div className="pdf-retention-row">
         {processingMode === "local" && <div className="pdf-retention-name"><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem || filenameStem(defaultResultFilename)} label="Saved PDF name" description="This name is used for the export and, when retained, for PDF editor History in the Results folder." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(filenameStem(value)); }} /></div>}
         {processingMode === "local" && <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles || Boolean(saveJob)} title="Save the current PDF to the Local agent Results folder without leaving the editor"><Save size={17} /> {saveJob ? "Saving…" : "Save to device"}</button>}
       </div>
-      {!pdfFiles.length && !pages.length ? <PdfEmptyState onBrowse={() => pdfInputRef.current?.click()} onBlank={addBlankPage} loading={loadingFiles} dragActive={pdfDragActive} /> : !pages.length ? <PdfNoPagesState onBrowse={() => pdfInputRef.current?.click()} onBlank={addBlankPage} /> : <div className="pdf-editor-layout">
+      {!pdfFiles.length && !pages.length ? <PdfEmptyState onBrowse={openPdfPicker} onBlank={addBlankPage} loading={loadingFiles} dragActive={pdfDragActive} browserMode={processingMode === "browser"} /> : !pages.length ? <PdfNoPagesState onBrowse={openPdfPicker} onBlank={addBlankPage} browserMode={processingMode === "browser"} /> : <div className="pdf-editor-layout">
         <aside className="pdf-page-rail"><div className="pdf-rail-heading"><span>Pages</span><small>Pages load as you scroll</small></div><div ref={pageListRef} className="pdf-page-list" onDragOver={handlePageListDragOver} onDrop={handlePageListDrop}>{renderPageList()}</div></aside>
-        <section className="pdf-selected-panel"><div className="pdf-selected-heading"><div><span>Selected page {selectedPage ? pages.findIndex((page) => page.id === selectedPage.id) + 1 : "—"}</span><small>{selectedPage?.kind === "blank" ? "Blank page" : selectedPage?.sourceName || "Choose a page"}{selectedPage?.kind === "source" ? ` · Original page ${selectedPage.pageNumber}` : ""}</small></div></div><div ref={previewScrollRef} className="pdf-document-preview" onScroll={handlePreviewScroll}>{pages.map((page, index) => <Fragment key={page.id}><PdfPreviewPage page={page} index={index} selected={page.id === selectedPage?.id} previewZoom={previewZoom} pdfDocument={documentsRef.current[page.pdfIndex]} previewRootRef={previewScrollRef} elementRef={(element) => { if (element) previewElementRefs.current.set(page.id, element); else previewElementRefs.current.delete(page.id); }} selectedObject={selectedObject?.pageId === page.id ? selectedObject : null} onSelectObject={(object) => setSelectedObject(object ? { ...object, pageId: page.id } : null)} onChange={(images, history) => updatePage(page.id, { images }, history)} onRemove={(imageId) => removeImage(page.id, imageId)} onChangeTextBoxes={(textBoxes, history) => updatePage(page.id, { textBoxes }, history)} onRemoveTextBox={(textBoxId) => removeTextBox(page.id, textBoxId)} onAddImages={() => openImagePickerForPage(page.id)} onError={setPreviewError} /><PdfInsertPageButton pageNumber={index + 1} onClick={() => addBlankPageAfter(page.id)} /></Fragment>)}</div>{previewError && <DismissibleMessage className="pdf-preview-error" resetKey={previewError}><AlertTriangle size={16} /><span>{previewError}</span></DismissibleMessage>}<p className="pdf-editor-tip"><GripVertical size={15} /> Scroll the preview to select a page. Click + Add page between previews to insert a blank page. Use Text box to add editable text to the selected page.</p></section>
+        <section className="pdf-selected-panel"><div className="pdf-selected-heading"><div><span>Selected page {selectedPage ? pages.findIndex((page) => page.id === selectedPage.id) + 1 : "—"}</span><small>{selectedPage?.kind === "blank" ? "Blank page" : selectedPage?.sourceName || "Choose a page"}{selectedPage?.kind === "source" ? ` · Original page ${selectedPage.pageNumber}` : ""}</small></div></div><div ref={previewScrollRef} className="pdf-document-preview" onScroll={handlePreviewScroll}>{pages.map((page, index) => <Fragment key={page.id}><PdfPreviewPage page={page} index={index} selected={page.id === selectedPage?.id} previewZoom={previewZoom} pdfDocument={documentsRef.current[page.pdfIndex]} previewRootRef={previewScrollRef} elementRef={(element) => { if (element) previewElementRefs.current.set(page.id, element); else previewElementRefs.current.delete(page.id); }} selectedObject={selectedObject?.pageId === page.id ? selectedObject : null} onSelectObject={(object) => setSelectedObject(object ? { ...object, pageId: page.id } : null)} onChange={(images, history) => updatePage(page.id, { images }, history)} onRemove={(imageId) => removeImage(page.id, imageId)} onChangeTextBoxes={(textBoxes, history) => updatePage(page.id, { textBoxes }, history)} onRemoveTextBox={(textBoxId) => removeTextBox(page.id, textBoxId)} onAddImages={() => openImagePickerForPage(page.id)} onError={setPreviewError} /><PdfInsertPageButton pageNumber={index + 1} onClick={() => addBlankPageAfter(page.id)} /></Fragment>)}</div>{previewError && <DismissibleMessage className="pdf-preview-error" resetKey={previewError}><AlertTriangle size={16} /><span>{previewError}</span></DismissibleMessage>}<p className="pdf-editor-tip"><GripVertical size={15} /> Scroll the preview to select a page. Click + Add page between previews to insert a blank page. {processingMode === "browser" ? "Add images up to 1 MB each; duplicate pages and styled text boxes require Local agent." : "Use Text box to add editable text to the selected page."}</p></section>
       </div>}
       {saveJob && <div className="pdf-save-progress" role="status" aria-live="polite"><LoaderCircle className="spin" size={16} /><span>{saveJob.message || "Saving the current PDF to this device…"}</span></div>}
       {saveNotice && <DismissibleMessage className={saveNotice.type === "success" ? "success-banner pdf-save-notice" : "error-banner pdf-save-notice"} resetKey={saveNotice.message}>{saveNotice.type === "success" ? <CheckCircle2 size={17} /> : <AlertTriangle size={18} />}<span>{saveNotice.message}</span></DismissibleMessage>}
-      {error && <DismissibleMessage className="error-banner" resetKey={error}><AlertTriangle size={18} /><span>{error}</span></DismissibleMessage>}
+      {error && <DismissibleMessage className="error-banner" resetKey={error}><AlertTriangle size={18} /><span>{error}</span>{processingMode === "browser" && error.includes("Local agent") && <button className="secondary-button error-banner-action" type="button" onClick={useLocalAgent}>Use Local agent</button>}</DismissibleMessage>}
     </section>}
     <ToolFaqContent pathname="/pdf-editor" />
     </>}
   </AppShell>;
 }
 
-function PdfEmptyState({ onBrowse, onBlank, loading, dragActive }) {
-  return <div className="pdf-empty-state"><div className="pdf-empty-icon"><UploadCloud size={28} /></div><h2>{loading ? "Reading PDF pages…" : dragActive ? "Drop your PDF files" : "Start a PDF project"}</h2><p>{loading ? "Creating page previews for the editor." : dragActive ? "Release to add the PDFs to your project." : "Upload one PDF to edit it, merge documents, or build a new PDF from blank pages."}</p><div className="pdf-empty-actions"><button className="primary-button" type="button" onClick={onBrowse} disabled={loading}><FilePlus2 size={18} /> Browse PDF files</button><button className="secondary-button" type="button" onClick={onBlank} disabled={loading}><FilePlus2 size={18} /> Start with blank page</button></div><small>Up to 5 PDFs · 200 MB total</small></div>;
+function PdfEmptyState({ onBrowse, onBlank, loading, dragActive, browserMode = false }) {
+  return <div className="pdf-empty-state"><div className="pdf-empty-icon"><UploadCloud size={28} /></div><h2>{loading ? "Reading PDF pages…" : dragActive ? "Drop your PDF files" : "Start a PDF project"}</h2><p>{loading ? "Creating page previews for the editor." : dragActive ? "Release to add the PDFs to your project." : browserMode ? "Import and merge PDFs up to 50 MB total, or create a simple PDF from blank pages and PNG/JPG/JPEG images. Results are download-only in this browser." : "Upload one PDF to edit it, merge documents, or build a new PDF from blank pages."}</p><div className="pdf-empty-actions"><button className="primary-button" type="button" onClick={onBrowse} disabled={loading}><FilePlus2 size={18} /> Browse PDF files</button><button className="secondary-button" type="button" onClick={onBlank} disabled={loading}><FilePlus2 size={18} /> Start with blank page</button></div><small>{browserMode ? "Up to 5 PDFs · 50 MB total · PNG/JPG/JPEG images up to 1 MB each" : "Up to 5 PDFs · 200 MB total"}</small></div>;
 }
 
-function PdfNoPagesState({ onBrowse, onBlank }) {
-  return <div className="pdf-empty-state pdf-no-pages-state"><div className="pdf-empty-icon"><FileText size={28} /></div><h2>No pages left</h2><p>Add another PDF or add a blank page to continue building your document.</p><div className="pdf-empty-actions"><button className="primary-button" type="button" onClick={onBrowse}><Plus size={18} /> Add PDF</button><button className="secondary-button" type="button" onClick={onBlank}><FilePlus2 size={18} /> Add blank page</button></div></div>;
+function PdfNoPagesState({ onBrowse, onBlank, browserMode = false }) {
+  return <div className="pdf-empty-state pdf-no-pages-state"><div className="pdf-empty-icon"><FileText size={28} /></div><h2>No pages left</h2><p>{browserMode ? "Add a blank page, or import another PDF to continue building your document in this browser." : "Add another PDF or add a blank page to continue building your document."}</p><div className="pdf-empty-actions"><button className="primary-button" type="button" onClick={onBrowse}><Plus size={18} /> Add PDF</button><button className="secondary-button" type="button" onClick={onBlank}><FilePlus2 size={18} /> Add blank page</button></div></div>;
 }
 
 function PdfPreviewPage({ page, index, selected, previewZoom, pdfDocument, previewRootRef, elementRef, selectedObject, onSelectObject, onChange, onRemove, onChangeTextBoxes, onRemoveTextBox, onAddImages, onError }) {
@@ -2162,8 +2224,12 @@ function TextBoxOverlayLayer({ page, selectedTextBoxId, onSelect, onChange, onRe
   })}</div>;
 }
 
-function pdfPreviewUrl(downloadUrl) {
+function pdfPreviewUrl(result) {
+  const downloadUrl = result?.previewUrl || result?.downloadUrl;
   if (!downloadUrl) return "";
+  // Browser results already provide a blob URL. Appending a query string to a
+  // blob URL makes it a different, invalid object URL in some embedded browsers.
+  if (/^(blob:|data:)/i.test(downloadUrl)) return downloadUrl;
   return `${downloadUrl}${downloadUrl.includes("?") ? "&" : "?"}preview=1`;
 }
 
@@ -2183,7 +2249,7 @@ function PdfResultPreview({ result }) {
 
     const loadPreview = async () => {
       try {
-        const sourceUrl = pdfPreviewUrl(result?.downloadUrl);
+        const sourceUrl = pdfPreviewUrl(result);
         if (!sourceUrl) throw new Error("The PDF preview URL is unavailable.");
         const response = await fetch(sourceUrl, { cache: "no-store", signal: controller.signal });
         if (!response.ok) {
@@ -2252,6 +2318,13 @@ function PdfJobCard({ job: initialJob, mode = "local", keepResult = false, onRes
   const [printError, setPrintError] = useState("");
   const [filenameStemValue, setFilenameStemValue] = useState("");
   useEffect(() => {
+    // Browser jobs are completed in the parent because there is no server job
+    // to poll. Keep the card in sync with that parent state so a successful
+    // export cannot remain visually stuck on its last progress frame.
+    if (mode === "browser") setJob(initialJob);
+  }, [initialJob, mode]);
+  useEffect(() => {
+    if (mode === "browser") return undefined;
     let active = true;
     const poll = async () => {
       try {

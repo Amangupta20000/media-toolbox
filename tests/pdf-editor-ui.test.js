@@ -34,6 +34,8 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(styles, /\.pdf-image-overlay\.selected/);
   assert.match(styles, /\.pdf-text-box-overlay\.selected/);
   assert.match(styles, /\.pdf-object-transform-handles/);
+  assert.match(styles, /\.processing-format-table thead th:first-child \{ width: 28%; \}/);
+  assert.match(styles, /\.processing-format-table tbody th \{[^}]*white-space: normal;[^}]*overflow-wrap: anywhere;/);
   assert.match(shell, /Text box/);
   assert.doesNotMatch(shell, /<button className="secondary-button" type="button" onClick=\{addTextBox\} disabled=\{!selectedPage\}/);
   assert.match(shell, /Text size for text box/);
@@ -47,8 +49,6 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.doesNotMatch(shell, /pdf-shortcuts/);
   assert.match(shell, /Delete page/);
   assert.match(shell, /Drop here/);
-  assert.match(shell, /textBoxFontName/);
-  assert.match(shell, /textBoxFontDefinition/);
   assert.match(shell, /contentEditable/);
   assert.match(shell, /selection.start < 0 \|\| selection.end < selection.start/);
   assert.match(shell, /restoreTextSelection\(editor, selection\)/);
@@ -102,6 +102,50 @@ test("PDF editor can export blank-page-only projects and lets users rename downl
   assert.match(await read("components/pdf-text-editor.jsx"), /ResultFilenameField/);
   assert.match(worker, /layoutPdfTextRuns/);
   assert.match(intake, /styled range/);
+});
+
+test("PDF editor keeps advanced editing Local-agent-only in Browser mode", async () => {
+  const shell = await read("components/pdf-editor.jsx");
+  const options = await read("components/processing-options.jsx");
+  const browserProcessing = await read("components/browser-processing.js");
+  assert.match(browserProcessing, /BROWSER_PDF_EDITOR_IMAGE_MAX_BYTES = 1 \* 1024 \* 1024/);
+  assert.match(browserProcessing, /BROWSER_PDF_EDITOR_MAX_TOTAL_BYTES = 50 \* 1024 \* 1024/);
+  assert.match(browserProcessing, /"pdf-editor"/);
+  assert.match(shell, /BROWSER_TEXT_BOX_ERROR = "Styled text boxes require Local agent\. Switch to Local agent to continue\."/);
+  assert.match(shell, /BROWSER_DUPLICATE_PAGE_ERROR = "Duplicating pages requires Local agent\. Switch to Local agent to continue\."/);
+  assert.match(shell, /BROWSER_PASSWORD_PDF_ERROR = "Password-protected PDFs require Local agent\. Switch to Local agent to continue\."/);
+  assert.match(shell, /BROWSER_IMAGE_FORMAT_ERROR = "Browser mode accepts PNG, JPG, and JPEG images only\. Use Local agent for other formats\."/);
+  assert.match(shell, /BROWSER_IMAGE_SIZE_ERROR = "Browser mode accepts images up to 1 MB each\. Use Local agent for larger images\."/);
+  assert.match(shell, /BROWSER_PROJECT_ERROR = "This project contains a Local-agent-only feature\. Switch to Local agent to export it\."/);
+  assert.match(shell, /function PdfJobCard\(\{ job: initialJob, mode = "local"[\s\S]*?useEffect\(\(\) => \{\s*if \(mode === "browser"\) return undefined;/);
+  assert.match(shell, /processingMode === "browser"/);
+  assert.match(shell, /browserPdfProjectError/);
+  assert.match(shell, /browserOnly: processingMode === "browser"/);
+  assert.match(shell, /function buildBrowserPdf\(pageOutputs\)/);
+  assert.match(shell, /canvas\.toDataURL\("image\/jpeg", 0\.92\)/);
+  assert.match(shell, /rasterizeBrowserPage\(page, sourceDocuments, preparedPage\)/);
+  assert.match(shell, /if \(\/\^\(blob:\|data:\)\/i\.test\(downloadUrl\)\) return downloadUrl/);
+  assert.match(shell, /if \(mode === "browser"\) setJob\(initialJob\)/);
+  assert.match(shell, /Use Local agent/);
+  assert.match(shell, /aria-disabled=\{processingMode === "browser"\}/);
+  assert.match(shell, /Duplicate page\{processingMode === "browser" \? " · Local agent only" : ""\}/);
+  assert.match(shell, /Browser mode accepts PDFs up to 50 MB total/);
+  assert.doesNotMatch(shell, /pdf-browser-scope-note/);
+  assert.match(shell, /LockKeyhole size=\{12\}/);
+  assert.match(shell, /accept=\{processingMode === "browser" \? "image\/png,image\/jpeg,\.png,\.jpg,\.jpeg"/);
+  assert.match(shell, /droppedFiles\.some\(\(file\) => isPdf\(file\)\)/);
+  assert.doesNotMatch(shell, /Browser mode is temporarily unavailable/);
+  assert.match(options, /\["Import existing PDFs", "Available", "Available"\]/);
+  assert.match(options, /\["Merge existing PDFs", "Available", "Available"\]/);
+  assert.match(options, /\["Duplicate page", "Available", "Local agent only", true\]/);
+  assert.match(options, /\["Text boxes", "Available", "Local agent only", true\]/);
+  assert.match(options, /\["Password-protected PDFs", "Available where supported", "Local agent only", true\]/);
+  assert.match(options, /\["OCR and searchable text editing", "Available", "Local agent only", true\]/);
+  assert.match(options, /\["Save to device and History", "Available", "Local agent only", true\]/);
+  assert.match(options, /\["Browser image limit", "25 MB per image", "1 MB per image"\]/);
+  assert.match(options, /\["Browser image formats", "PNG, JPG\/JPEG, HEIC\/HEIF, TIFF\/TIF, GIF, BMP", "PNG, JPG, JPEG only"\]/);
+  assert.match(options, /\["Browser PDF total", "200 MB total", "50 MB total"\]/);
+  assert.match(options, /processing-locked/);
 });
 
 test("PDF editor saves to the device in place without opening the export result view", async () => {

@@ -1,8 +1,10 @@
 import { normalizeSvgMarkup, normalizeSvgOptions } from "../lib/svg-options.js";
 
 export const BROWSER_PDF_MAX_BYTES = 10 * 1024 * 1024;
+export const BROWSER_PDF_EDITOR_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 export const BROWSER_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
-export const BROWSER_SUPPORTED_TOOLS = new Set(["image-converter", "svg-to-png", "pdf-compressor"]);
+export const BROWSER_PDF_EDITOR_IMAGE_MAX_BYTES = 1 * 1024 * 1024;
+export const BROWSER_SUPPORTED_TOOLS = new Set(["image-converter", "svg-to-png", "pdf-compressor", "pdf-editor"]);
 
 const BROWSER_OUTPUT_MIME = {
   jpeg: "image/jpeg",
@@ -37,7 +39,7 @@ export function browserCapabilities(tool) {
       status: supported ? "ready" : "unavailable",
       browser: true,
       image: { browser: supported, formats },
-      pdf: { browser: supported && tool === "pdf-compressor" },
+      pdf: { browser: supported && ["pdf-compressor", "pdf-editor"].includes(tool) },
     },
     error: supported ? "" : "This browser does not support the required local conversion features.",
   };
