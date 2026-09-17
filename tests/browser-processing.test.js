@@ -1,9 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BROWSER_IMAGE_MAX_BYTES, BROWSER_PDF_EDITOR_IMAGE_MAX_BYTES, BROWSER_PDF_EDITOR_MAX_TOTAL_BYTES, BROWSER_PDF_MAX_BYTES, BROWSER_PDF_TEXT_EDITOR_MAX_BYTES, BROWSER_PDF_TEXT_EDITOR_MAX_PAGES, browserOutputMime, browserSupportsFormat, browserSupportsTool, processBrowserPdfTextEdits } from "../components/browser-processing.js";
+import { BROWSER_IMAGE_MAX_BYTES, BROWSER_IMAGE_TARGET_TOLERANCE_BYTES, BROWSER_PDF_EDITOR_IMAGE_MAX_BYTES, BROWSER_PDF_EDITOR_MAX_TOTAL_BYTES, BROWSER_PDF_MAX_BYTES, BROWSER_PDF_TEXT_EDITOR_MAX_BYTES, BROWSER_PDF_TEXT_EDITOR_MAX_PAGES, browserOutputMime, browserSupportsFormat, browserSupportsTool, padJpegToTarget, processBrowserPdfTextEdits } from "../components/browser-processing.js";
 
 test("browser image conversion uses a conservative 5 MB per-image limit", () => {
   assert.equal(BROWSER_IMAGE_MAX_BYTES, 5 * 1024 * 1024);
+});
+
+test("browser JPG target sizing can increase a smaller encoded result", async () => {
+  const source = new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xda, 0x00, 0x02, 0x01, 0x02, 0xff, 0xd9])], { type: "image/jpeg" });
+  const target = 50 * 1000;
+  const result = await padJpegToTarget(source, target);
+  assert.ok(result.size >= target);
+  assert.ok(result.size - target <= BROWSER_IMAGE_TARGET_TOLERANCE_BYTES);
+  assert.equal(result.type, "image/jpeg");
 });
 
 test("browser processing includes lightweight PDF editors", () => {

@@ -682,7 +682,7 @@ function ImageSettingsCard({ files, settings, activeIndex, sameConversion, sameS
   const selectImage = (index) => onActiveIndexChange(Math.max(0, Math.min(index, files.length - 1)));
   return <section className="tool-card settings-card image-batch-settings-card">
     <div className="card-heading"><div><span className="card-index">02</span><h2>{files.length ? "Set output" : "Choose output"}</h2></div><span className="optional-label">{files.length > 1 ? `${activeIndex + 1} of ${files.length}` : "Per-image target"}</span></div>
-    <p className="card-description">Choose a conversion and optional KB target for the selected image. Pixel dimensions stay unchanged.</p>
+    <p className="card-description">Choose a conversion and optional KB target for the selected image. Pixel dimensions stay unchanged.{processingMode === "browser" ? " Browser targets are approximate within about ±10 KB." : ""}</p>
     {!files.length ? <div className="batch-settings-empty"><Info size={18} /><span>Add images above to configure each output.</span></div> : <>
       <div className="image-settings-pager" aria-label="Select image to configure">
         <button className="image-settings-pager-arrow" type="button" onClick={() => selectImage(activeIndex - 1)} disabled={activeIndex === 0} aria-label="Previous image" title="Previous image"><ChevronLeft size={16} /></button>

@@ -6,6 +6,7 @@ export const BROWSER_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 export const BROWSER_PDF_EDITOR_IMAGE_MAX_BYTES = 1 * 1024 * 1024;
 export const BROWSER_PDF_TEXT_EDITOR_MAX_BYTES = 25 * 1024 * 1024;
 export const BROWSER_PDF_TEXT_EDITOR_MAX_PAGES = 100;
+export const BROWSER_IMAGE_TARGET_TOLERANCE_BYTES = 10 * 1000;
 export const BROWSER_SUPPORTED_TOOLS = new Set(["image-converter", "svg-to-png", "pdf-compressor", "pdf-editor", "pdf-text-editor"]);
 
 const BROWSER_OUTPUT_MIME = {
@@ -230,14 +231,75 @@ async function encodeImage(canvas, format, targetBytes, onProgress) {
   if (!mime) throw new Error(`Browser mode cannot create ${browserOutputLabel(format)} files. Use the Local agent for this format.`);
   if (format !== "jpeg" || !targetBytes) return { blob: await canvasBlob(canvas, mime), quality: undefined, targetMet: undefined, warnings: [] };
 
-  let best = null;
+  let closest = null;
+  let bestUnder = null;
   for (let quality = 95; quality >= 5; quality -= 10) {
     const blob = await canvasBlob(canvas, mime, quality / 100);
-    best = { blob, quality };
-    if (blob.size <= targetBytes) return { blob, quality, targetMet: true, warnings: [`JPG quality was set to ${quality} to target approximately ${Math.round(targetBytes / 1000)} KB.`] };
+    const candidate = { blob, quality };
+    const distance = Math.abs(blob.size - targetBytes);
+    if (!closest || distance < Math.abs(closest.blob.size - targetBytes)) closest = candidate;
+    if (blob.size <= targetBytes && (!bestUnder || blob.size > bestUnder.blob.size)) bestUnder = candidate;
     onProgress?.(Math.min(90, 35 + Math.round((95 - quality) / 90 * 55)), `Testing JPG quality ${quality}`);
   }
-  return { blob: best.blob, quality: best.quality, targetMet: false, warnings: [`The ${Math.round(targetBytes / 1000)} KB JPG target could not be reached without changing pixel dimensions; the smallest tested result was kept.`] };
+  const selected = bestUnder || closest;
+  if (!selected) throw new Error("This browser could not create JPG output.");
+  if (selected.blob.size < targetBytes) {
+    onProgress?.(96, "Adjusting JPG size");
+    const padded = await padJpegToTarget(selected.blob, targetBytes);
+    const targetMet = Math.abs(padded.size - targetBytes) <= BROWSER_IMAGE_TARGET_TOLERANCE_BYTES;
+    return {
+      blob: padded,
+      quality: selected.quality,
+      targetMet,
+      warnings: [`JPG quality was set to ${selected.quality} and the output was adjusted to approximately ${Math.round(targetBytes / 1000)} KB without changing pixel dimensions.`],
+    };
+  }
+  const targetMet = Math.abs(selected.blob.size - targetBytes) <= BROWSER_IMAGE_TARGET_TOLERANCE_BYTES;
+  return {
+    blob: selected.blob,
+    quality: selected.quality,
+    targetMet,
+    warnings: [targetMet
+      ? `JPG quality was set to ${selected.quality} to target approximately ${Math.round(targetBytes / 1000)} KB.`
+      : `The ${Math.round(targetBytes / 1000)} KB JPG target could not be reached without changing pixel dimensions; the closest safe result was kept.`],
+  };
+}
+
+export async function padJpegToTarget(blob, targetBytes) {
+  if (!blob || blob.size >= targetBytes) return blob;
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let insertionPoint = bytes.length;
+  for (let index = 0; index < bytes.length - 1; index += 1) {
+    if (bytes[index] === 0xff && bytes[index + 1] === 0xda) {
+      insertionPoint = index;
+      break;
+    }
+  }
+  if (insertionPoint === bytes.length) {
+    for (let index = bytes.length - 2; index >= 0; index -= 1) {
+      if (bytes[index] === 0xff && bytes[index + 1] === 0xd9) {
+        insertionPoint = index;
+        break;
+      }
+    }
+  }
+  let remaining = Math.max(0, Math.floor(targetBytes) - bytes.length);
+  const segments = [];
+  while (remaining > 0) {
+    let segmentLength = Math.min(65537, remaining);
+    const remainder = remaining - segmentLength;
+    if (remainder > 0 && remainder < 4) segmentLength -= 4 - remainder;
+    if (segmentLength < 4) segmentLength = 4;
+    const payloadLength = segmentLength - 4;
+    const segment = new Uint8Array(segmentLength);
+    segment[0] = 0xff;
+    segment[1] = 0xfe;
+    segment[2] = (payloadLength + 2) >> 8;
+    segment[3] = (payloadLength + 2) & 0xff;
+    segments.push(segment);
+    remaining -= segmentLength;
+  }
+  return new Blob([bytes.slice(0, insertionPoint), ...segments, bytes.slice(insertionPoint)], { type: "image/jpeg" });
 }
 
 function browserPdfCompressionSettings(profile, customQuality) {
