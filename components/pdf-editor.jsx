@@ -737,6 +737,7 @@ export function PdfEditor() {
   const [previewZoom, setPreviewZoom] = useState(1);
   const [activeView, setActiveView] = useState("tool");
   const [moreToolsOpen, setMoreToolsOpen] = useState(false);
+  const [mobileLayout, setMobileLayout] = useState(false);
   const [, setHistoryRevision] = useState(0);
   const pdfInputRef = useRef(null);
   const imageInputRef = useRef(null);
@@ -746,9 +747,13 @@ export function PdfEditor() {
   const previewElementRefs = useRef(new Map());
   const dropAnimationTimerRef = useRef(null);
   const dragScrollFrameRef = useRef(null);
-  const dragPointerRef = useRef({ x: 0, y: 0, forceBottom: false, forceRight: false });
+  const dragPointerRef = useRef({ x: 0, y: 0, forceBottom: false, forceRight: false, valid: false });
   const imageTargetPageIdRef = useRef(null);
   const draggedIdRef = useRef(null);
+  const pointerPageDragRef = useRef(null);
+  const pointerPageScrollRef = useRef(null);
+  const suppressPageClickRef = useRef(false);
+  const suppressPageClickTimerRef = useRef(null);
   const dropIntentRef = useRef({ targetId: null, position: null });
   const documentsRef = useRef([]);
   const imageUrlsRef = useRef(new Set());
@@ -865,10 +870,19 @@ export function PdfEditor() {
     };
   }, [moreToolsOpen]);
 
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 680px)");
+    const update = () => setMobileLayout(media.matches);
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
+
   useEffect(() => () => {
     for (const url of imageUrlsRef.current) URL.revokeObjectURL(url);
     if (dropAnimationTimerRef.current) window.clearTimeout(dropAnimationTimerRef.current);
     if (dragScrollFrameRef.current) window.cancelAnimationFrame(dragScrollFrameRef.current);
+    if (suppressPageClickTimerRef.current) window.clearTimeout(suppressPageClickTimerRef.current);
     if (historyTimerRef.current) window.clearTimeout(historyTimerRef.current);
   }, []);
 
@@ -1252,10 +1266,10 @@ export function PdfEditor() {
       const list = pageListRef.current;
       if (!list || !draggedIdRef.current) return;
       const bounds = list.getBoundingClientRect();
-      const { x, y, forceBottom, forceRight } = dragPointerRef.current;
+      const { x, y, forceBottom, forceRight, valid } = dragPointerRef.current;
       const edge = 116;
       let moved = false;
-      if (list.scrollHeight > list.clientHeight) {
+      if (valid && list.scrollHeight > list.clientHeight) {
         if (y < bounds.top + edge) {
           const intensity = Math.min(1, (bounds.top + edge - y) / edge);
           const previousScrollTop = list.scrollTop;
@@ -1268,7 +1282,7 @@ export function PdfEditor() {
           moved = moved || list.scrollTop !== previousScrollTop;
         }
       }
-      if (list.scrollWidth > list.clientWidth) {
+      if (valid && list.scrollWidth > list.clientWidth) {
         if (x < bounds.left + edge) {
           const intensity = Math.min(1, (bounds.left + edge - x) / edge);
           const previousScrollLeft = list.scrollLeft;
@@ -1281,7 +1295,11 @@ export function PdfEditor() {
           moved = moved || list.scrollLeft !== previousScrollLeft;
         }
       }
-      if (moved && draggedIdRef.current) dragScrollFrameRef.current = window.requestAnimationFrame(tick);
+      if (moved && pointerPageDragRef.current?.active) updatePointerPageDrop({ clientX: x, clientY: y }, { startAutoScroll: false });
+      // Keep the loop alive while a drag is active. Some mobile browsers stop
+      // emitting dragover once the pointer sits at a scroll edge, so relying on
+      // movement or another event here leaves the horizontal rail stuck.
+      if (draggedIdRef.current && valid) dragScrollFrameRef.current = window.requestAnimationFrame(tick);
     };
     dragScrollFrameRef.current = window.requestAnimationFrame(tick);
   };
@@ -1289,8 +1307,171 @@ export function PdfEditor() {
   const handlePageListDragOver = (event) => {
     event.preventDefault();
     if (!draggedIdRef.current) return;
-    dragPointerRef.current = { ...dragPointerRef.current, x: event.clientX, y: event.clientY };
+    if (Number.isFinite(event.clientX) && Number.isFinite(event.clientY) && (event.clientX !== 0 || event.clientY !== 0)) dragPointerRef.current = { ...dragPointerRef.current, x: event.clientX, y: event.clientY, valid: true };
     startPageListAutoScroll();
+  };
+
+  const handlePageDrag = (event) => {
+    if (!draggedIdRef.current) return;
+    // On the mobile horizontal rail, dragover can stop firing once the
+    // pointer reaches the edge of the scrollable list. The drag source still
+    // emits drag events, so keep the auto-scroll pointer position fresh here.
+    if (Number.isFinite(event.clientX) && Number.isFinite(event.clientY) && (event.clientX !== 0 || event.clientY !== 0)) dragPointerRef.current = { ...dragPointerRef.current, x: event.clientX, y: event.clientY, valid: true };
+    startPageListAutoScroll();
+  };
+
+  const pageDropPosition = (event, element) => {
+    const bounds = element?.getBoundingClientRect?.();
+    if (!bounds) return null;
+    const list = pageListRef.current;
+    const horizontal = Boolean(list && list.scrollWidth > list.clientWidth + 1 && list.scrollHeight <= list.clientHeight + 1);
+    return horizontal
+      ? (event.clientX < bounds.left + bounds.width / 2 ? "before" : "after")
+      : (event.clientY < bounds.top + bounds.height / 2 ? "before" : "after");
+  };
+
+  const pageListIsHorizontal = () => {
+    const list = pageListRef.current;
+    return Boolean(list && list.scrollWidth > list.clientWidth + 1 && list.scrollHeight <= list.clientHeight + 1);
+  };
+
+  const findPageAtPointer = (x, y, sourceId) => {
+    const list = pageListRef.current;
+    if (!list) return null;
+    const bounds = list.getBoundingClientRect();
+    const visible = [...pageElementRefs.current.entries()]
+      .filter(([pageId, element]) => {
+        if (pageId === sourceId) return false;
+        const pageBounds = element.getBoundingClientRect();
+        return pageBounds.bottom > bounds.top && pageBounds.top < bounds.bottom && pageBounds.right > bounds.left && pageBounds.left < bounds.right;
+      })
+      .map(([pageId, element]) => ({ pageId, element, bounds: element.getBoundingClientRect() }));
+    if (!visible.length) return null;
+    const pointed = visible.find(({ bounds: pageBounds }) => x >= pageBounds.left && x <= pageBounds.right && y >= pageBounds.top && y <= pageBounds.bottom);
+    if (pointed) return pointed;
+    const horizontal = pageListIsHorizontal();
+    const coordinate = horizontal ? x : y;
+    const start = horizontal ? bounds.left : bounds.top;
+    const end = horizontal ? bounds.right : bounds.bottom;
+    const ordered = visible.sort((left, right) => (horizontal ? left.bounds.left - right.bounds.left : left.bounds.top - right.bounds.top));
+    if (coordinate <= start) return ordered[0];
+    if (coordinate >= end) return ordered.at(-1);
+    return ordered.reduce((closest, candidate) => {
+      const closestCenter = horizontal ? (closest.bounds.left + closest.bounds.right) / 2 : (closest.bounds.top + closest.bounds.bottom) / 2;
+      const candidateCenter = horizontal ? (candidate.bounds.left + candidate.bounds.right) / 2 : (candidate.bounds.top + candidate.bounds.bottom) / 2;
+      return Math.abs(candidateCenter - coordinate) < Math.abs(closestCenter - coordinate) ? candidate : closest;
+    });
+  };
+
+  const setSuppressedPageClick = () => {
+    suppressPageClickRef.current = true;
+    if (suppressPageClickTimerRef.current) window.clearTimeout(suppressPageClickTimerRef.current);
+    suppressPageClickTimerRef.current = window.setTimeout(() => {
+      suppressPageClickRef.current = false;
+      suppressPageClickTimerRef.current = null;
+    }, 300);
+  };
+
+  const updatePointerPageDrop = (event, { startAutoScroll = true } = {}) => {
+    const drag = pointerPageDragRef.current;
+    if (!drag?.active || !draggedIdRef.current) return;
+    dragPointerRef.current = { ...dragPointerRef.current, x: event.clientX, y: event.clientY, forceBottom: false, forceRight: false, valid: true };
+    if (startAutoScroll) startPageListAutoScroll();
+    const target = findPageAtPointer(event.clientX, event.clientY, drag.pageId);
+    if (!target) {
+      clearDropIntent();
+      return;
+    }
+    const position = pageDropPosition(event, target.element);
+    const sourceIndex = pages.findIndex((page) => page.id === drag.pageId);
+    const targetIndex = pages.findIndex((page) => page.id === target.pageId);
+    const noChange = sourceIndex === targetIndex || (position === "before" && sourceIndex + 1 === targetIndex) || (position === "after" && sourceIndex - 1 === targetIndex);
+    if (sourceIndex === -1 || targetIndex === -1 || noChange) {
+      clearDropIntent();
+      return;
+    }
+    dropIntentRef.current = { targetId: target.pageId, position };
+    setDropTargetId(target.pageId);
+    setDropPosition(position);
+  };
+
+  const handlePageListPointerDown = (event) => {
+    if ((!mobileLayout && event.pointerType === "mouse") || !event.isPrimary || (event.button !== undefined && event.button !== 0) || event.target.closest?.(".thumbnail-drag-handle")) return;
+    pointerPageScrollRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, lastX: event.clientX, moved: false };
+  };
+
+  const handlePageListPointerMove = (event) => {
+    const scroll = pointerPageScrollRef.current;
+    if (!scroll || scroll.pointerId !== event.pointerId || pointerPageDragRef.current) return;
+    const totalX = event.clientX - scroll.startX;
+    const totalY = event.clientY - scroll.startY;
+    if (!scroll.moved) {
+      if (Math.hypot(totalX, totalY) < 8 || Math.abs(totalY) > Math.abs(totalX)) return;
+      scroll.moved = true;
+      setSuppressedPageClick();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    }
+    const list = pageListRef.current;
+    if (!list) return;
+    event.preventDefault();
+    list.scrollLeft -= event.clientX - scroll.lastX;
+    scroll.lastX = event.clientX;
+  };
+
+  const finishPageListPointerScroll = (event) => {
+    const scroll = pointerPageScrollRef.current;
+    if (!scroll || scroll.pointerId !== event.pointerId) return;
+    pointerPageScrollRef.current = null;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
+  const handlePageListWheel = (event) => {
+    const list = pageListRef.current;
+    if (!list || list.scrollWidth <= list.clientWidth + 1) return;
+    const delta = event.shiftKey ? (event.deltaY || event.deltaX) : Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : 0;
+    if (!delta) return;
+    event.preventDefault();
+    list.scrollLeft += delta;
+  };
+
+  const handlePagePointerDown = (event, pageId) => {
+    if ((!mobileLayout && event.pointerType === "mouse") || !event.isPrimary || (event.button !== undefined && event.button !== 0) || !event.target.closest?.(".thumbnail-drag-handle")) return;
+    if (suppressPageClickRef.current) suppressPageClickRef.current = false;
+    pointerPageDragRef.current = { pageId, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, active: false, element: event.currentTarget };
+  };
+
+  const handlePagePointerMove = (event) => {
+    const drag = pointerPageDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!drag.active) {
+      if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 8) return;
+      drag.active = true;
+      setSuppressedPageClick();
+      draggedIdRef.current = drag.pageId;
+      dragPointerRef.current = { x: event.clientX, y: event.clientY, forceBottom: false, forceRight: false, valid: true };
+      dropIntentRef.current = { targetId: null, position: null };
+      setDraggedId(drag.pageId);
+      setDropTargetId(null);
+      setDropPosition(null);
+      drag.element.setPointerCapture?.(event.pointerId);
+    }
+    event.preventDefault();
+    updatePointerPageDrop(event);
+  };
+
+  const finishPagePointerDrag = (event, cancelled = false) => {
+    const drag = pointerPageDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    pointerPageDragRef.current = null;
+    drag.element.releasePointerCapture?.(event.pointerId);
+    if (!drag.active) return;
+    event.preventDefault();
+    const { targetId, position } = dropIntentRef.current;
+    const sourceIndex = pages.findIndex((page) => page.id === drag.pageId);
+    const targetIndex = pages.findIndex((page) => page.id === targetId);
+    const noChange = sourceIndex === targetIndex || (position === "before" && sourceIndex + 1 === targetIndex) || (position === "after" && sourceIndex - 1 === targetIndex);
+    if (!cancelled && targetId && position && sourceIndex !== -1 && targetIndex !== -1 && !noChange) reorderPages(drag.pageId, targetId, position);
+    resetDragState();
   };
 
   const handlePageDragOver = (event, pageId) => {
@@ -1312,13 +1493,14 @@ export function PdfEditor() {
       forceBottom = Boolean(lastVisible && lastVisible[0] === pageId && targetBounds.bottom >= bounds.bottom - 48 && event.clientY >= targetBounds.top + targetBounds.height * 0.3);
       forceRight = Boolean(rightmostVisible && rightmostVisible[0] === pageId && targetBounds.right >= bounds.right - 48 && event.clientX >= targetBounds.left + targetBounds.width * 0.3);
     }
-    dragPointerRef.current = { x: event.clientX, y: event.clientY, forceBottom, forceRight };
+    const pointerValid = Number.isFinite(event.clientX) && Number.isFinite(event.clientY) && (event.clientX !== 0 || event.clientY !== 0);
+    dragPointerRef.current = { ...dragPointerRef.current, x: event.clientX, y: event.clientY, forceBottom, forceRight, valid: pointerValid || dragPointerRef.current.valid };
     startPageListAutoScroll();
     if (activeDraggedId === pageId) {
       clearDropIntent();
       return;
     }
-    const position = event.clientY < targetBounds.top + targetBounds.height / 2 ? "before" : "after";
+    const position = pageDropPosition(event, event.currentTarget);
     const sourceIndex = pages.findIndex((page) => page.id === activeDraggedId);
     const targetIndex = pages.findIndex((page) => page.id === pageId);
     const noChange = sourceIndex === targetIndex || (position === "before" && sourceIndex + 1 === targetIndex) || (position === "after" && sourceIndex - 1 === targetIndex);
@@ -1335,7 +1517,7 @@ export function PdfEditor() {
     event.preventDefault();
     stopPageListAutoScroll();
     const activeDraggedId = draggedIdRef.current || draggedId;
-    const pointerPosition = event.currentTarget?.getBoundingClientRect ? (event.clientY < event.currentTarget.getBoundingClientRect().top + event.currentTarget.getBoundingClientRect().height / 2 ? "before" : "after") : null;
+    const pointerPosition = pageDropPosition(event, event.currentTarget);
     const position = pointerPosition || dropIntentRef.current.position;
     if (!activeDraggedId || !pageId || !position) {
       clearDropIntent();
@@ -1363,9 +1545,9 @@ export function PdfEditor() {
     reorderPages(activeDraggedId, targetId, position);
   };
 
-  const startDraggingPage = (pageId) => {
+  const startDraggingPage = (pageId, event) => {
     draggedIdRef.current = pageId;
-    dragPointerRef.current = { x: 0, y: 0, forceBottom: false, forceRight: false };
+    dragPointerRef.current = { x: event?.clientX || 0, y: event?.clientY || 0, forceBottom: false, forceRight: false, valid: Number.isFinite(event?.clientX) && Number.isFinite(event?.clientY) && (event.clientX !== 0 || event.clientY !== 0) };
     dropIntentRef.current = { targetId: null, position: null };
     setDraggedId(pageId);
     setDropTargetId(null);
@@ -1375,12 +1557,13 @@ export function PdfEditor() {
   const resetDragState = () => {
     stopPageListAutoScroll();
     draggedIdRef.current = null;
+    dragPointerRef.current = { ...dragPointerRef.current, valid: false, forceBottom: false, forceRight: false };
     clearDropIntent();
     setDraggedId(null);
   };
 
   const renderPageList = () => {
-    return pages.map((page, index) => <PdfPageThumbnail key={page.id} page={page} index={index} elementRef={(element) => { if (element) pageElementRefs.current.set(page.id, element); else pageElementRefs.current.delete(page.id); }} thumbnailRootRef={pageListRef} pdfDocument={page.kind === "source" ? documentsRef.current[page.pdfIndex] : null} onThumbnailError={() => setPreviewError("Some thumbnails could not be rendered, but the pages remain available in the full preview.")} selected={page.id === selectedPage?.id} draggedId={draggedId} dropTargetId={dropTargetId} dropPosition={dropPosition} recentlyDroppedId={recentlyDroppedId} onSelect={() => selectPage(page.id)} onDelete={() => deletePage(page.id)} onDragStart={() => startDraggingPage(page.id)} onDragEnd={resetDragState} onDragOver={(event) => handlePageDragOver(event, page.id)} onDrop={(event) => handlePageDrop(event, page.id)} />);
+    return pages.map((page, index) => <PdfPageThumbnail key={page.id} page={page} index={index} elementRef={(element) => { if (element) pageElementRefs.current.set(page.id, element); else pageElementRefs.current.delete(page.id); }} thumbnailRootRef={pageListRef} pdfDocument={page.kind === "source" ? documentsRef.current[page.pdfIndex] : null} nativeDraggable={!mobileLayout} onThumbnailError={() => setPreviewError("Some thumbnails could not be rendered, but the pages remain available in the full preview.")} selected={page.id === selectedPage?.id} draggedId={draggedId} dropTargetId={dropTargetId} dropPosition={dropPosition} recentlyDroppedId={recentlyDroppedId} onSelect={() => { if (suppressPageClickRef.current) { suppressPageClickRef.current = false; return; } selectPage(page.id); }} onDelete={() => deletePage(page.id)} onDragStart={(event) => startDraggingPage(page.id, event)} onDrag={handlePageDrag} onDragEnd={resetDragState} onDragOver={(event) => handlePageDragOver(event, page.id)} onDrop={(event) => handlePageDrop(event, page.id)} onPointerDown={(event) => handlePagePointerDown(event, page.id)} onPointerMove={handlePagePointerMove} onPointerUp={finishPagePointerDrag} onPointerCancel={(event) => finishPagePointerDrag(event, true)} />);
   };
 
   const scrollThumbnailIntoView = (pageId) => {
@@ -1755,7 +1938,7 @@ export function PdfEditor() {
         {processingMode === "local" && <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles || Boolean(saveJob)} title="Save the current PDF to the Local agent Results folder without leaving the editor"><Save size={17} /> {saveJob ? "Saving…" : "Save to device"}</button>}
       </div>
       {!pdfFiles.length && !pages.length ? <PdfEmptyState onBrowse={openPdfPicker} onBlank={addBlankPage} loading={loadingFiles} dragActive={pdfDragActive} browserMode={processingMode === "browser"} /> : !pages.length ? <PdfNoPagesState onBrowse={openPdfPicker} onBlank={addBlankPage} browserMode={processingMode === "browser"} /> : <div className="pdf-editor-layout">
-        <aside className="pdf-page-rail"><div className="pdf-rail-heading"><span>Pages</span><small>Pages load as you scroll</small></div><div ref={pageListRef} className="pdf-page-list" onDragOver={handlePageListDragOver} onDrop={handlePageListDrop}>{renderPageList()}</div></aside>
+        <aside className="pdf-page-rail"><div className="pdf-rail-heading"><span>Pages</span><small>Pages load as you scroll</small></div><div ref={pageListRef} className="pdf-page-list" onDragOver={handlePageListDragOver} onDrop={handlePageListDrop} onWheel={handlePageListWheel} onPointerDown={handlePageListPointerDown} onPointerMove={(event) => { handlePagePointerMove(event); handlePageListPointerMove(event); }} onPointerUp={(event) => { finishPagePointerDrag(event); finishPageListPointerScroll(event); }} onPointerCancel={(event) => { finishPagePointerDrag(event, true); finishPageListPointerScroll(event); }}>{renderPageList()}</div></aside>
         <section className="pdf-selected-panel"><div className="pdf-selected-heading"><div><span>Selected page {selectedPage ? pages.findIndex((page) => page.id === selectedPage.id) + 1 : "—"}</span><small>{selectedPage?.kind === "blank" ? "Blank page" : selectedPage?.sourceName || "Choose a page"}{selectedPage?.kind === "source" ? ` · Original page ${selectedPage.pageNumber}` : ""}</small></div></div><div ref={previewScrollRef} className="pdf-document-preview" onScroll={handlePreviewScroll}>{pages.map((page, index) => <Fragment key={page.id}><PdfPreviewPage page={page} index={index} selected={page.id === selectedPage?.id} previewZoom={previewZoom} pdfDocument={documentsRef.current[page.pdfIndex]} previewRootRef={previewScrollRef} elementRef={(element) => { if (element) previewElementRefs.current.set(page.id, element); else previewElementRefs.current.delete(page.id); }} selectedObject={selectedObject?.pageId === page.id ? selectedObject : null} onSelectObject={(object) => setSelectedObject(object ? { ...object, pageId: page.id } : null)} onChange={(images, history) => updatePage(page.id, { images }, history)} onRemove={(imageId) => removeImage(page.id, imageId)} onChangeTextBoxes={(textBoxes, history) => updatePage(page.id, { textBoxes }, history)} onRemoveTextBox={(textBoxId) => removeTextBox(page.id, textBoxId)} onAddImages={() => openImagePickerForPage(page.id)} onError={setPreviewError} /><PdfInsertPageButton pageNumber={index + 1} onClick={() => addBlankPageAfter(page.id)} /></Fragment>)}</div>{previewError && <DismissibleMessage className="pdf-preview-error" resetKey={previewError}><AlertTriangle size={16} /><span>{previewError}</span></DismissibleMessage>}<p className="pdf-editor-tip"><GripVertical size={15} /> Scroll the preview to select a page. Click + Add page between previews to insert a blank page. {processingMode === "browser" ? "Add images up to 1 MB each; duplicate pages and styled text boxes require Local agent." : "Use Text box to add editable text to the selected page."}</p></section>
       </div>}
       {saveJob && <div className="pdf-save-progress" role="status" aria-live="polite"><LoaderCircle className="spin" size={16} /><span>{saveJob.message || "Saving the current PDF to this device…"}</span></div>}
@@ -1809,10 +1992,10 @@ function PdfInsertPageButton({ pageNumber, onClick }) {
   return <div className="pdf-insert-page"><span className="pdf-insert-page-line" /><button className="pdf-insert-page-button" type="button" onClick={onClick} aria-label={`Add a blank page after page ${pageNumber}`} title={`Add a blank page after page ${pageNumber}`}><Plus size={17} /><span>Add page</span></button><span className="pdf-insert-page-line" /></div>;
 }
 
-function PdfPageThumbnail({ page, index, elementRef, thumbnailRootRef, pdfDocument, onThumbnailError, selected, draggedId, dropTargetId, dropPosition, recentlyDroppedId, onSelect, onDelete, onDragStart, onDragEnd, onDragOver, onDrop }) {
-  return <>{dropTargetId === page.id && dropPosition === "before" && <div className="pdf-drop-gap" aria-hidden="true">Drop here</div>}<div ref={elementRef} className={`pdf-page-thumbnail ${selected ? "selected" : ""} ${draggedId === page.id ? "dragging" : ""} ${dropTargetId === page.id ? "drop-target" : ""} ${recentlyDroppedId === page.id && draggedId !== page.id ? "just-dropped" : ""}`} draggable onClick={onSelect} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop}>
+function PdfPageThumbnail({ page, index, elementRef, thumbnailRootRef, pdfDocument, nativeDraggable = true, onThumbnailError, selected, draggedId, dropTargetId, dropPosition, recentlyDroppedId, onSelect, onDelete, onDragStart, onDrag, onDragEnd, onDragOver, onDrop, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }) {
+  return <>{dropTargetId === page.id && dropPosition === "before" && <div className="pdf-drop-gap" aria-hidden="true">Drop here</div>}<div ref={elementRef} className={`pdf-page-thumbnail ${selected ? "selected" : ""} ${draggedId === page.id ? "dragging" : ""} ${dropTargetId === page.id ? "drop-target" : ""} ${recentlyDroppedId === page.id && draggedId !== page.id ? "just-dropped" : ""}`} draggable={nativeDraggable} onClick={onSelect} onDragStart={onDragStart} onDrag={onDrag} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}>
     <div className="thumbnail-frame">{page.kind === "source" || page.kind === "raster" ? <div className="thumbnail-page-surface" style={{ "--page-ratio": pageDisplayRatio(page) }}><PdfThumbnailImage page={page} index={index} pdfDocument={pdfDocument} rootRef={thumbnailRootRef} onError={onThumbnailError} /><ThumbnailImageOverlayLayer page={page} /><ThumbnailTextBoxOverlayLayer page={page} /></div> : <BlankPageMiniature page={page} />}</div>
-    <div className="thumbnail-meta"><GripVertical className="thumbnail-grip" size={14} /><span><strong>Final {index + 1}</strong>{page.kind === "source" || page.kind === "raster" ? <> · <span className="thumbnail-original-page">Original {page.pageNumber}</span> · {page.sourceName}</> : " · New blank page"}</span><button type="button" aria-label={`Delete page ${index + 1}`} title="Delete page" onClick={(event) => { event.stopPropagation(); onDelete(); }}><X size={14} /></button></div>
+    <div className="thumbnail-meta"><span className="thumbnail-drag-handle" aria-label={`Drag page ${index + 1}`} title="Drag to reorder"><GripVertical className="thumbnail-grip" size={14} /></span><span><strong>Final {index + 1}</strong>{page.kind === "source" || page.kind === "raster" ? <> · <span className="thumbnail-original-page">Original {page.pageNumber}</span> · {page.sourceName}</> : " · New blank page"}</span><button type="button" aria-label={`Delete page ${index + 1}`} title="Delete page" onClick={(event) => { event.stopPropagation(); onDelete(); }}><X size={14} /></button></div>
   </div>{dropTargetId === page.id && dropPosition === "after" && <div className="pdf-drop-gap" aria-hidden="true">Drop here</div>}</>;
 }
 
@@ -1861,11 +2044,11 @@ function PdfThumbnailImage({ page, index, pdfDocument, rootRef, onError }) {
 
   if (!active) return <div ref={frameRef} className="thumbnail-loading" aria-label={`Page ${index + 1} thumbnail will load when visible`}>Scroll to load</div>;
   if (!thumbnail) return <div ref={frameRef} className="thumbnail-loading" aria-label={`Loading page ${index + 1} thumbnail`}>Loading…</div>;
-  return <img ref={frameRef} className="thumbnail-page-image" src={thumbnail} alt={`Page ${index + 1}`} loading={index < 4 ? "eager" : "lazy"} decoding="async" style={page.previewFallback ? { transform: `rotate(${normalizeRotation(page.rotation)}deg)` } : undefined} />;
+  return <img ref={frameRef} className="thumbnail-page-image" src={thumbnail} alt={`Page ${index + 1}`} draggable="false" loading={index < 4 ? "eager" : "lazy"} decoding="async" style={page.previewFallback ? { transform: `rotate(${normalizeRotation(page.rotation)}deg)` } : undefined} />;
 }
 
 function ThumbnailImageOverlayLayer({ page }) {
-  return <div className="thumbnail-image-overlay-layer">{getPageImages(page).map((image, index) => { const placement = imageDisplayPlacement(page, image); return <div className="thumbnail-image-overlay" key={image.id || index} style={{ ...imageOverlayFrameStyle(placement), transform: `rotate(${normalizeImageRotation(image.rotation)}deg)`, transformOrigin: "center center" }}><img src={image.url} alt="" aria-hidden="true" style={imagePreviewStyle(page, image, placement)} /></div>; })}</div>;
+  return <div className="thumbnail-image-overlay-layer">{getPageImages(page).map((image, index) => { const placement = imageDisplayPlacement(page, image); return <div className="thumbnail-image-overlay" key={image.id || index} style={{ ...imageOverlayFrameStyle(placement), transform: `rotate(${normalizeImageRotation(image.rotation)}deg)`, transformOrigin: "center center" }}><img src={image.url} alt="" aria-hidden="true" draggable="false" style={imagePreviewStyle(page, image, placement)} /></div>; })}</div>;
 }
 
 function ThumbnailTextBoxOverlayLayer({ page }) {
@@ -1874,7 +2057,7 @@ function ThumbnailTextBoxOverlayLayer({ page }) {
 
 function BlankPageMiniature({ page }) {
   const images = getPageImages(page);
-  return <div className="blank-page-mini" style={{ aspectRatio: pageDisplayRatio(page) }}>{images.map((image, index) => { const placement = imageDisplayPlacement(page, image); return <div className="blank-page-mini-image" key={image.id || index} style={{ ...imageOverlayFrameStyle(placement), transform: `rotate(${normalizeImageRotation(image.rotation)}deg)`, transformOrigin: "center center" }}><img src={image.url} alt={`Image ${index + 1} on blank page`} style={imagePreviewStyle(page, image, placement)} /></div>; })}<ThumbnailTextBoxOverlayLayer page={page} /></div>;
+  return <div className="blank-page-mini" style={{ aspectRatio: pageDisplayRatio(page) }}>{images.map((image, index) => { const placement = imageDisplayPlacement(page, image); return <div className="blank-page-mini-image" key={image.id || index} style={{ ...imageOverlayFrameStyle(placement), transform: `rotate(${normalizeImageRotation(image.rotation)}deg)`, transformOrigin: "center center" }}><img src={image.url} alt={`Image ${index + 1} on blank page`} draggable="false" style={imagePreviewStyle(page, image, placement)} /></div>; })}<ThumbnailTextBoxOverlayLayer page={page} /></div>;
 }
 
 function imageOverlayFrameStyle(placement) {

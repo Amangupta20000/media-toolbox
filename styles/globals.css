@@ -539,7 +539,7 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .pdf-zoom-controls .icon-button { width: 32px; height: 32px; margin-left: 0; }
 .pdf-zoom-value { min-width: 54px; height: 32px; padding: 0 7px; color: #47657a; background: transparent; border: 1px solid transparent; border-radius: 7px; font-size: 11px; font-weight: 800; cursor: pointer; }
 .pdf-zoom-value:hover { color: var(--navy); background: #e9f5f5; border-color: #b9dfe0; }
-.pdf-more-tools { position: relative; z-index: 80; flex: 0 0 auto; }
+.pdf-more-tools { position: relative; z-index: 2; flex: 0 0 auto; }
 .pdf-more-tools-trigger { width: 40px; height: 40px; margin-left: 0; color: #5e778c; background: #f2f7f9; border-color: #dbe7ec; }
 .pdf-more-tools-trigger:hover { color: var(--navy); background: #e9f5f5; border-color: #b9dfe0; }
 .pdf-more-tools-trigger:disabled { opacity: .55; cursor: not-allowed; }
@@ -595,6 +595,8 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .blank-page-mini { position: relative; height: 100%; width: auto; max-width: 100%; overflow: hidden; background: #fff; border: 1px solid #d9e3e8; box-shadow: 0 2px 7px rgba(28, 52, 72, .11); }
 .blank-page-mini img { position: absolute; display: block; object-fit: fill; }
 .thumbnail-meta { display: flex; align-items: center; gap: 5px; padding: 7px 1px 0; color: #8999a8; font-size: 9px; }
+.thumbnail-drag-handle { width: 26px; height: 26px; display: grid; place-items: center; flex: 0 0 auto; margin: -5px 0 -5px -5px; touch-action: none; cursor: grab; }
+.thumbnail-drag-handle:active { cursor: grabbing; }
 .thumbnail-grip { flex: 0 0 auto; color: #a1b0ba; }
 .thumbnail-meta span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .thumbnail-meta strong { color: var(--navy); }
@@ -1130,9 +1132,13 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
   .pdf-editor-actions > button, .pdf-editor-actions > .pdf-more-tools { flex: 1 1 auto; }
   .pdf-editor-layout { display: flex; flex-direction: column; }
   .pdf-editor-shell { overflow: hidden; }
-  .pdf-page-rail { position: static; height: auto; min-height: 0; max-height: none; overflow: visible; border-right: 0; border-bottom: 1px solid var(--line); }
-  .pdf-page-list { display: flex; height: auto; max-height: none; overflow-x: auto; overflow-y: hidden; padding-bottom: 7px; }
-  .pdf-page-thumbnail { width: 142px; min-width: 142px; }
+  .pdf-page-rail { position: static; align-self: stretch; width: 100%; height: auto; min-height: 0; max-height: none; overflow: visible; border-right: 0; border-bottom: 1px solid var(--line); }
+  .pdf-page-list { display: flex; width: 100%; min-width: 0; height: auto; max-height: none; overflow-x: auto; overflow-y: hidden; padding-bottom: 7px; touch-action: pan-x; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: #5b8795 transparent; user-select: none; }
+  .pdf-page-list::-webkit-scrollbar { height: 7px; }
+  .pdf-page-list::-webkit-scrollbar-track { background: transparent; }
+  .pdf-page-list::-webkit-scrollbar-thumb { background: #5b8795; border-radius: 99px; }
+  .pdf-page-thumbnail { width: 142px; min-width: 142px; touch-action: pan-x; -webkit-user-drag: none; }
+  .pdf-page-thumbnail img { -webkit-user-drag: none; user-select: none; }
   .thumbnail-frame { --thumbnail-height: 142px; }
   .pdf-drop-gap { width: 30px; min-width: 30px; min-height: 142px; margin: 0 1px; writing-mode: vertical-rl; }
   .pdf-selected-panel { padding: 20px 17px; }
@@ -1330,7 +1336,7 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .keep-result-slot { min-height: 29px; margin-top: 15px; }
 .keep-result-check { display: flex; align-items: center; gap: 8px; min-height: 29px; color: #708394; font-size: 11px; font-weight: 650; }
 .keep-result-check input { accent-color: var(--teal); }
-.pdf-retention-row { position: relative; z-index: 40; display: flex; align-items: center; gap: 24px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+.pdf-retention-row { position: relative; z-index: 1; display: flex; align-items: center; gap: 24px; padding: 0 20px; border-bottom: 1px solid var(--line); }
 .pdf-retention-name { min-width: 0; flex: 1 1 320px; }
 .pdf-retention-name .result-filename-field { margin: 12px 0; }
 .agent-status-card, .agent-pair-card, .agent-capabilities-card, .agent-install-card, .agent-sessions-card { display: flex; gap: 18px; margin-bottom: 16px; padding: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 10px 24px rgba(26, 52, 77, .04); }
@@ -1772,13 +1778,15 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
   .pdf-text-toolbar { align-items: stretch; flex-direction: column; }
   .pdf-text-toolbar .primary-button { width: 100%; }
   .pdf-text-editor-layout { display: flex; flex-direction: column; }
-  .pdf-text-page-rail { max-height: none; flex-direction: row; overflow: hidden; gap: 8px; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
-  .pdf-text-page-rail-scroll { min-width: 0; min-height: 0; overflow-x: auto; overflow-y: hidden; }
-  .pdf-text-rail-virtual-content { height: 100%; }
-  .pdf-text-rail-virtual-item { align-items: flex-start; }
+  /* The rail items are absolutely positioned for virtualization, so the
+     mobile row needs an explicit height instead of collapsing to its heading. */
+  .pdf-text-page-rail { width: 100%; height: 162px; min-height: 162px; max-height: none; flex: 0 0 162px; flex-direction: row; overflow: hidden; gap: 8px; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .pdf-text-page-rail-scroll { min-width: 0; min-height: 0; height: 100%; flex: 1 1 auto; overflow-x: auto; overflow-y: hidden; }
+  .pdf-text-rail-virtual-content { width: 100%; height: 138px; min-height: 138px; }
+  .pdf-text-rail-virtual-item { height: 138px; align-items: flex-start; }
   .pdf-text-rail-heading { min-width: 48px; display: grid; align-content: center; gap: 3px; padding: 0 2px; }
   .pdf-text-thumbnail { width: 83px; min-width: 83px; margin: 0; }
-  .pdf-text-thumbnail canvas { min-height: 100px; }
+  .pdf-text-thumbnail canvas { min-height: 0; max-height: 112px; }
   .pdf-text-workspace { padding: 12px; }
   .pdf-text-preview-scroll { padding: 7px; }
   .pdf-text-page-frame { --preview-height: calc(max(300px, min(68vh, 520px)) - 24px); height: auto; min-height: max(300px, min(68vh, 520px)); padding: 11px; }

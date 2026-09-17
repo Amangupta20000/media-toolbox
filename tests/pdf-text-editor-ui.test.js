@@ -258,6 +258,9 @@ test("PDF text editor supports constrained browser replacement and identity-chec
   assert.match(await read("components/pdf-editor.jsx"), /PDF_EDITOR_THUMBNAIL_QUALITY = 1\.25/);
   assert.match(styles, /\.pdf-text-run \{[^}]*cursor: grab/);
   assert.match(styles, /\.pdf-text-page-rail-scroll/);
+  assert.match(styles, /\.pdf-text-page-rail \{ width: 100%; height: 162px; min-height: 162px; max-height: none; flex: 0 0 162px/);
+  assert.match(styles, /\.pdf-text-rail-virtual-content \{ width: 100%; height: 138px; min-height: 138px; \}/);
+  assert.match(styles, /\.pdf-text-thumbnail canvas \{ min-height: 0; max-height: 112px; \}/);
   assert.match(styles, /\.pdf-text-virtual-item \{[^}]*justify-content: center/);
   assert.match(styles, /\.pdf-text-page \{[^}]*width: 100%/);
   assert.match(styles, /\.pdf-text-page-frame \{[^}]*margin-inline: auto/);
