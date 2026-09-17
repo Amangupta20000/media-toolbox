@@ -1,6 +1,6 @@
 import Head from "next/head";
 import { useRouter } from "next/router";
-import { absoluteSiteUrl, AUTHOR_EMAIL, AUTHOR_ID, AUTHOR_NAME, metadataForPathname, normalizeSitePath, PRODUCT_NAME, PRODUCT_TAGLINE, SITE_URL } from "../lib/site-metadata.js";
+import { absoluteSiteUrl, ADSENSE_CLIENT_ID, AUTHOR_EMAIL, AUTHOR_ID, AUTHOR_NAME, metadataForPathname, normalizeSitePath, PRODUCT_NAME, PRODUCT_TAGLINE, SITE_URL } from "../lib/site-metadata.js";
 import { TOOL_SEO_CONTENT } from "../lib/tool-seo-content.js";
 
 export function SeoHead() {
@@ -96,6 +96,7 @@ export function SeoHead() {
 
   return <Head>
     <title>{metadata.title}</title>
+    {!metadata.noIndex && <script async src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT_ID}`} crossOrigin="anonymous" />}
     <meta name="description" content={metadata.description} />
     <meta name="keywords" content={metadata.keywords} />
     <meta name="author" content={AUTHOR_NAME} />

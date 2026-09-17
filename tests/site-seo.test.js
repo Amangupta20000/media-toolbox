@@ -42,6 +42,8 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(document, /name="theme-color"/);
   assert.match(document, /media-toolbox-theme/);
   assert.match(document, /document\.documentElement\.dataset\.theme/);
+  assert.match(seo, /pagead2\.googlesyndication\.com\/pagead\/js\/adsbygoogle\.js\?client=\$\{ADSENSE_CLIENT_ID\}/);
+  assert.match(seo, /crossOrigin="anonymous"/);
   assert.match(styles, /\[data-theme="dark"\] \.section-kicker \{ color: #8fe0d8; \}/);
   assert.match(styles, /\[data-theme="dark"\] \.tool-nav-item \{ color: #aabccc; \}/);
   assert.match(shell, /AppFooter/);
@@ -248,6 +250,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(privacy, /Privacy Policy/);
   assert.match(privacy, /\{PRODUCT_NAME\} is operated by Aman Gupta/);
   assert.match(privacy, /mailto:a20000\.gupta@gmail\.com/);
+  assert.match(privacy, /AdSense publisher script/);
   assert.doesNotMatch(privacy, /server jobs|server mode|configured server/i);
   assert.match(privacy, /Files and results/);
   assert.match(terms, /Terms and Conditions/);
