@@ -111,10 +111,10 @@ export function AnalyticsRuntime() {
     return () => document.removeEventListener("click", handleClick);
   }, [consent, router.pathname]);
 
-  if (!isAnalyticsConfigured() || !publicPath(router.pathname) || !bannerOpen) return null;
+  if (!isAnalyticsConfigured() || !publicPath(router.pathname)) return null;
 
   const chooseConsent = (value) => setAnalyticsConsent(value);
-  return <aside className="analytics-consent-banner" role="dialog" aria-modal="false" aria-labelledby="analytics-consent-title" aria-describedby="analytics-consent-description">
+  return <aside className={`analytics-consent-banner ${bannerOpen ? "is-open" : "is-hidden"}`} role="region" aria-hidden={!bannerOpen} aria-labelledby="analytics-consent-title" aria-describedby="analytics-consent-description">
     <div className="analytics-consent-heading"><span className="analytics-consent-icon"><BarChart3 size={17} aria-hidden="true" /></span><div><strong id="analytics-consent-title">Analytics preferences</strong><button className="analytics-consent-close" type="button" onClick={() => setBannerOpen(false)} aria-label="Close analytics preferences" title="Close"><X size={15} /></button></div></div>
     <p id="analytics-consent-description">We use Google Analytics to understand how visitors use NativeMedia Agent and improve the website.</p>
     {detailsOpen && <div id="analytics-consent-details" className="analytics-consent-details"><p>After you accept, analytics may use the page category, page name and title, tool, processing mode, input type and count, selected action labels, result type, offer ID, and copy outcome. Google Analytics may also receive standard technical information such as browser/device information and timestamps. The purpose is to understand usage and improve the website. We do not send your files, file contents, filenames, exact file sizes, license information, or offer codes.</p><Link href="/privacy">Read the Privacy Policy</Link></div>}

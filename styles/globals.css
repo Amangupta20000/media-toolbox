@@ -428,7 +428,8 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .secondary-button:hover { color: var(--navy); border-color: #b9cbd8; background: #f9fbfc; }
 .error-banner { display: flex; align-items: center; gap: 9px; margin-top: 14px; padding: 12px 14px; color: var(--danger); background: var(--danger-bg); border: 1px solid #f2d4d4; border-radius: 10px; font-size: 11px; font-weight: 650; }
 .error-banner-action { flex: 0 0 auto; min-height: 31px; margin-left: auto; padding-inline: 10px; font-size: 10px; }
-.analytics-consent-banner { position: fixed; right: 20px; bottom: 20px; z-index: 1200; width: min(430px, calc(100% - 40px)); padding: 17px 18px 15px; color: #526a7d; background: #f8fbfc; border: 1px solid #b9dfe0; border-radius: 14px; box-shadow: 0 18px 48px rgba(5, 25, 38, .24); }
+.analytics-consent-banner { position: fixed; right: 20px; bottom: 20px; z-index: 1200; width: min(430px, calc(100% - 40px)); padding: 17px 18px 15px; color: #526a7d; background: #f8fbfc; border: 1px solid #b9dfe0; border-radius: 14px; box-shadow: 0 18px 48px rgba(5, 25, 38, .24); visibility: visible; opacity: 1; transition: opacity .16s ease; }
+.analytics-consent-banner.is-hidden { visibility: hidden; opacity: 0; pointer-events: none; }
 .analytics-consent-heading { display: flex; align-items: flex-start; gap: 9px; }
 .analytics-consent-heading > div { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0; flex: 1; }
 .analytics-consent-icon { display: grid; flex: 0 0 auto; width: 30px; height: 30px; place-items: center; color: #168b8e; background: #e0f5f3; border-radius: 9px; }

@@ -32,3 +32,14 @@ test("mobile layout uses one shared content gutter without nested width subtract
   assert.doesNotMatch(styles, /\.tool-seo-content, \.breadcrumb-wrap \{ width: calc\(100% - 28px\); \}/);
   assert.doesNotMatch(styles, /\.processing-options-panel \{ width: calc\(100% - 28px\); margin-bottom: 20px; \}/);
 });
+
+test("consent banner keeps a fixed, hidden hydration placeholder", async () => {
+  const runtime = await read("components/analytics.jsx");
+  const styles = await read("styles/globals.css");
+
+  assert.match(runtime, /analytics-consent-banner \$\{bannerOpen \? "is-open" : "is-hidden"\}/);
+  assert.match(runtime, /role="region"/);
+  assert.match(runtime, /aria-hidden=\{!bannerOpen\}/);
+  assert.match(styles, /\.analytics-consent-banner \{[^}]*position: fixed[^}]*visibility: visible[^}]*opacity: 1/);
+  assert.match(styles, /\.analytics-consent-banner\.is-hidden \{[^}]*visibility: hidden[^}]*opacity: 0[^}]*pointer-events: none/);
+});

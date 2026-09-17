@@ -30,6 +30,10 @@ test("GA4 tracking is consent-gated and uses the approved event contract", async
   assert.match(runtime, /Accept analytics/);
   assert.match(runtime, /Reject analytics/);
   assert.match(runtime, /Privacy choices/);
+  assert.match(runtime, /role="region"/);
+  assert.doesNotMatch(runtime, /role="dialog"/);
+  assert.match(runtime, /analytics-consent-banner \$\{bannerOpen \? "is-open" : "is-hidden"\}/);
+  assert.match(runtime, /aria-hidden=\{!bannerOpen\}/);
   assert.match(runtime, /page category, page name and title/);
   assert.match(runtime, /pageType: "tool", pageName: "svg_to_png"/);
   assert.match(runtime, /pageType: "offer", pageName: "offers"/);
