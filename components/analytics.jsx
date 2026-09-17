@@ -65,7 +65,7 @@ export function AnalyticsRuntime() {
     const pagePath = cleanPath(url || router.asPath);
     if (pagePath === lastPageViewRef.current) return;
     lastPageViewRef.current = pagePath;
-    pushAnalyticsEvent("page_view", { page_path: pagePath, page_title: document.title });
+    pushAnalyticsEvent("custom_page_view", { page_path: pagePath, page_title: document.title });
     const tool = TOOL_PATHS[pagePath];
     if (tool && tool !== lastToolOpenRef.current) {
       lastToolOpenRef.current = tool;

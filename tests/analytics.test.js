@@ -24,7 +24,7 @@ test("GA4 tracking is consent-gated and uses the approved event contract", async
   assert.match(analytics, /getAnalyticsConsent\(\) !== "granted"/);
   assert.match(analytics, /https:\/\/www\.googletagmanager\.com\/gtm\.js/);
   assert.match(analytics, /offer_redeemed: \["offer_id", "result"\]/);
-  assert.match(analytics, /page_view: \["page_path", "page_title"\]/);
+  assert.match(analytics, /custom_page_view: \["page_path", "page_title"\]/);
   assert.match(analytics, /dataLayer\.push\(\{ event: name/);
   assert.match(runtime, /Accept analytics/);
   assert.match(runtime, /Reject analytics/);
