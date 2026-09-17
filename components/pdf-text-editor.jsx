@@ -939,6 +939,14 @@ function PdfTextJobLog({ logs, mode }) {
   return <div className="job-log-panel"><div className="job-log-heading"><span><span className="log-live-dot" /> {mode === "browser" ? "Browser log" : "Worker log"}</span><span>{logs.length} events</span></div><div className="job-log-list" aria-live="polite">{logs.length ? logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{formatLogTime(entry.time)}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for the {mode === "browser" ? "browser" : "worker"} to report progress…</div>}</div></div>;
 }
 
+function validatePdfResult(result) {
+  if (!result || typeof result !== "object") return "The PDF export returned no result.";
+  if (!result.downloadUrl || !result.filename) return "The PDF export returned no downloadable file.";
+  if (!Number.isFinite(Number(result.bytes)) || Number(result.bytes) <= 0) return "The exported PDF is empty or its size could not be verified.";
+  if (!Number.isInteger(Number(result.pageCount)) || Number(result.pageCount) < 1) return "The exported PDF page count could not be verified.";
+  return "";
+}
+
 function PdfTextJobCard({ initialJob, mode, onReset, onContinue, keepResult }) {
   const [job, setJob] = useState(initialJob);
   const [printing, setPrinting] = useState(false);
@@ -1038,6 +1046,8 @@ export function PdfTextEditor() {
   const [loadingMessage, setLoadingMessage] = useState("Reading PDF text and building previews…");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [job, setJob] = useState(null);
+  const [saveJob, setSaveJob] = useState(null);
+  const [saveNotice, setSaveNotice] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [activeView, setActiveView] = useState("tool");
@@ -1129,6 +1139,44 @@ export function PdfTextEditor() {
 
   useEffect(() => { loadPdfLibrary().then(setPdfLibrary).catch(() => setError("PDF preview support could not be loaded. Refresh and try again.")); }, []);
   useEffect(() => { probeProcessingLocations({ tool: "pdf-text-editor" }).then((value) => { setLocations(value); const preferred = preferredProcessingMode(value); setProcessingMode(preferred); setCapabilities(processingCapabilities(value, preferred)); }).catch(() => undefined); }, []);
+  // Saving to the device is a background persistence action. It creates the
+  // retained PDF in the Local agent Results folder without replacing the
+  // editor with the export/result screen.
+  useEffect(() => {
+    if (!saveJob?.id) return undefined;
+    let active = true;
+    let timer = null;
+    const poll = async () => {
+      try {
+        const current = await getProcessingJob("local", saveJob.id);
+        if (!active) return;
+        if (current.status === "completed") {
+          const resultError = validatePdfResult(current.result);
+          setSaveJob(null);
+          setSaveNotice(resultError
+            ? { type: "error", message: `The PDF could not be saved: ${resultError}` }
+            : { type: "success", message: `Saved “${current.result.filename}” to the Local agent Results folder.` });
+          return;
+        }
+        if (current.status === "failed") {
+          setSaveJob(null);
+          setSaveNotice({ type: "error", message: current.error || "The PDF could not be saved to this device." });
+          return;
+        }
+        setSaveJob(current);
+        timer = window.setTimeout(poll, 1000);
+      } catch (saveError) {
+        if (!active) return;
+        setSaveJob(null);
+        setSaveNotice({ type: "error", message: saveError instanceof Error ? saveError.message : "Unable to verify the saved PDF." });
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [saveJob?.id]);
   const defaultResultFilename = useMemo(() => source?.name ? `${filenameStem(source.name)}_edited.pdf` : "edited.pdf", [source?.name]);
   useEffect(() => {
     if (!resultFilenameTouchedRef.current) setResultFilenameStem(filenameStem(defaultResultFilename));
@@ -1136,11 +1184,17 @@ export function PdfTextEditor() {
   useEffect(() => setCapabilities(processingCapabilities(locations, processingMode)), [locations, processingMode]);
   useEffect(() => {
     const handleKeyDown = (event) => {
-      if (activeView !== "tool" || job || loading) return;
+      if (activeView !== "tool" || job || saveJob || loading) return;
       const target = event.target;
       if (target instanceof HTMLElement && target.closest("input, textarea, select, button, [contenteditable=\"true\"]")) return;
       if (event.metaKey || event.ctrlKey) {
         const key = event.key.toLowerCase();
+        if (key === "s") {
+          event.preventDefault();
+          if (processingMode === "local" && !saveJob) void submit({ saveToDevice: true });
+          else if (processingMode !== "local") setError("Save to device requires Local agent mode.");
+          return;
+        }
         if (key === "z") {
           event.preventDefault();
           if (event.shiftKey) redoTextEdit(); else undoTextEdit();
@@ -1165,7 +1219,7 @@ export function PdfTextEditor() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeView, job, loading, historyVersion]);
+  }, [activeView, job, saveJob, loading, processingMode, historyVersion]);
 
   const selectFile = (file) => {
     setError("");
@@ -1185,6 +1239,9 @@ export function PdfTextEditor() {
     previewRequestRef.current += 1;
     setPendingOcrFile(file);
     setOcrMode(null);
+    if (saveJob && ["queued", "processing"].includes(saveJob.status)) deleteProcessingJob("local", saveJob.id).catch(() => undefined);
+    setSaveJob(null);
+    setSaveNotice(null);
     resultFilenameTouchedRef.current = false;
     setResultFilenameStem("");
     setSource(null); setSourceHash(""); setPages([]); clearTextEditorHistory(); setSelectedRun(null); setEditorValue(""); setJob(null); setOcrProgress(0); setPreviewUpdating(false); sourceBytesRef.current = null; sourcePasswordRef.current = "";
@@ -1479,10 +1536,11 @@ export function PdfTextEditor() {
   const reset = () => {
     previewRequestRef.current += 1;
     if (job && jobMode !== "browser" && ["queued", "processing"].includes(job.status)) deleteProcessingJob(jobMode, job.id).catch(() => undefined);
+    if (saveJob && ["queued", "processing"].includes(saveJob.status)) deleteProcessingJob("local", saveJob.id).catch(() => undefined);
     if (browserResultUrlRef.current) URL.revokeObjectURL(browserResultUrlRef.current);
     browserResultUrlRef.current = "";
     resultFilenameTouchedRef.current = false;
-    setPendingOcrFile(null); setOcrMode(null); setSource(null); setSourceHash(""); setPages([]); clearTextEditorHistory(); setSelectedRun(null); setJob(null); setJobKeepResult(false); setResultFilenameStem(""); setError(""); setUploadProgress(0); setPreviewUpdating(false); setCheckingLocation(false); sourceBytesRef.current = null; sourcePasswordRef.current = "";
+    setPendingOcrFile(null); setOcrMode(null); setSource(null); setSourceHash(""); setPages([]); clearTextEditorHistory(); setSelectedRun(null); setJob(null); setSaveJob(null); setSaveNotice(null); setJobKeepResult(false); setResultFilenameStem(""); setError(""); setUploadProgress(0); setPreviewUpdating(false); setCheckingLocation(false); sourceBytesRef.current = null; sourcePasswordRef.current = "";
   };
   const continueEditing = () => {
     if (browserResultUrlRef.current) URL.revokeObjectURL(browserResultUrlRef.current);
@@ -1556,7 +1614,23 @@ export function PdfTextEditor() {
     const effectiveKeepResult = processingMode === "local" && saveToDevice;
     const form = new FormData();
     form.append("tool", "pdf-text-editor"); form.append("source", source, source.name); form.append("sourceHash", sourceHash); form.append("edits", JSON.stringify(editPayload)); form.append("filename", downloadFilename(resultFilenameStem || filenameStem(defaultResultFilename), defaultResultFilename)); if (processingMode === "local") form.append("retention", effectiveKeepResult ? "keep" : "delete");
-    try { setUploadProgress(1); const response = await uploadWithProgress(form, processingMode, setUploadProgress); setUploadProgress(0); const id = response.jobId || response.jobIds?.[0]; setJobMode(processingMode); setJobKeepResult(effectiveKeepResult); setJob({ id, status: "queued", progress: 0, stage: "Queued", message: effectiveKeepResult ? "Waiting for the worker. The completed PDF will be saved to this device." : "Waiting for the worker.", logs: [], warnings: [], error: null, result: null }); } catch (submitError) { setUploadProgress(0); setError(submitError instanceof Error ? submitError.message : "The PDF text edit could not be submitted."); }
+    try {
+      setUploadProgress(1);
+      const response = await uploadWithProgress(form, processingMode, setUploadProgress);
+      setUploadProgress(0);
+      const id = response.jobId || response.jobIds?.[0];
+      setJobMode(processingMode);
+      setJobKeepResult(effectiveKeepResult);
+      if (saveToDevice && processingMode === "local") {
+        setSaveNotice(null);
+        setSaveJob({ id, status: "queued", progress: 0, stage: "Saving…", message: "Saving the current PDF to this device…", logs: [], warnings: [], error: null, result: null });
+      } else {
+        setJob({ id, status: "queued", progress: 0, stage: "Queued", message: effectiveKeepResult ? "Waiting for the worker. The completed PDF will be saved to this device." : "Waiting for the worker.", logs: [], warnings: [], error: null, result: null });
+      }
+    } catch (submitError) {
+      setUploadProgress(0);
+      setError(submitError instanceof Error ? submitError.message : "The PDF text edit could not be submitted.");
+    }
   };
 
   useEffect(() => {
@@ -1622,10 +1696,10 @@ export function PdfTextEditor() {
                       <button className="pdf-zoom-value" type="button" onClick={resetPreviewZoom} title="Reset zoom (0)">{Math.round(previewZoom * 100)}%</button>
                       <button className="icon-button" type="button" onClick={() => changePreviewZoom(0.1)} aria-label="Zoom in" title="Zoom in (+)"><ZoomIn size={16} /></button>
                     </div>
-                    <button className="primary-button" type="button" onClick={submit} disabled={!canSubmit} data-analytics-cta="export_pdf_text_edit" data-analytics-surface="pdf-text-editor">
+                    <button className="primary-button" type="button" onClick={submit} disabled={!canSubmit || Boolean(saveJob)} data-analytics-cta="export_pdf_text_edit" data-analytics-surface="pdf-text-editor">
                       {uploadProgress ? <><LoaderCircle className="spin" size={17} /> Uploading {uploadProgress}%</> : checkingLocation ? <><LoaderCircle className="spin" size={17} /> Checking worker…</> : <><Pencil size={17} /> Export edited PDF</>}
                     </button>
-                    {processingMode === "local" && <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!canSubmit} title="Process the PDF and keep it in the Local agent Results folder"><Save size={17} /> Save to device</button>}
+                    {processingMode === "local" && <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!canSubmit || Boolean(saveJob)} title="Save the current PDF to the Local agent Results folder without leaving the editor"><Save size={17} /> {saveJob ? "Saving…" : "Save to device"}</button>}
                   </div>
                 </div>
                 {processingMode === "local" && <div className="pdf-retention-row pdf-text-retention-row"><div className="pdf-retention-name"><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem || filenameStem(defaultResultFilename)} label="Saved PDF name" description="This name is used for export and for PDF text editor History when the result is retained." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(filenameStem(value)); }} /></div></div>}
@@ -1642,6 +1716,8 @@ export function PdfTextEditor() {
               </div>
             </>
           )}
+          {saveJob && <div className="pdf-save-progress" role="status" aria-live="polite"><LoaderCircle className="spin" size={16} /><span>{saveJob.message || "Saving the current PDF to this device…"}</span></div>}
+          {saveNotice && <DismissibleMessage className={saveNotice.type === "success" ? "success-banner pdf-save-notice" : "error-banner pdf-save-notice"} resetKey={saveNotice.message}>{saveNotice.type === "success" ? <CheckCircle2 size={17} /> : <AlertTriangle size={18} />}<span>{saveNotice.message}</span></DismissibleMessage>}
           {error && <DismissibleMessage className="error-banner" resetKey={error}><AlertTriangle size={17} /><span>{error}</span>{processingMode === "browser" && error.includes("Local agent") && <button className="secondary-button error-banner-action" type="button" onClick={useLocalAgent}>Use Local agent</button>}</DismissibleMessage>}
           {!job && <div className="trust-row"><div><FileText size={16} /> {ocrDetected && !nativePages ? "OCR regions are visual reconstructions" : ocrDetected ? "Native text stays searchable" : "Searchable text stays searchable"}</div><div><ShieldCheck size={16} /> {ocrDetected ? "Original untouched pages stay unchanged" : "No rasterization or white masking"}</div><div><Pencil size={16} /> Longer text may overflow</div></div>}
           <ToolFaqContent pathname="/pdf-text-editor" />
