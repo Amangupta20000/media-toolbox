@@ -36,6 +36,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   const offersComponent = await read("components/offers-page.jsx");
   const freeAccessModal = await read("components/free-access-modal.jsx");
   const styles = await read("styles/globals.css");
+  const adsTxt = await read("public/ads.txt");
 
   assert.match(app, /SeoHead/);
   assert.match(document, /<Html lang="en">/);
@@ -44,6 +45,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(document, /document\.documentElement\.dataset\.theme/);
   assert.match(seo, /pagead2\.googlesyndication\.com\/pagead\/js\/adsbygoogle\.js\?client=\$\{ADSENSE_CLIENT_ID\}/);
   assert.match(seo, /crossOrigin="anonymous"/);
+  assert.equal(adsTxt.trim(), "google.com, pub-8789714270333969, DIRECT, f08c47fec0942fa0");
   assert.match(styles, /\[data-theme="dark"\] \.section-kicker \{ color: #8fe0d8; \}/);
   assert.match(styles, /\[data-theme="dark"\] \.tool-nav-item \{ color: #aabccc; \}/);
   assert.match(shell, /AppFooter/);
