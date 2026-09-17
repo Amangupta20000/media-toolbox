@@ -7,13 +7,21 @@ import { BarChart3, Check, X } from "lucide-react";
 import { getAnalyticsConsent, isAnalyticsConfigured, loadGoogleTagManager, pushAnalyticsEvent, setAnalyticsConsent } from "../lib/analytics.js";
 
 const PRIVATE_PATHS = new Set(["/admin", "/license-admin"]);
-const TOOL_PATHS = Object.freeze({
-  "/image-converter": "image-converter",
-  "/pdf-compressor": "pdf-compressor",
-  "/video-repair": "video-repair",
-  "/svg-to-png": "svg-to-png",
-  "/pdf-editor": "pdf-editor",
-  "/pdf-text-editor": "pdf-text-editor",
+const PAGE_METADATA = Object.freeze({
+  "/": { pageType: "home", pageName: "home" },
+  "/image-converter": { pageType: "tool", pageName: "image_converter" },
+  "/pdf-compressor": { pageType: "tool", pageName: "pdf_compressor" },
+  "/video-repair": { pageType: "tool", pageName: "video_repair" },
+  "/svg-to-png": { pageType: "tool", pageName: "svg_to_png" },
+  "/pdf-editor": { pageType: "tool", pageName: "pdf_editor" },
+  "/pdf-text-editor": { pageType: "tool", pageName: "pdf_text_editor" },
+  "/offers": { pageType: "offer", pageName: "offers" },
+  "/contact": { pageType: "static_page", pageName: "contact_us" },
+  "/coming-soon": { pageType: "static_page", pageName: "coming_soon" },
+  "/privacy": { pageType: "static_page", pageName: "privacy_policy" },
+  "/terms": { pageType: "static_page", pageName: "terms" },
+  "/local-agent": { pageType: "static_page", pageName: "local_agent" },
+  "/how-to-setup-agent": { pageType: "static_page", pageName: "how_to_setup_agent" },
 });
 
 function publicPath(pathname) {
@@ -23,6 +31,13 @@ function publicPath(pathname) {
 function cleanPath(value) {
   const path = String(value || "/").split(/[?#]/, 1)[0];
   return path.startsWith("/") ? path : "/";
+}
+
+function getPageMetadata(pathname) {
+  const pagePath = cleanPath(pathname);
+  if (PAGE_METADATA[pagePath]) return PAGE_METADATA[pagePath];
+  if (pagePath.startsWith("/downloads/")) return { pageType: "static_page", pageName: "downloads" };
+  return { pageType: "static_page", pageName: "other_static_page" };
 }
 
 export function AnalyticsRuntime() {
@@ -65,11 +80,11 @@ export function AnalyticsRuntime() {
     const pagePath = cleanPath(url || router.asPath);
     if (pagePath === lastPageViewRef.current) return;
     lastPageViewRef.current = pagePath;
-    pushAnalyticsEvent("custom_page_view", { page_path: pagePath, page_title: document.title });
-    const tool = TOOL_PATHS[pagePath];
-    if (tool && tool !== lastToolOpenRef.current) {
-      lastToolOpenRef.current = tool;
-      pushAnalyticsEvent("tool_open", { tool });
+    const pageMetadata = getPageMetadata(pagePath);
+    pushAnalyticsEvent("custom_page_view", { ...pageMetadata, page_title: document.title });
+    if (pageMetadata.pageType === "tool" && pageMetadata.pageName !== lastToolOpenRef.current) {
+      lastToolOpenRef.current = pageMetadata.pageName;
+      pushAnalyticsEvent("tool_open", { tool: pageMetadata.pageName });
     }
   }, [consent, router.asPath, router.pathname]);
 
@@ -102,7 +117,7 @@ export function AnalyticsRuntime() {
   return <aside className="analytics-consent-banner" role="dialog" aria-modal="false" aria-labelledby="analytics-consent-title" aria-describedby="analytics-consent-description">
     <div className="analytics-consent-heading"><span className="analytics-consent-icon"><BarChart3 size={17} aria-hidden="true" /></span><div><strong id="analytics-consent-title">Analytics preferences</strong><button className="analytics-consent-close" type="button" onClick={() => setBannerOpen(false)} aria-label="Close analytics preferences" title="Close"><X size={15} /></button></div></div>
     <p id="analytics-consent-description">We use Google Analytics to understand how visitors use NativeMedia Agent and improve the website.</p>
-    {detailsOpen && <div id="analytics-consent-details" className="analytics-consent-details"><p>After you accept, analytics may use the page path and title, tool, processing mode, input type and count, selected action labels, result type, offer ID, and copy outcome. Google Analytics may also receive standard technical information such as browser/device information and timestamps. The purpose is to understand usage and improve the website. We do not send your files, file contents, filenames, exact file sizes, license information, or offer codes.</p><Link href="/privacy">Read the Privacy Policy</Link></div>}
+    {detailsOpen && <div id="analytics-consent-details" className="analytics-consent-details"><p>After you accept, analytics may use the page category, page name and title, tool, processing mode, input type and count, selected action labels, result type, offer ID, and copy outcome. Google Analytics may also receive standard technical information such as browser/device information and timestamps. The purpose is to understand usage and improve the website. We do not send your files, file contents, filenames, exact file sizes, license information, or offer codes.</p><Link href="/privacy">Read the Privacy Policy</Link></div>}
     <div className="analytics-consent-actions"><button className="primary-button" type="button" onClick={() => chooseConsent("granted")}><Check size={15} /> Accept analytics</button><button className="secondary-button" type="button" onClick={() => chooseConsent("denied")}>Reject analytics</button><button className="analytics-consent-preferences" type="button" onClick={() => setDetailsOpen((value) => !value)}>{detailsOpen ? "Hide details" : "Privacy choices"}</button></div>
     {consent !== "unknown" && <small className="analytics-consent-current">Current choice: {consent === "granted" ? "analytics accepted" : "analytics rejected"}</small>}
   </aside>;
