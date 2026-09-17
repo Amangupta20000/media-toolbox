@@ -1,0 +1,12 @@
+# The web deployment does not need desktop application packages or local build output.
+.agent-build/
+agent/
+release/
+node_modules/
+.next/
+data/
+vendor/
+.vercel/
+
+# Never upload local configuration files.
+.env*
