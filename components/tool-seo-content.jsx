@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { normalizeSitePath } from "../lib/site-metadata.js";
@@ -12,7 +13,7 @@ export function ToolSeoContent({ pathname }) {
   return <section className="tool-seo-content" aria-labelledby="tool-seo-title">
     <div className="tool-seo-intro">
       <div className="section-kicker"><span className="kicker-line" /> Helpful guide</div>
-      <h2 id="tool-seo-title">About {content.name}</h2>
+      <h2 id="tool-seo-title">{content.introHeading || `About ${content.name}`}</h2>
       <p>{content.intro}</p>
     </div>
     <div className="tool-seo-grid">
@@ -25,6 +26,19 @@ export function ToolSeoContent({ pathname }) {
         <ul>{content.trust.map((item) => <li key={item}>{item}</li>)}</ul>
       </article>
     </div>
+    {content.comparison?.length > 0 && <section className="tool-seo-comparison" aria-labelledby="tool-seo-comparison-title">
+      <h2 id="tool-seo-comparison-title">At a glance</h2>
+      <div className="tool-seo-comparison-scroll">
+        <table>
+          <thead><tr><th>Feature</th><th>Browser mode</th><th>Local agent</th></tr></thead>
+          <tbody>{content.comparison.map(([feature, browser, local]) => <tr key={feature}><th scope="row">{feature}</th><td>{browser}</td><td>{local}</td></tr>)}</tbody>
+        </table>
+      </div>
+    </section>}
+    {content.relatedLinks?.length > 0 && <nav className="tool-seo-related" aria-labelledby="tool-seo-related-title">
+      <h2 id="tool-seo-related-title">Related tools and guides</h2>
+      <div className="tool-seo-related-grid">{content.relatedLinks.map(([href, label, detail]) => <Link className="tool-seo-related-link" href={href} key={href}><span><strong>{label}</strong><small>{detail}</small></span><span aria-hidden="true">→</span></Link>)}</div>
+    </nav>}
   </section>;
 }
 

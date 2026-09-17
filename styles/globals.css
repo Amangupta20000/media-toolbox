@@ -239,6 +239,20 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .tool-seo-panel ol, .tool-seo-panel ul { display: grid; gap: 10px; margin: 0; padding-left: 20px; color: #718695; font-size: 11px; line-height: 1.55; }
 .tool-seo-panel li::marker { color: var(--teal); font-weight: 800; }
 .tool-seo-trust li::marker { content: "✓  "; color: var(--teal); }
+.tool-seo-comparison, .tool-seo-related { margin-top: 13px; padding: 21px 23px; background: var(--surface); border: 1px solid var(--line); border-radius: 15px; box-shadow: 0 8px 22px rgba(37, 62, 88, .03); }
+.tool-seo-comparison h2, .tool-seo-related h2 { margin: 0 0 14px; font-size: 16px; }
+.tool-seo-comparison-scroll { overflow-x: auto; }
+.tool-seo-comparison table { width: 100%; min-width: 610px; border-collapse: collapse; color: #718695; font-size: 11px; line-height: 1.45; }
+.tool-seo-comparison th, .tool-seo-comparison td { padding: 10px 12px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+.tool-seo-comparison thead th { color: var(--navy); font-weight: 800; border-top: 0; }
+.tool-seo-comparison tbody th { color: var(--navy); font-weight: 750; }
+.tool-seo-related-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.tool-seo-related-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 14px; color: var(--navy); background: rgba(255,255,255,.34); border: 1px solid var(--line); border-radius: 10px; text-decoration: none; }
+.tool-seo-related-link:hover { border-color: var(--teal); color: var(--teal-dark); }
+.tool-seo-related-link > span:first-child { display: grid; gap: 4px; min-width: 0; }
+.tool-seo-related-link strong { font-size: 12px; }
+.tool-seo-related-link small { color: #718695; font-size: 10px; line-height: 1.4; }
+.tool-seo-related-link > span:last-child { flex: 0 0 auto; color: var(--teal); font-size: 19px; }
 .tool-seo-faq-list { display: grid; grid-template-columns: 1fr; gap: 0; }
 .tool-seo-faq-item { border-top: 1px solid var(--line); }
 .tool-seo-faq-item:first-child { border-top: 0; }
@@ -956,7 +970,11 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .breadcrumb-nav [aria-current="page"] { color: #8da1af; }
 [data-theme="dark"] .breadcrumb-separator { color: #536b7b; }
 [data-theme="dark"] .tool-seo-intro p, [data-theme="dark"] .tool-seo-panel ol, [data-theme="dark"] .tool-seo-panel ul, [data-theme="dark"] .tool-seo-faq-answer { color: #a5b6c4; }
-[data-theme="dark"] .tool-seo-panel, [data-theme="dark"] .tool-seo-faq { background: #172b3b; border-color: var(--line); box-shadow: 0 12px 28px rgba(0, 0, 0, .14); }
+[data-theme="dark"] .tool-seo-panel, [data-theme="dark"] .tool-seo-faq, [data-theme="dark"] .tool-seo-comparison, [data-theme="dark"] .tool-seo-related { background: #172b3b; border-color: var(--line); box-shadow: 0 12px 28px rgba(0, 0, 0, .14); }
+[data-theme="dark"] .tool-seo-comparison table, [data-theme="dark"] .tool-seo-comparison tbody th { color: #a5b6c4; }
+[data-theme="dark"] .tool-seo-comparison thead th, [data-theme="dark"] .tool-seo-related-link { color: #d7e5ed; }
+[data-theme="dark"] .tool-seo-related-link { background: rgba(8, 28, 43, .28); }
+[data-theme="dark"] .tool-seo-related-link small { color: #a5b6c4; }
 [data-theme="dark"] .tool-seo-faq-question:hover { color: #8fe0d8; }
 [data-theme="dark"] .beta-label { color: #8fe0d8; background: #1b4e54; }
 [data-theme="dark"] .svg-code-input, [data-theme="dark"] .svg-custom-size, [data-theme="dark"] .svg-preview-card { color: #dcebf2; background: #122536; border-color: #2c4657; }
@@ -1151,7 +1169,8 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
   .tool-seo-content { margin-bottom: 35px; }
   .tool-faq-content { margin-top: 35px; }
   .tool-seo-grid, .tool-seo-faq-list { grid-template-columns: 1fr; }
-  .tool-seo-panel, .tool-seo-faq { padding: 19px 18px; }
+  .tool-seo-panel, .tool-seo-faq, .tool-seo-comparison, .tool-seo-related { padding: 19px 18px; }
+  .tool-seo-related-grid { grid-template-columns: 1fr; }
   .processing-options-panel { margin-bottom: 20px; }
   .capability-strip { height: 64px; align-items: flex-start; flex-direction: column; gap: 4px; padding-block: 10px; }
   .capability-strip > span, .capability-main { width: 100%; }

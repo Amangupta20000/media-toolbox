@@ -22,7 +22,7 @@ test("SVG to PNG is exposed as a tool with crawlable SEO metadata", async () => 
   assert.match(shell, /href: "\/svg-to-png", label: "SVG to PNG"/);
   assert.doesNotMatch(shell, /href: "\/svg-to-png"[^\n]+beta: true/);
   assert.match(route, /SvgToPngTool/);
-  assert.match(tool, /Upload an SVG or paste its code/);
+  assert.match(tool, /Convert an SVG file or paste SVG code/);
   assert.match(tool, /1×/);
   assert.match(tool, /2×/);
   assert.match(tool, /3×/);

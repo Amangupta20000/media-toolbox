@@ -18,7 +18,7 @@ const navigation = [
 ];
 
 const pdfNavigation = [
-  { href: "/pdf-editor", label: "PDF editor", detail: "Merge and arrange pages", icon: FileText, beta: true },
+  { href: "/pdf-editor", label: "PDF editor", detail: "Merge and arrange pages", icon: FileText },
   { href: "/pdf-text-editor", label: "PDF text editor", detail: "Edit existing PDF text", icon: FileText, beta: true },
   { href: "/pdf-compressor", label: "PDF compressor", detail: "Reduce PDF file size", icon: Archive },
 ];

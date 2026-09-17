@@ -295,7 +295,7 @@ export function SvgToPngTool() {
   }, [job, jobMode]);
 
   return <AppShell>
-    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> Rasterize & export</div><h1>SVG to PNG converter</h1><p>Upload an SVG or paste its code, then export at 1×, 2×, 3×, 4×, or a custom size with a transparent, solid, or gradient background.</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Local or browser processing</span></div></div>
+    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> Rasterize & export</div><h1>Free SVG to PNG converter</h1><p>Convert an SVG file or paste SVG code to PNG at 1×, 2×, 3×, 4×, or a custom size with a transparent, solid, or gradient background.</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Local or browser processing</span></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
     <ProcessingOptionsPanel tool="svg-to-png" locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={selectProcessingMode} />
     {activeView === "history" ? <ToolHistory tool="svg-to-png" /> : activeView === "guide" ? <ToolSeoContent pathname="/svg-to-png" /> : activeView === "processing" ? null : <>
@@ -316,7 +316,7 @@ export function SvgToPngTool() {
       </div>}
       {error && <div className="error-banner"><Info size={17} /><span>{error}</span></div>}
       {!job && <div className="trust-row"><div><CheckCircle2 size={16} /> Source stays untouched</div><div><ShieldCheck size={16} /> Local agent pipeline</div><div><Sparkles size={16} /> Transparent PNG support</div></div>}
-      <ToolFaqContent pathname="/svg-to-png" />
+          <ToolFaqContent pathname="/svg-to-png" />
     </>}
   </AppShell>;
 }

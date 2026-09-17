@@ -202,7 +202,7 @@ export function AgentSetupGuide() {
 
   return <AppShell>
     <section className="agent-guide-hero">
-      <div className="agent-guide-hero-copy"><div className="section-kicker"><span className="kicker-line" /> Desktop setup guide</div><h1>How to set up the Local agent</h1><p>Install NativeMedia Agent on your computer, connect it to this browser, and keep supported media processing on your desktop.</p><div className="agent-guide-hero-actions"><Link className="primary-button" href="/local-agent"><CheckCircle2 size={17} /> Open Local agent</Link><a className="secondary-button" href={releasesUrl} target="_blank" rel="noreferrer"><Download size={17} /> Latest release</a></div></div>
+    <div className="agent-guide-hero-copy"><div className="section-kicker"><span className="kicker-line" /> Desktop setup guide</div><h1>How to install NativeMedia Agent</h1><p>Install the NativeMedia Agent Local agent on your computer, connect it to this browser, and keep supported media processing on your desktop.</p><div className="agent-guide-hero-actions"><Link className="primary-button" href="/local-agent"><CheckCircle2 size={17} /> Open Local agent</Link><a className="secondary-button" href={releasesUrl} target="_blank" rel="noreferrer"><Download size={17} /> Latest release</a></div></div>
       <SetupFlowDiagram />
     </section>
 

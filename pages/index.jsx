@@ -4,12 +4,12 @@ import { AppShell } from "../components/app-shell.jsx";
 import { PRODUCT_NAME, PRODUCT_TAGLINE } from "../lib/site-metadata.js";
 
 const toolDirectory = [
-  { href: "/pdf-editor", label: "PDF editor", description: "Merge PDFs, arrange pages, and add images or text boxes.", icon: FileText, category: "PDF tools" },
-  { href: "/pdf-text-editor", label: "PDF text editor", description: "Edit searchable PDF text with OCR-assisted selection for scans.", icon: FileText, category: "PDF tools" },
-  { href: "/pdf-compressor", label: "PDF compressor", description: "Shrink large PDFs with selectable quality and image settings.", icon: Archive, category: "PDF tools" },
-  { href: "/image-converter", label: "Image converter", description: "Convert JPG, PNG, HEIC, TIFF, GIF, and BMP files.", icon: ImageIcon, category: "Media tools" },
-  { href: "/svg-to-png", label: "SVG to PNG", description: "Rasterize SVG files with exact sizing and transparent, solid, or gradient backgrounds.", icon: ImageIcon, category: "Media tools" },
-  { href: "/video-repair", label: "Video repair", description: "Recover readable video files with layered repair methods.", icon: Film, category: "Media tools" },
+  { href: "/pdf-editor", label: "Free PDF editor", description: "Merge PDFs, organize pages, add blank pages, and export a new document.", icon: FileText, category: "PDF tools" },
+  { href: "/pdf-text-editor", label: "Free PDF text editor", description: "Replace searchable PDF text while preserving its original layout.", icon: FileText, category: "PDF tools" },
+  { href: "/pdf-compressor", label: "Free PDF compressor", description: "Reduce PDF file size with balanced and advanced compression profiles.", icon: Archive, category: "PDF tools" },
+  { href: "/image-converter", label: "Free private image converter", description: "Convert JPG, JPEG, PNG, GIF, and BMP images without uploading them.", icon: ImageIcon, category: "Media tools" },
+  { href: "/svg-to-png", label: "Free SVG to PNG converter", description: "Rasterize SVG artwork with transparent, solid, or gradient backgrounds.", icon: ImageIcon, category: "Media tools" },
+  { href: "/video-repair", label: "Private video repair tool", description: "Repair damaged video files with layered local recovery methods.", icon: Film, category: "Media tools" },
 ];
 
 const principles = [
@@ -22,11 +22,11 @@ export default function HomePage() {
   return <AppShell>
     <section className="home-hero" aria-labelledby="home-title">
       <div className="section-kicker"><span className="kicker-line" /> Private file tools</div>
-      <h1 id="home-title">Private PDF and media tools for your desktop</h1>
+      <h1 id="home-title">Free private PDF and media tools</h1>
       <p>Convert images, repair videos, edit PDFs, and reduce document size with {PRODUCT_NAME}. {PRODUCT_TAGLINE} Connect the agent on macOS, Windows, or Linux to keep processing on your computer and your original files untouched.</p>
       <div className="home-actions">
         <Link className="primary-button" href="/pdf-editor" prefetch={false} data-analytics-cta="open_pdf_editor" data-analytics-surface="home">Open PDF editor <ArrowRight size={17} /></Link>
-        <Link className="secondary-button" href="/image-converter" prefetch={false} data-analytics-cta="convert_image" data-analytics-surface="home">Convert an image</Link>
+        <Link className="secondary-button" href="/image-converter" prefetch={false} data-analytics-cta="convert_image" data-analytics-surface="home">Try the private image converter</Link>
       </div>
       <div className="home-trust-line"><ShieldCheck size={17} /><span>Processing location shown · source files are not overwritten</span></div>
     </section>

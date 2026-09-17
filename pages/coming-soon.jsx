@@ -1,9 +1,8 @@
-import { AudioLines, Captions, FileImage, FileMusic, FileText, FileVideo, Film, GalleryHorizontalEnd, ImagePlus, PenLine, ScanLine, SlidersHorizontal, WandSparkles } from "lucide-react";
+import { AudioLines, Captions, FileImage, FileMusic, FileVideo, Film, GalleryHorizontalEnd, ImagePlus, PenLine, ScanLine, SlidersHorizontal, WandSparkles } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "../components/app-shell.jsx";
 
 const plannedTools = [
-  ["PDF editor", "Merge PDFs, reorder pages, and add or remove pages in one document.", FileText, "Beta", "/pdf-editor"],
   ["PDF text editor", "Edit text inside PDFs and save a clean, shareable copy.", PenLine, "Beta", "/pdf-text-editor"],
   ["Sign images & PDFs", "Create or upload a signature, then place it on an image or PDF page.", PenLine],
   ["Audio converter", "Convert music and audio between MP3, WAV, AAC, FLAC, and more.", AudioLines],

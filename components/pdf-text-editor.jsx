@@ -1574,8 +1574,8 @@ export function PdfTextEditor() {
       <div className="page-heading">
         <div>
           <div className="section-kicker"><span className="kicker-line" /> PDF text tools · Beta</div>
-          <h1>PDF text editor</h1>
-          <p>Edit existing selectable text while preserving the original PDF graphics, colors, opacity, images, and page layout. Image-only PDFs can be scanned with the bundled OCR engine.</p>
+          <h1>Free PDF text editor</h1>
+          <p>Replace searchable PDF text while preserving the original graphics, colours, images, and page layout. Use Local agent for OCR, formatting, and text placement changes in scanned PDFs.</p>
         </div>
         <div className="heading-note"><ShieldCheck size={16} /><span>Only selected text operators change</span></div>
       </div>

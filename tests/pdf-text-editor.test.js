@@ -417,6 +417,27 @@ test("Browser PDF text export rewrites plain native replacements and reports pro
   assert.equal(progress.at(-1), 100);
 });
 
+test("Browser PDF text export uses a standard fallback for symbols missing from the source font map", async () => {
+  const source = await type0Fixture("Tj", "Arial", [["0001", "0041"]], ["0001"]);
+  const extracted = await extractPdfTextRuns(source);
+  const run = extracted.pages[0].runs[0];
+  const file = {
+    name: "source.pdf",
+    size: source.byteLength,
+    arrayBuffer: async () => source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength),
+  };
+  const browserOutput = await processBrowserPdfTextEdits(file, [{
+    pageIndex: run.pageIndex,
+    operatorOrdinal: run.ordinal,
+    runId: run.runId,
+    originalText: run.text,
+    originalTextHash: run.originalTextHash,
+    replacementText: "A / B",
+    mode: "native",
+  }]);
+  assert.match((await searchableText(await browserOutput.blob.arrayBuffer()))[0], /A \/ B/);
+});
+
 test("live PDF preview rebuilds all native edits and restores the source when edits are cleared", async () => {
   const source = await createFixture();
   const extracted = await extractPdfTextRuns(source);

@@ -81,12 +81,14 @@ test("PDF text editor is exposed as a dedicated tool with history navigation", a
   assert.match(shell, /ToolViewTabs/);
   assert.match(shell, /ToolHistory tool="pdf-text-editor"/);
   assert.match(history, /"pdf-text-editor"/);
-  assert.match(navigation, /label: "PDF editor"[^\n]+beta: true/);
+  assert.match(navigation, /label: "PDF editor"[^\n]+icon: FileText \}/);
+  assert.doesNotMatch(navigation, /label: "PDF editor"[^\n]+beta: true/);
   assert.match(navigation, /label: "PDF text editor"[^\n]+beta: true/);
   assert.match(navigation, /nav-beta/);
   const pdfEditorPosition = comingSoon.indexOf('["PDF editor"');
   const pdfTextEditorPosition = comingSoon.indexOf('["PDF text editor"');
-  assert.ok(pdfEditorPosition >= 0 && pdfTextEditorPosition > pdfEditorPosition, "PDF text editor should follow PDF editor in Coming soon");
+  assert.equal(pdfEditorPosition, -1, "PDF editor should no longer be listed in Coming soon");
+  assert.ok(pdfTextEditorPosition >= 0, "PDF text editor should remain in Coming soon");
   assert.match(comingSoon, /\["PDF text editor"[^\n]+"Beta", "\/pdf-text-editor"\]/);
 });
 

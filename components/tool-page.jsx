@@ -359,9 +359,9 @@ export function ToolPage({ tool }) {
   const batchBusy = Boolean(batchJobs?.some((entry) => entry.status === "queued" || entry.status === "processing"));
   const busy = Boolean(jobId && job && (job.status === "queued" || job.status === "processing")) || batchBusy;
   const canSubmit = Boolean(isImage ? imageFiles.length : source) && !busy && !uploadProgress;
-  const title = isImage ? "Image conversion" : isPdfCompressor ? "PDF compression" : "Video repair";
-  const eyebrow = isImage ? "Format & size" : isPdfCompressor ? "Optimize & shrink" : "Recovery & salvage";
-  const description = isImage ? "Convert image data between formats while keeping the original pixel dimensions intact." : isPdfCompressor ? "Reduce a PDF’s file size while keeping its pages readable and leaving the original untouched." : "Give damaged or unsupported footage a layered recovery pass without touching the original.";
+  const title = isImage ? "Free private image converter" : isPdfCompressor ? "Free PDF compressor" : "Private video repair tool";
+  const eyebrow = isImage ? "Convert without uploads" : isPdfCompressor ? "Reduce PDF size" : "Recover damaged video";
+  const description = isImage ? "Convert JPG, JPEG, PNG, GIF, or BMP images in this browser, or use Local agent for HEIC, TIFF, larger files, and full desktop format support." : isPdfCompressor ? "Reduce PDF file size with a balanced browser profile or advanced Local agent profiles while keeping the original PDF untouched." : "Repair damaged MP4, MOV, M4V, MKV, WebM, AVI, MPEG, or MPG videos with layered recovery on your computer.";
   const heicReady = capabilities?.image?.heic || capabilities?.image?.sips;
   const imageMagickReady = capabilities?.image?.imagemagick !== false;
   const sipsReady = capabilities?.image?.sips === true;
