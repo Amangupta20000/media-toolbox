@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, CalendarClock, Check, Copy, Gift, Infinity, ShieldCheck, UserRoundCheck } from "lucide-react";
 import { FREE_ACCESS_CODE } from "../lib/free-access.js";
 import { PRODUCT_NAME } from "../lib/site-metadata.js";
+import { pushAnalyticsEvent } from "../lib/analytics.js";
 
 const OFFER_REDEMPTION_POLICIES = Object.freeze({
   unlimited: {
@@ -60,6 +61,20 @@ function OfferCard({ offer }) {
   const [copyError, setCopyError] = useState("");
   const [expiry, setExpiry] = useState(0);
   const [availability, setAvailability] = useState("checking");
+  const offerViewTrackedRef = useRef(false);
+
+  useEffect(() => {
+    const trackView = () => {
+      if (offerViewTrackedRef.current) return;
+      if (pushAnalyticsEvent("offer_viewed", { offer_id: offer.id })) offerViewTrackedRef.current = true;
+    };
+    trackView();
+    const handleConsent = (event) => {
+      if (event.detail?.value === "granted") trackView();
+    };
+    window.addEventListener("media-toolbox-analytics-consent", handleConsent);
+    return () => window.removeEventListener("media-toolbox-analytics-consent", handleConsent);
+  }, [offer.id]);
 
   useEffect(() => {
     if (!offer.statusEndpoint) {
@@ -88,6 +103,9 @@ function OfferCard({ offer }) {
     try {
       await copyText(offer.code);
       setCopied(true);
+      // The public site cannot verify redemption inside the desktop app. This
+      // records the allowlisted code handoff without sending the code itself.
+      pushAnalyticsEvent("offer_redeemed", { offer_id: offer.id, result: "code_copied" });
       window.setTimeout(() => setCopied(false), 2200);
     } catch (error) {
       setCopyError(error.message || "The code could not be copied.");

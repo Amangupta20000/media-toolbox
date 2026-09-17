@@ -16,6 +16,7 @@ import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, prefe
 import { BROWSER_IMAGE_MAX_BYTES, BROWSER_PDF_MAX_BYTES, browserSupportsFormat, processBrowserImage, processBrowserPdfCompression } from "./browser-processing.js";
 import { ProcessingOptionsPanel } from "./processing-options.jsx";
 import { PdfResultPreview } from "./pdf-result-preview.jsx";
+import { pushAnalyticsEvent } from "../lib/analytics.js";
 
 const imageFormats = [
   ["original", "Original", "Keep encoded format"],
@@ -253,6 +254,7 @@ export function ToolPage({ tool }) {
   const [activeView, setActiveView] = useState("tool");
   const browserObjectUrlsRef = useRef(new Set());
   const browserRunRef = useRef(0);
+  const trackedJobStatesRef = useRef(new Set());
 
   useEffect(() => {
     let active = true;
@@ -413,6 +415,7 @@ export function ToolPage({ tool }) {
     setPreviewUrl("");
     setPreviewError(false);
     setError("");
+    pushAnalyticsEvent("input_selected", { tool, input_type: "image", count: next.length });
   };
 
   const removeImageFile = (index) => {
@@ -433,6 +436,7 @@ export function ToolPage({ tool }) {
     }
     setSource(file);
     setError("");
+    pushAnalyticsEvent("input_selected", { tool, input_type: isPdfCompressor ? "pdf" : "video", count: 1 });
   };
 
   const selectProcessingMode = (mode) => {
@@ -504,6 +508,7 @@ export function ToolPage({ tool }) {
       if (isPdfCompressor) {
         const runId = ++browserRunRef.current;
         const logEntry = (message, level = "info") => ({ time: new Date().toISOString(), level, message });
+        pushAnalyticsEvent("processing_started", { tool, mode: processingMode });
         setJobMode("browser");
         setJobId(null);
         setJob({ id: `browser-${runId}`, status: "processing", progress: 1, stage: "Reading PDF", message: "The browser is preparing the PDF.", logs: [logEntry("Browser PDF compression started.")], warnings: [], error: null, result: null });
@@ -529,6 +534,7 @@ export function ToolPage({ tool }) {
       const unsupported = imageSettings.find((setting) => !browserSupportsFormat(setting.format));
       if (unsupported) { setError("Browser mode can create Original, PNG, or JPG files in this browser. Choose one of those formats or use the Local agent."); return; }
       const runId = ++browserRunRef.current;
+      pushAnalyticsEvent("processing_started", { tool, mode: processingMode });
       const entries = imageFiles.map((file, index) => ({ id: `browser-${runId}-${index}`, status: "queued", progress: 0, stage: "Queued", message: "Waiting for the browser conversion.", logs: [], warnings: [], error: null, result: null }));
       setJobMode("browser");
       setBatchJobs(entries);
@@ -554,6 +560,7 @@ export function ToolPage({ tool }) {
       return;
     }
     const form = new FormData();
+    pushAnalyticsEvent("processing_started", { tool, mode: processingMode });
     form.append("tool", tool);
     if (isImage) imageFiles.forEach((file) => form.append("source", file, file.name));
     else form.append("source", source, source.name);
@@ -585,6 +592,28 @@ export function ToolPage({ tool }) {
     }
   };
 
+  useEffect(() => {
+    if (!job || !["completed", "failed"].includes(job.status)) return;
+    const key = `${tool}:${job.id}:${job.status}`;
+    if (trackedJobStatesRef.current.has(key)) return;
+    trackedJobStatesRef.current.add(key);
+    const resultType = isImage ? "image" : isPdfCompressor ? "pdf" : "video";
+    pushAnalyticsEvent(job.status === "completed" ? "processing_completed" : "processing_failed", job.status === "completed"
+      ? { tool, mode: jobMode, result_type: resultType }
+      : { tool, mode: jobMode, error_category: "worker_failure" });
+  }, [isImage, isPdfCompressor, job, jobMode, tool]);
+
+  useEffect(() => {
+    if (!batchJobs?.length || batchJobs.some((entry) => !["completed", "failed", "cancelled"].includes(entry.status))) return;
+    const key = `${tool}:batch:${batchJobs.map((entry) => `${entry.id}:${entry.status}`).join(",")}`;
+    if (trackedJobStatesRef.current.has(key)) return;
+    trackedJobStatesRef.current.add(key);
+    const failed = batchJobs.some((entry) => entry.status !== "completed");
+    pushAnalyticsEvent(failed ? "processing_failed" : "processing_completed", failed
+      ? { tool, mode: jobMode, error_category: "batch_failure" }
+      : { tool, mode: jobMode, result_type: "image_batch" });
+  }, [batchJobs, jobMode, tool]);
+
   return <AppShell>
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> {eyebrow}</div><h1>{title}</h1><p>{description}</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Original files stay untouched</span></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
@@ -592,10 +621,10 @@ export function ToolPage({ tool }) {
     {activeView === "history" ? <ToolHistory tool={tool} /> : activeView === "guide" ? <ToolSeoContent pathname={`/${tool}`} /> : activeView === "processing" ? null : <>
     <ProcessingMode value={processingMode} onChange={selectProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool={tool} />
     <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${capabilities?.status === "ready" ? "ready" : ""}`} /><span>{processingMode === "browser" ? isPdfCompressor ? "Browser compression ready" : "Browser conversion ready" : capabilities?.status === "ready" ? "Local agent worker online" : "Connecting to Local agent"}</span></div>{processingMode === "browser" ? <span>No upload · browser memory only</span> : isImage ? <span>{heicReady ? (capabilities?.image?.heic ? "HEIC enabled" : "HEIC enabled via local fallback") : capabilities?.status === "ready" ? "HEIC unavailable" : "HEIC capability checking"}</span> : isPdfCompressor ? <span>{capabilities?.status !== "ready" ? "PDF compression capability checking" : pdfCompressorReady ? "PDF compression ready" : "PDF structural optimization fallback"}</span> : <span>{capabilities?.video?.untrunc ? (matchingReferenceReady ? "Reference recovery + fallback" : "Reference recovery · upload a reference") : capabilities?.status === "ready" ? "FFmpeg recovery enabled · reference recovery unavailable" : "Video capabilities checking"}</span>}</div>
-    {job ? <JobStatusCard job={job} isImage={isImage} isPdfCompressor={isPdfCompressor} mode={jobMode} keepResult={keepResult} onReset={reset} /> : batchJobs ? <BatchJobStatusCard jobs={batchJobs} mode={jobMode} onReset={reset} /> : <div className="workspace-grid">
+    {job ? <JobStatusCard job={job} tool={tool} isImage={isImage} isPdfCompressor={isPdfCompressor} mode={jobMode} keepResult={keepResult} onReset={reset} /> : batchJobs ? <BatchJobStatusCard jobs={batchJobs} tool={tool} mode={jobMode} onReset={reset} /> : <div className="workspace-grid">
       <section className="tool-card primary-card"><div className="card-heading"><div><span className="card-index">01</span><h2>{isImage ? "Add up to 5 images" : isPdfCompressor ? "Add a PDF" : "Add a damaged video"}</h2></div><span className="required-label">Required</span></div><FileDropzone files={isImage ? imageFiles : undefined} file={isImage ? undefined : source} onFiles={isImage ? handleImageFiles : undefined} onFile={isImage ? undefined : handleSourceFile} onRemoveFile={isImage ? removeImageFile : undefined} onClear={() => { setSource(null); setImageFiles([]); setImageSettings([]); setActiveImageIndex(0); setSameConversion(false); setSameSize(false); setPreviewUrl(""); setPreviewError(false); }} multiple={isImage} variant={isImage ? "image" : isPdfCompressor ? "pdf" : "video"} accept={isImage ? imageAccept : isPdfCompressor ? ".pdf,application/pdf" : "video/*,.mkv,.webm,.avi,.3gp"} label={isImage ? "Drop up to 5 images here" : isPdfCompressor ? "Drop a PDF here" : "Drop a video here"} hint={isImage ? "or click to browse · paste an image directly" : "or click to browse from your device"} required disabled={Boolean(uploadProgress)} />{isImage && imageFiles[0] && previewUrl && <div className="image-preview-card"><div className="preview-heading"><span>First image preview</span><small>Local only · not uploaded</small></div><div className="image-preview-frame">{previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${imageFiles[0].name}-preview`}><AlertTriangle size={18} /><span>This browser cannot preview this image format, but the file can still be processed.</span></DismissibleMessage> : <img src={previewUrl} alt={`Preview of ${imageFiles[0].name}`} onError={() => setPreviewError(true)} />}</div></div>}<div className="limit-row"><span>Maximum file size</span><strong>{isImage ? processingMode === "browser" ? "5 MB each · 5 per request" : "25 MB each · 5 per request" : isPdfCompressor ? processingMode === "browser" ? "10 MB · browser limit" : "200 MB" : "2 GB"}</strong></div><div className={`keep-result-slot ${processingMode === "local" ? "visible" : ""}`} aria-hidden={processingMode !== "local"}>{processingMode === "local" && <label className="keep-result-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label>}</div></section>
     {isImage ? <ImageSettingsCard files={imageFiles} settings={imageSettings} activeIndex={activeImageIndex} sameConversion={sameConversion} onChange={updateImageSetting} onActiveIndexChange={setActiveImageIndex} sameSize={sameSize} method={method} capabilities={capabilities} processingMode={processingMode} imageMagickReady={imageMagickReady} sipsReady={sipsReady} onSameConversionChange={toggleSameConversion} onSameSizeChange={toggleSameSize} onMethodChange={setMethod} /> : isPdfCompressor ? <PdfCompressionSettingsCard source={source} profile={compressionProfile} customQuality={customQuality} removeColor={removeColor} customTargetMb={customTargetMb} estimate={compressionEstimate} onChange={setCompressionProfile} onCustomQualityChange={setCustomQuality} onRemoveColorChange={setRemoveColor} onCustomTargetChange={setCustomTargetMb} capabilities={capabilities} processingMode={processingMode} /> : <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Reference video</h2></div><span className={matchingReferenceReady ? "optional-label" : "required-label"}>{matchingReferenceReady ? "Optional matching reference" : "Upload for damaged MP4"}</span></div><p className="card-description">A healthy recording from the same device or app can rebuild missing MP4 metadata when it was recorded with the same settings.</p><FileDropzone file={reference} onFile={setReference} onClear={() => setReference(null)} variant="video" accept="video/*,.mkv,.webm,.avi,.3gp" label="Drop a reference video" hint={matchingReferenceReady ? "or continue without one" : "required when MP4 metadata is missing"} disabled={Boolean(uploadProgress)} /><div className="info-note"><Info size={16} /><span>{capabilities?.video?.untrunc ? (matchingReferenceReady ? "Reference recovery is available. If you do not upload one, the configured matching reference will be tried." : "No matching reference is configured. Upload a healthy recording from the same device or app; readable containers can still be repaired without one.") : "FFmpeg can repair readable containers. Missing MP4 metadata requires Untrunc and a matching healthy reference."}</span></div></section>}
-      <section className="tool-card action-card"><div className="action-copy"><div className="action-icon"><Zap size={19} /></div><div><h2>Ready when you are</h2><p>{isImage ? "Your output will be created as a new file." : isPdfCompressor ? "The original PDF stays untouched; a smaller copy is created." : "The Local agent will try the safest recovery method first."}</p></div></div><button className="primary-button" onClick={submit} disabled={!canSubmit}>{uploadProgress ? <><LoaderCircle className="spin" size={18} /> Uploading {uploadProgress}%</> : <><Sparkles size={18} /> {isImage ? "Convert image" : isPdfCompressor ? "Compress PDF" : "Repair video"}</>}</button></section>
+      <section className="tool-card action-card"><div className="action-copy"><div className="action-icon"><Zap size={19} /></div><div><h2>Ready when you are</h2><p>{isImage ? "Your output will be created as a new file." : isPdfCompressor ? "The original PDF stays untouched; a smaller copy is created." : "The Local agent will try the safest recovery method first."}</p></div></div><button className="primary-button" onClick={submit} disabled={!canSubmit} data-analytics-cta={isImage ? "convert_image" : isPdfCompressor ? "compress_pdf" : "repair_video"} data-analytics-surface={tool}>{uploadProgress ? <><LoaderCircle className="spin" size={18} /> Uploading {uploadProgress}%</> : <><Sparkles size={18} /> {isImage ? "Convert image" : isPdfCompressor ? "Compress PDF" : "Repair video"}</>}</button></section>
     </div>}
     {!job && !isImage && !isPdfCompressor && <VideoRecoverySummary hasMatchingReference={matchingReferenceReady} hasUntrunc={capabilities?.video?.untrunc} />}
     {error && <DismissibleMessage className="error-banner" resetKey={error}><AlertTriangle size={18} /><span>{error}</span></DismissibleMessage>}
@@ -676,7 +705,7 @@ function ImageSettingsCard({ files, settings, activeIndex, sameConversion, sameS
   </section>;
 }
 
-function BatchJobStatusCard({ jobs, mode, onReset }) {
+function BatchJobStatusCard({ jobs, tool, mode, onReset }) {
   const completed = jobs.filter((entry) => entry.status === "completed").length;
   const failed = jobs.filter((entry) => entry.status === "failed").length;
   const finished = completed + failed === jobs.length;
@@ -692,17 +721,17 @@ function BatchJobStatusCard({ jobs, mode, onReset }) {
       return <article className={`batch-job-row ${done ? "complete" : itemFailed ? "failed" : ""}`} key={entry.id}>
         <div className="batch-job-row-status">{done ? <CheckCircle2 size={17} /> : itemFailed ? <AlertTriangle size={17} /> : <LoaderCircle className="spin" size={17} />}<span>{index + 1}</span></div>
         <div className="batch-job-row-copy"><strong title={entry.result?.filename || entry.message}>{entry.result?.filename || `Image ${index + 1}`}</strong><span>{done ? `${formatBytes(entry.result.bytes)} · ready` : itemFailed ? entry.error || "Conversion failed." : `${entry.stage || "Queued"} · ${progress}%`}</span></div>
-        {done && <BatchDownloadAction result={entry.result} />}
+        {done && <BatchDownloadAction result={entry.result} tool={tool} />}
       </article>;
     })}</div>
     <div className="job-actions"><button className="secondary-button" onClick={onReset}><RotateCcw size={17} /> {finished ? "Convert more images" : "Cancel batch"}</button></div>
   </section>;
 }
 
-function BatchDownloadAction({ result }) {
+function BatchDownloadAction({ result, tool }) {
   const [filenameStemValue, setFilenameStemValue] = useState(() => filenameStem(result?.filename));
   const filename = downloadFilename(filenameStemValue, result?.filename);
-  return <div className="batch-download-action"><ResultFilenameField originalFilename={result.filename} value={filenameStemValue} onChange={setFilenameStemValue} /><a className="secondary-button" href={downloadUrlWithFilename(result.downloadUrl, filename)} download={filename}><Download size={16} /> Download</a></div>;
+  return <div className="batch-download-action"><ResultFilenameField originalFilename={result.filename} value={filenameStemValue} onChange={setFilenameStemValue} /><a className="secondary-button" href={downloadUrlWithFilename(result.downloadUrl, filename)} download={filename} onClick={() => pushAnalyticsEvent("result_downloaded", { tool, result_type: "image" })}><Download size={16} /> Download</a></div>;
 }
 
 function VideoRecoverySummary({ hasMatchingReference, hasUntrunc }) {
@@ -732,7 +761,7 @@ function VideoRecoverySummary({ hasMatchingReference, hasUntrunc }) {
   </section>;
 }
 
-export function JobStatusCard({ job, isImage, isPdfCompressor, mode, keepResult, onReset }) {
+export function JobStatusCard({ job, tool, isImage, isPdfCompressor, mode, keepResult, onReset }) {
   const [filenameStemValue, setFilenameStemValue] = useState("");
   const done = job.status === "completed";
   const failed = job.status === "failed";
@@ -755,7 +784,7 @@ export function JobStatusCard({ job, isImage, isPdfCompressor, mode, keepResult,
     {done && job.result && isPdfCompressor && <ResultPdfPreview result={job.result} />}
     {done && job.result && <div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div>{isPdfCompressor && Number.isFinite(job.result.reductionPercent) && <div><span>Saved</span><strong>{job.result.reductionPercent > 0 ? `${job.result.reductionPercent}%` : "Already optimized"}</strong></div>}{isPdfCompressor && job.result.targetSizeMb && <div><span>Size target</span><strong>{job.result.targetMet ? `Under ${job.result.targetSizeMb} MB` : "Not reached"}</strong></div>}{isImage && job.result.targetSizeKb && <div><span>Size target</span><strong>{job.result.targetMet ? `Near ${job.result.targetSizeKb} KB` : "Not reached"}</strong></div>}{isImage && job.result.width && <div><span>Resolution</span><strong>{job.result.width} × {job.result.height}</strong></div>}<div><span>Method</span><strong>{job.result.method || "Completed"}</strong></div></div>}
     {job.warnings.length > 0 && <div className="warning-list">{job.warnings.map((warning) => <DismissibleMessage key={warning} resetKey={warning}><AlertTriangle size={16} /><span>{warning}</span></DismissibleMessage>)}</div>}
-    {done && job.result && <ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={filename} />} {done && job.result && <ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} />}<div className="job-actions">{done && job.result && <a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, filename)} download={filename}><Download size={18} /> Download result</a>}<button className="secondary-button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Process another file" : "Cancel"}</button></div>
+    {done && job.result && <ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={filename} />} {done && job.result && <ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} />}<div className="job-actions">{done && job.result && <a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, filename)} download={filename} onClick={() => pushAnalyticsEvent("result_downloaded", { tool, result_type: isImage ? "image" : isPdfCompressor ? "pdf" : "video" })}><Download size={18} /> Download result</a>}<button className="secondary-button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Process another file" : "Cancel"}</button></div>
   </section>;
 }
 

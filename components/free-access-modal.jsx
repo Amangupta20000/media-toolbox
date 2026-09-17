@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, Copy, Gift, X } from "lucide-react";
 import { FREE_ACCESS_CODE } from "../lib/free-access.js";
 import { PRODUCT_NAME } from "../lib/site-metadata.js";
+import { pushAnalyticsEvent } from "../lib/analytics.js";
 
 const SESSION_COOKIE = "media_toolbox_free_access_seen";
 const SESSION_COOKIE_MAX_AGE_SECONDS = 30 * 60;
@@ -40,6 +41,7 @@ export function FreeAccessModal({ pathname }) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
   const [codeExpiryLabel, setCodeExpiryLabel] = useState("");
+  const offerViewTrackedRef = useRef(false);
 
   useEffect(() => {
     if (["/admin", "/license-admin", "/offers"].includes(pathname) || hasSessionCookie()) return undefined;
@@ -62,9 +64,21 @@ export function FreeAccessModal({ pathname }) {
 
   useEffect(() => {
     if (!visible) return undefined;
+    const trackView = () => {
+      if (offerViewTrackedRef.current) return;
+      if (pushAnalyticsEvent("offer_viewed", { offer_id: "freeforall" })) offerViewTrackedRef.current = true;
+    };
+    trackView();
+    const handleConsent = (event) => {
+      if (event.detail?.value === "granted") trackView();
+    };
+    window.addEventListener("media-toolbox-analytics-consent", handleConsent);
     const closeOnEscape = (event) => { if (event.key === "Escape") setVisible(false); };
     document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("media-toolbox-analytics-consent", handleConsent);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
   }, [visible]);
 
   if (!visible) return null;
@@ -75,6 +89,9 @@ export function FreeAccessModal({ pathname }) {
     try {
       await copyText(FREE_ACCESS_CODE);
       setCopied(true);
+      // Redemption happens in the Local agent; the website only knows that
+      // the visitor copied the public offer code.
+      pushAnalyticsEvent("offer_redeemed", { offer_id: "freeforall", result: "code_copied" });
       window.setTimeout(() => setCopied(false), 2200);
     } catch (error) {
       setCopyError(error.message || "The code could not be copied.");

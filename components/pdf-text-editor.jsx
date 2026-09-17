@@ -21,6 +21,7 @@ import { graphemeCount } from "../lib/text-metrics.js";
 import { takeHistoryEdit } from "./history-edit.js";
 import { fontFamilyFromPdfName, hasTextFormat, normalizeTextFormat, scaleTextFormat, textFormatDefaults } from "../lib/pdf-text-format.js";
 import { PDF_TEXT_BOX_FONTS } from "../lib/pdf-text-box.js";
+import { pushAnalyticsEvent } from "../lib/analytics.js";
 
 async function loadPdfLibrary() {
   const library = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -943,6 +944,7 @@ function PdfTextJobCard({ initialJob, mode, onReset, onContinue, keepResult }) {
   const [printing, setPrinting] = useState(false);
   const [printError, setPrintError] = useState("");
   const [filenameStemValue, setFilenameStemValue] = useState("");
+  const trackedJobStatesRef = useRef(new Set());
   useEffect(() => {
     if (mode === "browser") setJob(initialJob);
   }, [initialJob, mode]);
@@ -971,6 +973,15 @@ function PdfTextJobCard({ initialJob, mode, onReset, onContinue, keepResult }) {
     poll();
     return () => { active = false; if (timer) window.clearTimeout(timer); };
   }, [initialJob.id, mode]);
+  useEffect(() => {
+    if (!job || !["completed", "failed"].includes(job.status)) return;
+    const key = `pdf-text-editor:${job.id}:${job.status}`;
+    if (trackedJobStatesRef.current.has(key)) return;
+    trackedJobStatesRef.current.add(key);
+    pushAnalyticsEvent(job.status === "completed" ? "processing_completed" : "processing_failed", job.status === "completed"
+      ? { tool: "pdf-text-editor", mode, result_type: "pdf" }
+      : { tool: "pdf-text-editor", mode, error_category: "export_failure" });
+  }, [job, mode]);
   const done = job.status === "completed";
   const failed = job.status === "failed";
   const progress = Math.max(0, Math.min(100, Number(job.progress) || 0));
@@ -994,7 +1005,7 @@ function PdfTextJobCard({ initialJob, mode, onReset, onContinue, keepResult }) {
       setPrintError(error instanceof Error ? error.message : "The PDF could not be opened for printing.");
     } finally { setPrinting(false); }
   };
-  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be edited" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<PdfTextJobLog logs={job.logs || []} mode={mode} />{job.warnings?.length > 0 && <DismissibleMessage className="pdf-text-export-warnings" resetKey={job.warnings.join("\n")}><AlertTriangle size={16} /><div>{job.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div></DismissibleMessage>}{done && job.result && <PdfResultPreview result={job.result} title="Edited PDF preview" subtitle={`Scroll to review all ${job.result.pageCount} pages`} />}{done && job.result && <><div className="result-summary"><div><span>Output</span><strong title={job.result.filename}>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Edits</span><strong>{job.result.editCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div><ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={downloadName} /><ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} /></>}{printError && <DismissibleMessage className="error-banner" resetKey={printError}><AlertTriangle size={17} /><span>{printError}</span></DismissibleMessage>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, downloadName)} download={downloadName}><Download size={17} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button></>}{(done || failed) && <button className="secondary-button" type="button" onClick={onContinue}><Pencil size={17} /> Continue editing</button>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
+  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be edited" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<PdfTextJobLog logs={job.logs || []} mode={mode} />{job.warnings?.length > 0 && <DismissibleMessage className="pdf-text-export-warnings" resetKey={job.warnings.join("\n")}><AlertTriangle size={16} /><div>{job.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div></DismissibleMessage>}{done && job.result && <PdfResultPreview result={job.result} title="Edited PDF preview" subtitle={`Scroll to review all ${job.result.pageCount} pages`} />}{done && job.result && <><div className="result-summary"><div><span>Output</span><strong title={job.result.filename}>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Edits</span><strong>{job.result.editCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div><ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={downloadName} /><ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} /></>}{printError && <DismissibleMessage className="error-banner" resetKey={printError}><AlertTriangle size={17} /><span>{printError}</span></DismissibleMessage>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, downloadName)} download={downloadName} onClick={() => pushAnalyticsEvent("result_downloaded", { tool: "pdf-text-editor", result_type: "pdf" })}><Download size={17} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button></>}{(done || failed) && <button className="secondary-button" type="button" onClick={onContinue}><Pencil size={17} /> Continue editing</button>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
 }
 
 export function PdfTextEditor() {
@@ -1042,6 +1053,7 @@ export function PdfTextEditor() {
   const sourcePasswordRef = useRef("");
   const resultFilenameTouchedRef = useRef(false);
   const browserResultUrlRef = useRef("");
+  const trackedJobStatesRef = useRef(new Set());
   useEffect(() => () => {
     if (browserResultUrlRef.current) URL.revokeObjectURL(browserResultUrlRef.current);
   }, []);
@@ -1165,6 +1177,7 @@ export function PdfTextEditor() {
       return;
     }
     if (!pdfLibrary) { setError("PDF preview support is still loading. Try again in a moment."); return; }
+    pushAnalyticsEvent("input_selected", { tool: "pdf-text-editor", input_type: "pdf", count: 1 });
     if (processingMode === "browser") {
       loadFile(file, "embedded").catch(() => undefined);
       return;
@@ -1520,6 +1533,7 @@ export function PdfTextEditor() {
         editPayload.push({ pageIndex: run.pageIndex, operatorOrdinal: run.ordinal, ...(run.operatorOrdinals?.length > 1 ? { operatorOrdinals: run.operatorOrdinals } : {}), ...(serializedOperatorGroups(run) ? { operatorGroups: serializedOperatorGroups(run) } : {}), runId: run.runId, originalText: run.text || run.originalText, originalTextHash: run.originalTextHash, ...(moveOnly ? { moveOnly: true } : { replacementText: replacementText ?? run.text }), ...(format ? { format } : {}), ...(run.item?.width ? { boxWidth: Number(run.item.width) } : {}), mode: run.mode || "native", offsetX: offset.x, offsetY: offset.y, scale: transform.scale, scaleX: transform.scaleX, scaleY: transform.scaleY, rotation: transform.rotation, ...(origin ? { originX: origin.x, originY: origin.y } : {}), ...(run.bbox ? { bbox: run.bbox, confidence: run.confidence } : {}) });
       }
     }
+    pushAnalyticsEvent("processing_started", { tool: "pdf-text-editor", mode: processingMode });
     if (processingMode === "browser") {
       setJobMode("browser");
       setJobKeepResult(false);
@@ -1544,6 +1558,16 @@ export function PdfTextEditor() {
     form.append("tool", "pdf-text-editor"); form.append("source", source, source.name); form.append("sourceHash", sourceHash); form.append("edits", JSON.stringify(editPayload)); form.append("filename", downloadFilename(resultFilenameStem || filenameStem(defaultResultFilename), defaultResultFilename)); if (processingMode === "local") form.append("retention", effectiveKeepResult ? "keep" : "delete");
     try { setUploadProgress(1); const response = await uploadWithProgress(form, processingMode, setUploadProgress); setUploadProgress(0); const id = response.jobId || response.jobIds?.[0]; setJobMode(processingMode); setJobKeepResult(effectiveKeepResult); setJob({ id, status: "queued", progress: 0, stage: "Queued", message: effectiveKeepResult ? "Waiting for the worker. The completed PDF will be saved to this device." : "Waiting for the worker.", logs: [], warnings: [], error: null, result: null }); } catch (submitError) { setUploadProgress(0); setError(submitError instanceof Error ? submitError.message : "The PDF text edit could not be submitted."); }
   };
+
+  useEffect(() => {
+    if (!job || !["completed", "failed"].includes(job.status)) return;
+    const key = `pdf-text-editor:${job.id}:${job.status}`;
+    if (trackedJobStatesRef.current.has(key)) return;
+    trackedJobStatesRef.current.add(key);
+    pushAnalyticsEvent(job.status === "completed" ? "processing_completed" : "processing_failed", job.status === "completed"
+      ? { tool: "pdf-text-editor", mode: jobMode, result_type: "pdf" }
+      : { tool: "pdf-text-editor", mode: jobMode, error_category: "export_failure" });
+  }, [job, jobMode]);
 
   return (
     <AppShell>
@@ -1598,7 +1622,7 @@ export function PdfTextEditor() {
                       <button className="pdf-zoom-value" type="button" onClick={resetPreviewZoom} title="Reset zoom (0)">{Math.round(previewZoom * 100)}%</button>
                       <button className="icon-button" type="button" onClick={() => changePreviewZoom(0.1)} aria-label="Zoom in" title="Zoom in (+)"><ZoomIn size={16} /></button>
                     </div>
-                    <button className="primary-button" type="button" onClick={submit} disabled={!canSubmit}>
+                    <button className="primary-button" type="button" onClick={submit} disabled={!canSubmit} data-analytics-cta="export_pdf_text_edit" data-analytics-surface="pdf-text-editor">
                       {uploadProgress ? <><LoaderCircle className="spin" size={17} /> Uploading {uploadProgress}%</> : checkingLocation ? <><LoaderCircle className="spin" size={17} /> Checking worker…</> : <><Pencil size={17} /> Export edited PDF</>}
                     </button>
                     {processingMode === "local" && <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!canSubmit} title="Process the PDF and keep it in the Local agent Results folder"><Save size={17} /> Save to device</button>}

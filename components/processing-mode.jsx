@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Globe2, Laptop, Server, Settings2 } from "lucide-react";
 import { browserSupportsTool } from "./browser-processing.js";
+import { pushAnalyticsEvent } from "../lib/analytics.js";
 
 const labels = {
   local: ["Local agent", "Reliable processing on this device", Laptop],
@@ -27,7 +28,7 @@ export function ProcessingMode({ value, onChange, onChangeView, locations, tool 
       {modes.map((mode) => {
         const [label, detail, Icon] = labels[mode];
         const available = Boolean(locations?.[mode]?.available && ready(mode));
-        return <button type="button" key={mode} className={`processing-mode-option ${value === mode ? "selected" : ""} ${!available ? "unavailable" : ""}`} disabled={!available} onClick={() => onChange(mode)}>
+        return <button type="button" key={mode} className={`processing-mode-option ${value === mode ? "selected" : ""} ${!available ? "unavailable" : ""}`} disabled={!available} onClick={() => { pushAnalyticsEvent("processing_mode_selected", { tool, mode }); onChange(mode); }}>
           <Icon size={18} /><span><strong>{label}</strong><small>{available ? detail : mode === "local" ? "Start and authorize the agent" : mode === "browser" ? "This tool cannot run in the browser" : "Connect to the server to continue"}</small></span><em>{value === mode ? "Selected" : available ? "Available" : "Unavailable"}</em>
         </button>;
       })}

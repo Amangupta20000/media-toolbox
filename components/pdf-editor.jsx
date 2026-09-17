@@ -17,6 +17,7 @@ import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, prefe
 import { MAX_PDF_COUNT, MAX_PDF_TOTAL_BYTES } from "../lib/pdf-limits.js";
 import { normalizeImageRotation, rotatedImageDrawPlacement } from "../lib/pdf-image-placement.js";
 import { PDF_TEXT_BOX_FONTS, textBoxCssFontFamily, textBoxTextRuns } from "../lib/pdf-text-box.js";
+import { pushAnalyticsEvent } from "../lib/analytics.js";
 
 const MAX_IMAGE_COORDINATE = 100000;
 const ACCEPTED_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".heic", ".heif", ".tif", ".tiff", ".gif", ".bmp"]);
@@ -1107,6 +1108,7 @@ export function PdfEditor() {
       const nextPdfFiles = [...pdfFilesRef.current, ...newFiles];
       const nextPages = [...pagesRef.current, ...newPages];
       commitDocument(nextPages, nextPdfFiles);
+      pushAnalyticsEvent("input_selected", { tool: "pdf-editor", input_type: "pdf", count: newFiles.length });
       if (!selectedId && nextPages[0]) setSelectedId(nextPages[0].id);
       if (browserFallbacks || serverFallbacks || thumbnailFailures || passwordProtectedFiles) {
         const messages = [];
@@ -1653,6 +1655,7 @@ export function PdfEditor() {
         addedImages.push({ id: makeId(), file, sourceBytes: await file.arrayBuffer(), url, x, y, width, height, rotation: 0, lockAspectRatio: true });
       }
       updatePage(targetPage.id, { images: [...existingImages, ...addedImages] });
+      pushAnalyticsEvent("input_selected", { tool: "pdf-editor", input_type: "image", count: addedImages.length });
       setError("");
     } catch (imageError) {
       for (const image of addedImages) {
@@ -1762,6 +1765,7 @@ export function PdfEditor() {
     }
     if (processingMode !== "browser" && !isProcessingLocationReady(locations, processingMode)) { setError("Admin login or activation is required in the Local agent dashboard."); return; }
     setError("");
+    pushAnalyticsEvent("processing_started", { tool: "pdf-editor", mode: processingMode });
     setJobMode(processingMode);
     if (processingMode === "browser") {
       try {
@@ -1928,7 +1932,7 @@ export function PdfEditor() {
               </>}
             </div>}
           </div>
-          <button className="primary-button" type="button" onClick={submit} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles}><WandSparkles size={17} /> {uploadProgress ? `Uploading ${uploadProgress}%` : "Export PDF"}</button>
+          <button className="primary-button" type="button" onClick={submit} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles} data-analytics-cta="export_pdf" data-analytics-surface="pdf-editor"><WandSparkles size={17} /> {uploadProgress ? `Uploading ${uploadProgress}%` : "Export PDF"}</button>
         </div>
       </div>
       <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { addPdfFiles(event.target.files); event.target.value = ""; }} />
@@ -2500,6 +2504,7 @@ function PdfJobCard({ job: initialJob, mode = "local", keepResult = false, onRes
   const [printing, setPrinting] = useState(false);
   const [printError, setPrintError] = useState("");
   const [filenameStemValue, setFilenameStemValue] = useState("");
+  const trackedJobStatesRef = useRef(new Set());
   useEffect(() => {
     // Browser jobs are completed in the parent because there is no server job
     // to poll. Keep the card in sync with that parent state so a successful
@@ -2523,6 +2528,15 @@ function PdfJobCard({ job: initialJob, mode = "local", keepResult = false, onRes
     poll();
     return () => { active = false; };
   }, [initialJob.id, mode]);
+  useEffect(() => {
+    if (!job || !["completed", "failed"].includes(job.status)) return;
+    const key = `pdf-editor:${job.id}:${job.status}`;
+    if (trackedJobStatesRef.current.has(key)) return;
+    trackedJobStatesRef.current.add(key);
+    pushAnalyticsEvent(job.status === "completed" ? "processing_completed" : "processing_failed", job.status === "completed"
+      ? { tool: "pdf-editor", mode, result_type: "pdf" }
+      : { tool: "pdf-editor", mode, error_category: "export_failure" });
+  }, [job, mode]);
 
   const printPdf = async () => {
     if (!job.result?.downloadUrl || printing) return;
@@ -2560,5 +2574,5 @@ function PdfJobCard({ job: initialJob, mode = "local", keepResult = false, onRes
   const failed = job.status === "failed";
   const progress = Math.max(0, Math.min(100, job.progress || 0));
   const downloadName = done && job.result ? downloadFilename(filenameStemValue || filenameStem(job.result.filename), job.result.filename) : "";
-  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : job.status === "queued" ? "Queued" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be created" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<div className="pdf-job-log"><div className="job-log-heading"><span>Worker log</span><span>{(job.logs || []).length} events</span></div><div className="job-log-list">{job.logs?.length ? job.logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for progress…</div>}</div></div>{done && job.result && <><div className="pdf-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>All {job.result.pageCount || ""} pages</small></div><PdfResultPreview result={job.result} /></div><div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Pages</span><strong>{job.result.pageCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div></>} {done && job.result && <ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={downloadName} />} {done && job.result && <ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} />} {printError && <DismissibleMessage className="error-banner" resetKey={printError}><AlertTriangle size={17} /><span>{printError}</span></DismissibleMessage>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, downloadName)} download={downloadName}><Download size={18} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button><button className="secondary-button" type="button" onClick={() => onContinue?.(job.result)}><FilePlus2 size={17} /> Continue editing</button></>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
+  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : job.status === "queued" ? "Queued" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be created" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<div className="pdf-job-log"><div className="job-log-heading"><span>Worker log</span><span>{(job.logs || []).length} events</span></div><div className="job-log-list">{job.logs?.length ? job.logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for progress…</div>}</div></div>{done && job.result && <><div className="pdf-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>All {job.result.pageCount || ""} pages</small></div><PdfResultPreview result={job.result} /></div><div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Pages</span><strong>{job.result.pageCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div></>} {done && job.result && <ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={downloadName} />} {done && job.result && <ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} />} {printError && <DismissibleMessage className="error-banner" resetKey={printError}><AlertTriangle size={17} /><span>{printError}</span></DismissibleMessage>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, downloadName)} download={downloadName} onClick={() => pushAnalyticsEvent("result_downloaded", { tool: "pdf-editor", result_type: "pdf" })}><Download size={18} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button><button className="secondary-button" type="button" onClick={() => onContinue?.(job.result)}><FilePlus2 size={17} /> Continue editing</button></>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
 }

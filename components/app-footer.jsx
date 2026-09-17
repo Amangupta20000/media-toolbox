@@ -10,6 +10,7 @@ export function AppFooter() {
         <Link href="/terms" title="Terms and Conditions">Terms and Conditions</Link>
         <Link href="/contact" title="Contact Us">Contact Us</Link>
         <Link href="/offers" title="Local agent offers">Offers</Link>
+        <button className="app-footer-consent-link" type="button" onClick={() => window.dispatchEvent(new Event("media-toolbox-open-analytics-consent"))}>Manage privacy choices</button>
         <a href="/sitemap.xml" title="Sitemap">Sitemap</a>
       </nav>
     </div>

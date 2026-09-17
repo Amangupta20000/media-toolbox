@@ -13,6 +13,7 @@ import { processBrowserSvg } from "./browser-processing.js";
 import { takeHistoryEdit } from "./history-edit.js";
 import { isProcessingLocationReady, getProcessingJob, preferredProcessingMode, probeProcessingLocations, uploadWithProgress, deleteProcessingJob } from "./processing-client.js";
 import { normalizeSvgMarkup, normalizeSvgOptions, validateSvgMarkup } from "../lib/svg-options.js";
+import { pushAnalyticsEvent } from "../lib/analytics.js";
 
 const scaleOptions = [
   ["1", "1×", "Intrinsic size"],
@@ -58,6 +59,7 @@ export function SvgToPngTool() {
   const [activeView, setActiveView] = useState("tool");
   const browserObjectUrlsRef = useRef(new Set());
   const browserRunRef = useRef(0);
+  const trackedJobStatesRef = useRef(new Set());
 
   useEffect(() => {
     let active = true;
@@ -136,12 +138,13 @@ export function SvgToPngTool() {
   const processingReady = isProcessingLocationReady(locations, processingMode);
   const customScaleAvailable = processingMode !== "browser";
 
-  const applyMarkup = (markup, filename = "pasted-artwork.svg") => {
+  const applyMarkup = (markup, filename = "pasted-artwork.svg", { trackInput = false } = {}) => {
     try {
       const validMarkup = normalizeSvgMarkup(markup);
       setSvgCode(validMarkup);
       setSource(svgFile(validMarkup, filename));
       setError("");
+      if (trackInput) pushAnalyticsEvent("input_selected", { tool: "svg-to-png", input_type: "svg", count: 1 });
       return true;
     } catch (validationError) {
       setError(validationError instanceof Error ? validationError.message : "The SVG could not be read.");
@@ -156,7 +159,7 @@ export function SvgToPngTool() {
       return;
     }
     try {
-      applyMarkup(await file.text(), file.name || "artwork.svg");
+      applyMarkup(await file.text(), file.name || "artwork.svg", { trackInput: true });
     } catch {
       setError("The SVG file could not be read.");
     }
@@ -166,7 +169,7 @@ export function SvgToPngTool() {
     try {
       const value = await navigator.clipboard.readText();
       setSvgCode(value);
-      applyMarkup(value);
+      applyMarkup(value, "pasted-artwork.svg", { trackInput: true });
     } catch {
       setError("Clipboard access was unavailable. Paste the SVG code into the box instead.");
     }
@@ -177,7 +180,7 @@ export function SvgToPngTool() {
     if (!pasted) return;
     const { value, selectionStart, selectionEnd } = event.currentTarget;
     const nextValue = `${value.slice(0, selectionStart)}${pasted}${value.slice(selectionEnd)}`;
-    window.setTimeout(() => applyMarkup(nextValue), 0);
+    window.setTimeout(() => applyMarkup(nextValue, "pasted-artwork.svg", { trackInput: true }), 0);
   };
 
   const handleCodeBlur = () => {
@@ -239,6 +242,7 @@ export function SvgToPngTool() {
       setError(validationError instanceof Error ? validationError.message : "Choose valid SVG conversion settings.");
       return;
     }
+    pushAnalyticsEvent("processing_started", { tool: "svg-to-png", mode: processingMode });
     if (processingMode === "browser") {
       const runId = ++browserRunRef.current;
       setJobMode("browser");
@@ -280,6 +284,16 @@ export function SvgToPngTool() {
     }
   };
 
+  useEffect(() => {
+    if (!job || !["completed", "failed"].includes(job.status)) return;
+    const key = `svg-to-png:${job.id}:${job.status}`;
+    if (trackedJobStatesRef.current.has(key)) return;
+    trackedJobStatesRef.current.add(key);
+    pushAnalyticsEvent(job.status === "completed" ? "processing_completed" : "processing_failed", job.status === "completed"
+      ? { tool: "svg-to-png", mode: jobMode, result_type: "image" }
+      : { tool: "svg-to-png", mode: jobMode, error_category: "conversion_failure" });
+  }, [job, jobMode]);
+
   return <AppShell>
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> Rasterize & export</div><h1>SVG to PNG converter</h1><p>Upload an SVG or paste its code, then export at 1×, 2×, 3×, 4×, or a custom size with a transparent, solid, or gradient background.</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Local or browser processing</span></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
@@ -287,7 +301,7 @@ export function SvgToPngTool() {
     {activeView === "history" ? <ToolHistory tool="svg-to-png" /> : activeView === "guide" ? <ToolSeoContent pathname="/svg-to-png" /> : activeView === "processing" ? null : <>
       <ProcessingMode value={processingMode} onChange={selectProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool="svg-to-png" />
       <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${processingReady ? "ready" : ""}`} /><span>{processingReady ? `${processingMode === "browser" ? "Browser" : processingMode === "server" ? "Server worker" : "Local agent"} ready for SVG conversion` : processingMode === "browser" ? "Browser conversion unavailable" : processingMode === "server" ? "Server worker unavailable" : "Connect the Local agent to convert"}</span></div><span>SVG input · PNG output</span></div>
-      {job ? <JobStatusCard job={job} isImage mode={jobMode} keepResult={false} onReset={reset} /> : <div className="workspace-grid svg-workspace-grid">
+      {job ? <JobStatusCard job={job} tool="svg-to-png" isImage mode={jobMode} keepResult={false} onReset={reset} /> : <div className="workspace-grid svg-workspace-grid">
         <section className="tool-card primary-card svg-source-card"><div className="card-heading"><div><span className="card-index">01</span><h2>Add SVG source</h2></div><span className="required-label">Required</span></div><FileDropzone file={source} onFile={handleFile} onClear={() => { setSource(null); setSvgCode(""); setError(""); }} variant="image" accept=".svg,image/svg+xml" label="Drop an SVG file here" hint="or click to browse from your device" required disabled={busy} />
           <div className="svg-code-divider"><span>or paste SVG code</span><button type="button" className="text-button" onClick={pasteFromClipboard} disabled={busy}><ClipboardPaste size={14} /> Paste from clipboard</button></div>
           <textarea className="svg-code-input" value={svgCode} onChange={(event) => setSvgCode(event.target.value)} onPaste={handleCodePaste} onBlur={handleCodeBlur} placeholder="<svg viewBox=&quot;0 0 800 600&quot; ...>" aria-label="Paste SVG code" disabled={busy} />
@@ -298,7 +312,7 @@ export function SvgToPngTool() {
           <label className="field-label">Background <span>PNG canvas</span></label><div className="svg-background-options" aria-label="PNG background"><button type="button" className={`format-option ${background === "transparent" ? "selected" : ""}`} onClick={() => setBackground("transparent")}><span className="format-radio" /><strong>Transparent</strong><small>Preserve alpha</small></button><button type="button" className={`format-option ${background === "color" ? "selected" : ""}`} onClick={() => setBackground("color")}><Palette size={16} /><strong>Solid colour</strong><small>One colour fill</small></button><button type="button" className={`format-option ${background === "gradient" ? "selected" : ""}`} onClick={() => setBackground("gradient")}><span className="svg-gradient-swatch" /><strong>Gradient</strong><small>Blend two colours</small></button></div>{background !== "transparent" && <div className="svg-background-controls"><div className="svg-background-colors"><label className="svg-color-picker" htmlFor="svg-background-color"><span>{background === "gradient" ? "Start colour" : "Background colour"}</span><input id="svg-background-color" type="color" value={background === "gradient" ? gradientStartColor : backgroundColor} onChange={(event) => background === "gradient" ? setGradientStartColor(event.target.value) : setBackgroundColor(event.target.value)} /><code>{background === "gradient" ? gradientStartColor : backgroundColor}</code></label>{background === "gradient" && <label className="svg-color-picker" htmlFor="svg-gradient-end"><span>End colour</span><input id="svg-gradient-end" type="color" value={gradientEndColor} onChange={(event) => setGradientEndColor(event.target.value)} /><code>{gradientEndColor}</code></label>}</div>{background === "gradient" && <label className="svg-range-control" htmlFor="svg-gradient-angle"><span><strong>Gradient direction</strong><output>{gradientAngle}°</output></span><input id="svg-gradient-angle" type="range" min="0" max="360" step="1" value={gradientAngle} onChange={(event) => setGradientAngle(event.target.value)} /></label>}<label className="svg-range-control" htmlFor="svg-background-opacity"><span><strong>Background opacity</strong><output>{backgroundOpacity}%</output></span><input id="svg-background-opacity" type="range" min="0" max="100" step="1" value={backgroundOpacity} onChange={(event) => setBackgroundOpacity(event.target.value)} /></label></div>}
           <div className="svg-output-note"><CheckCircle2 size={16} /><span>{scale === "custom" ? `${customWidth || "—"} × ${customHeight || "—"} px output` : `${scale}× intrinsic SVG dimensions`} · PNG</span></div>
         </section>
-        <section className="tool-card action-card"><div className="action-copy"><div className="action-icon"><Sparkles size={19} /></div><div><h2>Ready to rasterize?</h2><p>{processingMode === "browser" ? "This browser will create a new PNG without uploading the SVG." : processingMode === "server" ? "The server worker will create a new PNG." : "The Local agent will create a new PNG on this computer."}</p></div></div><button className="primary-button" type="button" onClick={submit} disabled={busy || !source || !processingReady}>{uploadProgress ? <><LoaderCircle className="spin" size={18} /> Uploading {uploadProgress}%</> : <><Download size={18} /> Convert to PNG</>}</button></section>
+        <section className="tool-card action-card"><div className="action-copy"><div className="action-icon"><Sparkles size={19} /></div><div><h2>Ready to rasterize?</h2><p>{processingMode === "browser" ? "This browser will create a new PNG without uploading the SVG." : processingMode === "server" ? "The server worker will create a new PNG." : "The Local agent will create a new PNG on this computer."}</p></div></div><button className="primary-button" type="button" onClick={submit} disabled={busy || !source || !processingReady} data-analytics-cta="convert_svg_to_png" data-analytics-surface="svg-to-png">{uploadProgress ? <><LoaderCircle className="spin" size={18} /> Uploading {uploadProgress}%</> : <><Download size={18} /> Convert to PNG</>}</button></section>
       </div>}
       {error && <div className="error-banner"><Info size={17} /><span>{error}</span></div>}
       {!job && <div className="trust-row"><div><CheckCircle2 size={16} /> Source stays untouched</div><div><ShieldCheck size={16} /> Local agent pipeline</div><div><Sparkles size={16} /> Transparent PNG support</div></div>}
