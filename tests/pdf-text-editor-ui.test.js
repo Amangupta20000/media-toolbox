@@ -25,7 +25,7 @@ test("PDF text editor is exposed as a dedicated tool with history navigation", a
   assert.doesNotMatch(navigation, /sidebar-header|sidebar-collapse|sidebar-collapsed|collapsed-menu-button/);
   assert.doesNotMatch(navigation, /sidebar-context/);
   assert.doesNotMatch(navigation, /<div className="sidebar-label">Workspace<\/div>/);
-  assert.match(navigation, /<Link href="\/" className="topbar-brand" aria-label="NativeMedia Agent home">/);
+  assert.match(navigation, /<Link href="\/" className="topbar-brand" aria-label="NativeMedia Agent home"[^>]*>/);
   assert.match(navigation, /<div className="topbar-brand-main">/);
   assert.match(navigation, /<img className="brand-logo" src="\/media-toolbox-logo-64\.png" srcSet="\/media-toolbox-logo-64\.png 64w, \/media-toolbox-logo-128\.png 128w" sizes="\(max-width: 680px\) 34px, 58px" width="58" height="58" decoding="async" alt="NativeMedia Agent logo" title="NativeMedia Agent" \/>/);
   assert.match(navigation, /<span className="topbar-brand-subtitle">\{PRODUCT_TAGLINE\}<\/span>/);
@@ -83,13 +83,12 @@ test("PDF text editor is exposed as a dedicated tool with history navigation", a
   assert.match(history, /"pdf-text-editor"/);
   assert.match(navigation, /label: "PDF editor"[^\n]+icon: FileText \}/);
   assert.doesNotMatch(navigation, /label: "PDF editor"[^\n]+beta: true/);
-  assert.match(navigation, /label: "PDF text editor"[^\n]+beta: true/);
+  assert.doesNotMatch(navigation, /label: "PDF text editor"[^\n]+beta: true/);
   assert.match(navigation, /nav-beta/);
   const pdfEditorPosition = comingSoon.indexOf('["PDF editor"');
   const pdfTextEditorPosition = comingSoon.indexOf('["PDF text editor"');
   assert.equal(pdfEditorPosition, -1, "PDF editor should no longer be listed in Coming soon");
-  assert.ok(pdfTextEditorPosition >= 0, "PDF text editor should remain in Coming soon");
-  assert.match(comingSoon, /\["PDF text editor"[^\n]+"Beta", "\/pdf-text-editor"\]/);
+  assert.equal(pdfTextEditorPosition, -1, "PDF text editor should no longer be listed in Coming soon");
 });
 
 test("PDF text editor supports constrained browser replacement and identity-checked local edits", async () => {

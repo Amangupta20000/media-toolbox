@@ -19,7 +19,7 @@ const navigation = [
 
 const pdfNavigation = [
   { href: "/pdf-editor", label: "PDF editor", detail: "Merge and arrange pages", icon: FileText },
-  { href: "/pdf-text-editor", label: "PDF text editor", detail: "Edit existing PDF text", icon: FileText, beta: true },
+  { href: "/pdf-text-editor", label: "PDF text editor", detail: "Edit existing PDF text", icon: FileText },
   { href: "/pdf-compressor", label: "PDF compressor", detail: "Reduce PDF file size", icon: Archive },
 ];
 
@@ -70,7 +70,7 @@ function AgentSetupPrompt() {
         <span>Follow the platform-specific setup steps with visual guidance.</span>
       </div>
     </div>
-    <Link className="secondary-button" href="/how-to-setup-agent">Open setup guide <ExternalLink size={16} aria-hidden="true" /></Link>
+    <Link className="secondary-button" href="/how-to-setup-agent" title="Open Local agent setup guide">Open setup guide <ExternalLink size={16} aria-hidden="true" /></Link>
   </div>;
 }
 
@@ -155,7 +155,7 @@ export function AppShell({ children }) {
   return <div className={`app-shell ${sidebarHidden ? "sidebar-hidden" : ""} ${mobileOpen ? "mobile-menu-open" : ""}`}>
     <header className="topbar">
       <button className="topbar-menu-button" type="button" aria-label={menuLabel} title={menuLabel} aria-controls="app-sidebar" aria-expanded={menuExpanded} onClick={toggleSidebar}><Menu size={21} aria-hidden="true" /></button>
-      <Link href="/" className="topbar-brand" aria-label="NativeMedia Agent home">
+      <Link href="/" className="topbar-brand" aria-label="NativeMedia Agent home" title="NativeMedia Agent home">
         <div className="topbar-brand-main">
           <div className="brand-mark"><img className="brand-logo" src="/media-toolbox-logo-64.png" srcSet="/media-toolbox-logo-64.png 64w, /media-toolbox-logo-128.png 128w" sizes="(max-width: 680px) 34px, 58px" width="58" height="58" decoding="async" alt="NativeMedia Agent logo" title="NativeMedia Agent" /></div>
           <div className="brand-copy"><span>NativeMedia</span><strong>Agent</strong></div>

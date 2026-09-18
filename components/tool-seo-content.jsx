@@ -9,6 +9,10 @@ import { TOOL_SEO_CONTENT } from "../lib/tool-seo-content.js";
 export function ToolSeoContent({ pathname }) {
   const content = TOOL_SEO_CONTENT[normalizeSitePath(pathname)];
   if (!content) return null;
+  const relatedLinks = [
+    ...(content.relatedLinks || []),
+    ["/browser-vs-local-agent", "Browser vs Local agent", "Compare privacy, limits, and feature support before choosing a mode."],
+  ];
 
   return <section className="tool-seo-content" aria-labelledby="tool-seo-title">
     <div className="tool-seo-intro">
@@ -35,9 +39,9 @@ export function ToolSeoContent({ pathname }) {
         </table>
       </div>
     </section>}
-    {content.relatedLinks?.length > 0 && <nav className="tool-seo-related" aria-labelledby="tool-seo-related-title">
+    {relatedLinks.length > 0 && <nav className="tool-seo-related" aria-labelledby="tool-seo-related-title">
       <h2 id="tool-seo-related-title">Related tools and guides</h2>
-      <div className="tool-seo-related-grid">{content.relatedLinks.map(([href, label, detail]) => <Link className="tool-seo-related-link" href={href} key={href}><span><strong>{label}</strong><small>{detail}</small></span><span aria-hidden="true">→</span></Link>)}</div>
+      <div className="tool-seo-related-grid">{relatedLinks.map(([href, label, detail]) => <Link className="tool-seo-related-link" href={href} key={href}><span><strong>{label}</strong><small>{detail}</small></span><span aria-hidden="true">→</span></Link>)}</div>
     </nav>}
   </section>;
 }

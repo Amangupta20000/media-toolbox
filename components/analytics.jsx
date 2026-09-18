@@ -22,6 +22,7 @@ const PAGE_METADATA = Object.freeze({
   "/terms": { pageType: "static_page", pageName: "terms" },
   "/local-agent": { pageType: "static_page", pageName: "local_agent" },
   "/how-to-setup-agent": { pageType: "static_page", pageName: "how_to_setup_agent" },
+  "/browser-vs-local-agent": { pageType: "guide", pageName: "browser_vs_local_agent" },
 });
 
 function publicPath(pathname) {

@@ -1,6 +1,8 @@
 import Head from "next/head";
+import Script from "next/script";
 import { useRouter } from "next/router";
 import { absoluteSiteUrl, ADSENSE_CLIENT_ID, AUTHOR_EMAIL, AUTHOR_ID, AUTHOR_NAME, metadataForPathname, normalizeSitePath, PRODUCT_NAME, PRODUCT_TAGLINE, SITE_URL } from "../lib/site-metadata.js";
+import { PROCESSING_MODE_GUIDE } from "../lib/processing-mode-guide.js";
 import { TOOL_SEO_CONTENT } from "../lib/tool-seo-content.js";
 
 export function SeoHead() {
@@ -12,6 +14,7 @@ export function SeoHead() {
   const robots = metadata.noIndex ? "noindex,nofollow" : "index,follow,max-image-preview:large";
   const pageLabel = metadata.breadcrumbLabel || metadata.title.replace(/\s*\|\s*NativeMedia Agent$/, "");
   const toolContent = TOOL_SEO_CONTENT[normalizedPath];
+  const guideContent = normalizedPath === "/browser-vs-local-agent" ? PROCESSING_MODE_GUIDE : null;
   const organization = {
     "@type": "Organization",
     "@id": `${SITE_URL}#organization`,
@@ -80,10 +83,11 @@ export function SeoHead() {
       { "@type": "ListItem", position: 2, name: pageLabel, item: canonicalUrl },
     ],
   };
-  const faqPage = toolContent?.faqs?.length ? {
+  const faqItems = toolContent?.faqs?.length ? toolContent.faqs : guideContent?.faqs;
+  const faqPage = faqItems?.length ? {
     "@type": "FAQPage",
     "@id": `${canonicalUrl}#faq`,
-    mainEntity: toolContent.faqs.map(([question, answer]) => ({
+    mainEntity: faqItems.map(([question, answer]) => ({
       "@type": "Question",
       name: question,
       acceptedAnswer: { "@type": "Answer", text: answer },
@@ -94,36 +98,38 @@ export function SeoHead() {
     "@graph": [organization, author, website, application, webPage, ...(breadcrumb ? [breadcrumb] : []), ...(faqPage ? [faqPage] : [])],
   };
 
-  return <Head>
-    <title>{metadata.title}</title>
-    {!metadata.noIndex && <script async src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT_ID}`} crossOrigin="anonymous" />}
-    <meta name="description" content={metadata.description} />
-    <meta name="keywords" content={metadata.keywords} />
-    <meta name="author" content={AUTHOR_NAME} />
-    <meta name="publisher" content={PRODUCT_NAME} />
-    <meta name="application-name" content={PRODUCT_NAME} />
-    <meta name="robots" content={robots} />
-    <meta name="googlebot" content={robots} />
-    <meta name="referrer" content="strict-origin-when-cross-origin" />
-    <link rel="icon" type="image/png" href="/media-toolbox-logo.png" />
-    <link rel="apple-touch-icon" href="/media-toolbox-logo.png" />
-    <link rel="canonical" href={canonicalUrl} />
-    <meta property="og:type" content="website" />
-    <meta property="og:locale" content="en_US" />
-    <meta property="og:site_name" content={PRODUCT_NAME} />
-    <meta property="og:url" content={canonicalUrl} />
-    <meta property="og:title" content={metadata.title} />
-    <meta property="og:description" content={metadata.description} />
-    <meta property="og:image" content={socialImageUrl} />
-    <meta property="og:image:alt" content="NativeMedia Agent app logo" />
-    <meta property="og:image:type" content="image/png" />
-    <meta property="og:image:width" content="256" />
-    <meta property="og:image:height" content="256" />
-    <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content={metadata.title} />
-    <meta name="twitter:description" content={metadata.description} />
-    <meta name="twitter:image" content={socialImageUrl} />
-    <meta name="twitter:image:alt" content="NativeMedia Agent app logo" />
-    {!metadata.noIndex && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }} />}
-  </Head>;
+  return <>
+    <Head>
+      <title>{metadata.title}</title>
+      <meta name="description" content={metadata.description} />
+      <meta name="keywords" content={metadata.keywords} />
+      <meta name="author" content={AUTHOR_NAME} />
+      <meta name="publisher" content={PRODUCT_NAME} />
+      <meta name="application-name" content={PRODUCT_NAME} />
+      <meta name="robots" content={robots} />
+      <meta name="googlebot" content={robots} />
+      <meta name="referrer" content="strict-origin-when-cross-origin" />
+      <link rel="icon" type="image/png" href="/media-toolbox-logo.png" />
+      <link rel="apple-touch-icon" href="/media-toolbox-logo.png" />
+      <link rel="canonical" href={canonicalUrl} />
+      <meta property="og:type" content="website" />
+      <meta property="og:locale" content="en_US" />
+      <meta property="og:site_name" content={PRODUCT_NAME} />
+      <meta property="og:url" content={canonicalUrl} />
+      <meta property="og:title" content={metadata.title} />
+      <meta property="og:description" content={metadata.description} />
+      <meta property="og:image" content={socialImageUrl} />
+      <meta property="og:image:alt" content="NativeMedia Agent app logo" />
+      <meta property="og:image:type" content="image/png" />
+      <meta property="og:image:width" content="256" />
+      <meta property="og:image:height" content="256" />
+      <meta name="twitter:card" content="summary" />
+      <meta name="twitter:title" content={metadata.title} />
+      <meta name="twitter:description" content={metadata.description} />
+      <meta name="twitter:image" content={socialImageUrl} />
+      <meta name="twitter:image:alt" content="NativeMedia Agent app logo" />
+      {!metadata.noIndex && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }} />}
+    </Head>
+    {!metadata.noIndex && <Script id="adsense-publisher" strategy="beforeInteractive" async src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT_ID}`} crossOrigin="anonymous" />}
+  </>;
 }

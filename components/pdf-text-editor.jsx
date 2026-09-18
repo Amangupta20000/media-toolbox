@@ -1779,7 +1779,7 @@ export function PdfTextEditor() {
     <AppShell>
       <div className="page-heading">
         <div>
-          <div className="section-kicker"><span className="kicker-line" /> PDF text tools · Beta</div>
+          <div className="section-kicker"><span className="kicker-line" /> PDF text tools</div>
           <h1>Free PDF text editor</h1>
           <p>Replace searchable PDF text while preserving the original graphics, colours, images, and page layout. Use Local agent for OCR, formatting, and text placement changes in scanned PDFs.</p>
         </div>
