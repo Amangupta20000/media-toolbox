@@ -111,7 +111,12 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.doesNotMatch(shell, /Keep final result on this device/);
   assert.doesNotMatch(shell, /keepResultTouchedRef/);
   assert.doesNotMatch(shell, /pdf-retention-info/);
-  assert.match(shell, /const effectiveKeepResult = processingMode === "local" && saveToDevice/);
+  assert.match(shell, /const replacementJobId = processingMode === "local" \? retainedJobIdRef\.current : ""/);
+  assert.match(shell, /const effectiveKeepResult = processingMode === "local" && \(saveToDevice \|\| Boolean\(replacementJobId\)\)/);
+  assert.match(shell, /form\.append\("replaceJobId", replacementJobId\)/);
+  assert.match(shell, /const saveReplacementJobIdRef = useRef\(""\)/);
+  assert.match(shell, /deleteProcessingJob\("local", replacedJobId\)\.catch\(\(\) => undefined\)/);
+  assert.match(shell, /replacementJobId=\{jobReplacementId\}/);
   assert.match(shell, /resultFilenameStem/);
   assert.match(shell, /form\.append\("filename"/);
   assert.match(shell, /Saved PDF name/);
@@ -148,7 +153,9 @@ test("PDF editor can export blank-page-only projects and lets users rename downl
   assert.match(await read("scripts/stage-agent-package.mjs"), /staged Local agent still contains the old PDF-editor requirement/);
   assert.match(filenameField, /Download file name/);
   assert.match(shell, /Save to device/);
-  assert.match(shell, /const effectiveKeepResult = processingMode === "local" && saveToDevice/);
+  assert.match(shell, /const replacementJobId = processingMode === "local" \? retainedJobIdRef\.current : ""/);
+  assert.match(shell, /const effectiveKeepResult = processingMode === "local" && \(saveToDevice \|\| Boolean\(replacementJobId\)\)/);
+  assert.match(shell, /form\.append\("replaceJobId", replacementJobId\)/);
   assert.match(await read("components/tool-page.jsx"), /ResultFilenameField/);
   assert.match(await read("components/pdf-text-editor.jsx"), /ResultFilenameField/);
   assert.match(worker, /layoutPdfTextRuns/);

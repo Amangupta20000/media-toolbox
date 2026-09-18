@@ -666,6 +666,7 @@ export function PdfEditor() {
   const [job, setJob] = useState(null);
   const [saveJob, setSaveJob] = useState(null);
   const [saveNotice, setSaveNotice] = useState(null);
+  const [jobReplacementId, setJobReplacementId] = useState("");
   const [error, setError] = useState("");
   const [previewError, setPreviewError] = useState("");
   const [pdfDragActive, setPdfDragActive] = useState(false);
@@ -704,6 +705,8 @@ export function PdfEditor() {
   const historyEditLoadedRef = useRef(false);
   const moreToolsRef = useRef(null);
   const resultFilenameTouchedRef = useRef(false);
+  const retainedJobIdRef = useRef(null);
+  const saveReplacementJobIdRef = useRef("");
   const pagesRef = useRef([]);
   const pdfFilesRef = useRef([]);
   const historyRef = useRef({ past: [], future: [] });
@@ -761,6 +764,15 @@ export function PdfEditor() {
         if (!active) return;
         if (current.status === "completed") {
           const resultError = validatePdfResult(current.result);
+          if (!resultError) {
+            const replacedJobId = saveReplacementJobIdRef.current;
+            retainedJobIdRef.current = current.id;
+            // Older installed agents ignore replaceJobId and would otherwise
+            // leave the previous retained result in Results. The current
+            // agent also accepts this cleanup safely after native replacement.
+            if (replacedJobId) deleteProcessingJob("local", replacedJobId).catch(() => undefined);
+          }
+          saveReplacementJobIdRef.current = "";
           setSaveJob(null);
           setSaveNotice(resultError
             ? { type: "error", message: `The PDF could not be saved: ${resultError}` }
@@ -1088,7 +1100,10 @@ export function PdfEditor() {
     fetch(pending.downloadUrl, { cache: "no-store" }).then(async (response) => {
       if (!response.ok) throw new Error("The saved PDF could not be reopened.");
       const blob = await response.blob();
-      if (active) setContinuingFile(new File([blob], pending.filename || "saved.pdf", { type: "application/pdf" }));
+      if (active) {
+        retainedJobIdRef.current = pending.retainedJobId || null;
+        setContinuingFile(new File([blob], pending.filename || "saved.pdf", { type: "application/pdf" }));
+      }
     }).catch((loadError) => {
       if (active) setError(loadError instanceof Error ? loadError.message : "The saved PDF could not be reopened.");
     });
@@ -1703,12 +1718,16 @@ export function PdfEditor() {
     clearDocumentHistory();
     pdfFilesRef.current = [];
     pagesRef.current = [];
+    retainedJobIdRef.current = null;
+    saveReplacementJobIdRef.current = "";
+    setJobReplacementId("");
     resultFilenameTouchedRef.current = false;
     setPdfFiles([]); setPages([]); setSelectedId(null); setSelectedObject(null); setJob(null); setSaveJob(null); setSaveNotice(null); setJobKeepResult(false); setContinuingFile(null); setError(""); setPreviewError(""); setUploadProgress(0); setResultFilenameStem("");
   };
 
-  const continueEditing = async (result) => {
+  const continueEditing = async (result, completedJobId = "") => {
     if (!result?.downloadUrl) { setError("The generated PDF is no longer available for editing."); return; }
+    const retainedJobId = jobKeepResult ? (completedJobId || retainedJobIdRef.current) : retainedJobIdRef.current;
     try {
       const response = await fetch(result.downloadUrl, { cache: "no-store" });
       if (!response.ok) throw new Error("The generated PDF could not be reopened.");
@@ -1720,6 +1739,9 @@ export function PdfEditor() {
       clearDocumentHistory();
       pdfFilesRef.current = [];
       pagesRef.current = [];
+      retainedJobIdRef.current = retainedJobId;
+      saveReplacementJobIdRef.current = "";
+      setJobReplacementId("");
       setPdfFiles([]); setPages([]); setSelectedId(null); setSelectedObject(null); setJob(null); setJobKeepResult(false); setError(""); setPreviewError(""); setUploadProgress(0);
       resultFilenameTouchedRef.current = false;
       setResultFilenameStem("");
@@ -1789,18 +1811,25 @@ export function PdfEditor() {
       return;
     }
     form.append("operations", JSON.stringify(operations));
-    const effectiveKeepResult = processingMode === "local" && saveToDevice;
+    const replacementJobId = processingMode === "local" ? retainedJobIdRef.current : "";
+    const effectiveKeepResult = processingMode === "local" && (saveToDevice || Boolean(replacementJobId));
     form.append("filename", downloadFilename(resultFilenameStem || filenameStem(defaultResultFilename), defaultResultFilename));
-    if (processingMode === "local") form.append("retention", effectiveKeepResult ? "keep" : "delete");
+    if (replacementJobId) form.append("replaceJobId", replacementJobId);
+    if (processingMode === "local") {
+      form.append("retention", effectiveKeepResult ? "keep" : "delete");
+      form.append("historyStatus", saveToDevice ? "saved" : "completed");
+    }
     try {
       setUploadProgress(1);
       const response = await uploadWithProgress(form, processingMode, setUploadProgress);
       setUploadProgress(0);
       setJobKeepResult(effectiveKeepResult);
       if (saveToDevice && processingMode === "local") {
+        saveReplacementJobIdRef.current = replacementJobId;
         setSaveNotice(null);
         setSaveJob({ id: response.jobId, status: "queued", progress: 0, stage: "Saving…", message: "Saving the current PDF to this device…", logs: [], warnings: [], error: null, result: null });
       } else {
+        setJobReplacementId(replacementJobId);
         setJob({ id: response.jobId, status: "queued", progress: 0, stage: "Queued", message: effectiveKeepResult ? "Waiting for the worker. The completed PDF will be saved to this device." : "Waiting for the worker.", logs: [], warnings: [], error: null, result: null });
       }
     } catch (submitError) {
@@ -1878,7 +1907,7 @@ export function PdfEditor() {
     <ProcessingOptionsPanel tool="pdf-editor" locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={selectProcessingMode} />
     {activeView === "history" ? <ToolHistory tool="pdf-editor" /> : activeView === "guide" ? <ToolSeoContent pathname="/pdf-editor" /> : activeView === "processing" ? null : <>
     {!job && <ProcessingMode value={processingMode} onChange={selectProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool="pdf-editor" />}
-    {job ? <PdfJobCard job={job} mode={jobMode} keepResult={jobKeepResult} onReset={reset} onContinue={continueEditing} /> : <section className={`pdf-editor-shell ${pdfDragActive ? "pdf-drop-active" : ""}`} onDragOver={handlePdfDragOver} onDragLeave={handlePdfDragLeave} onDrop={handlePdfDrop}>
+    {job ? <PdfJobCard job={job} mode={jobMode} keepResult={jobKeepResult} replacementJobId={jobReplacementId} onReset={reset} onContinue={continueEditing} /> : <section className={`pdf-editor-shell ${pdfDragActive ? "pdf-drop-active" : ""}`} onDragOver={handlePdfDragOver} onDragLeave={handlePdfDragLeave} onDrop={handlePdfDrop}>
       {processingMode === "local" && <div className="pdf-retention-row">
         <div className="pdf-editor-toolbar-heading pdf-retention-heading"><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDF_COUNT} PDFs · {pages.length} pages · {Math.ceil(pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0) / (1024 * 1024)) || 0} MB of {processingMode === "browser" ? 50 : 200} MB</span></div>
         <div className="pdf-retention-name"><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem || filenameStem(defaultResultFilename)} label="Saved PDF name" description="This name is used for the export and, when retained, for PDF editor History in the Results folder." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(filenameStem(value)); }} /></div>
@@ -2475,12 +2504,20 @@ function PdfResultPreview({ result }) {
   </div>;
 }
 
-function PdfJobCard({ job: initialJob, mode = "local", keepResult = false, onReset, onContinue }) {
+function PdfJobCard({ job: initialJob, mode = "local", keepResult = false, replacementJobId = "", onReset, onContinue }) {
   const [job, setJob] = useState(initialJob);
   const [printing, setPrinting] = useState(false);
   const [printError, setPrintError] = useState("");
   const [filenameStemValue, setFilenameStemValue] = useState("");
   const trackedJobStatesRef = useRef(new Set());
+  const cleanedReplacementJobRef = useRef("");
+  useEffect(() => {
+    if (mode !== "local" || !replacementJobId || job?.status !== "completed" || cleanedReplacementJobRef.current === job.id) return;
+    cleanedReplacementJobRef.current = job.id;
+    // Keep compatibility with older agents that ignore replaceJobId. On a
+    // current agent this is an idempotent cleanup of the superseded row.
+    deleteProcessingJob("local", replacementJobId).catch(() => undefined);
+  }, [job?.id, job?.status, mode, replacementJobId]);
   useEffect(() => {
     // Browser jobs are completed in the parent because there is no server job
     // to poll. Keep the card in sync with that parent state so a successful
@@ -2550,5 +2587,5 @@ function PdfJobCard({ job: initialJob, mode = "local", keepResult = false, onRes
   const failed = job.status === "failed";
   const progress = Math.max(0, Math.min(100, job.progress || 0));
   const downloadName = done && job.result ? downloadFilename(filenameStemValue || filenameStem(job.result.filename), job.result.filename) : "";
-  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : job.status === "queued" ? "Queued" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be created" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<div className="pdf-job-log"><div className="job-log-heading"><span>Worker log</span><span>{(job.logs || []).length} events</span></div><div className="job-log-list">{job.logs?.length ? job.logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for progress…</div>}</div></div>{job.warnings?.length > 0 && <div className="warning-list">{job.warnings.map((warning) => <DismissibleMessage key={warning} resetKey={warning}><AlertTriangle size={16} /><span>{warning}</span></DismissibleMessage>)}</div>}{done && job.result && <><div className="pdf-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>All {job.result.pageCount || ""} pages</small></div><PdfResultPreview result={job.result} /></div><div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Pages</span><strong>{job.result.pageCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div></>} {done && job.result && <ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={downloadName} />} {done && job.result && <ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} />} {printError && <DismissibleMessage className="error-banner" resetKey={printError}><AlertTriangle size={17} /><span>{printError}</span></DismissibleMessage>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, downloadName)} download={downloadName} onClick={() => pushAnalyticsEvent("result_downloaded", { tool: "pdf-editor", result_type: "pdf" })}><Download size={18} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button><button className="secondary-button" type="button" onClick={() => onContinue?.(job.result)}><FilePlus2 size={17} /> Continue editing</button></>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
+  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : job.status === "queued" ? "Queued" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be created" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<div className="pdf-job-log"><div className="job-log-heading"><span>Worker log</span><span>{(job.logs || []).length} events</span></div><div className="job-log-list">{job.logs?.length ? job.logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for progress…</div>}</div></div>{job.warnings?.length > 0 && <div className="warning-list">{job.warnings.map((warning) => <DismissibleMessage key={warning} resetKey={warning}><AlertTriangle size={16} /><span>{warning}</span></DismissibleMessage>)}</div>}{done && job.result && <><div className="pdf-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>All {job.result.pageCount || ""} pages</small></div><PdfResultPreview result={job.result} /></div><div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Pages</span><strong>{job.result.pageCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div></>} {done && job.result && <ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={downloadName} />} {done && job.result && <ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} />} {printError && <DismissibleMessage className="error-banner" resetKey={printError}><AlertTriangle size={17} /><span>{printError}</span></DismissibleMessage>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, downloadName)} download={downloadName} onClick={() => pushAnalyticsEvent("result_downloaded", { tool: "pdf-editor", result_type: "pdf" })}><Download size={18} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button><button className="secondary-button" type="button" onClick={() => onContinue?.(job.result, job.id)}><FilePlus2 size={17} /> Continue editing</button></>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
 }

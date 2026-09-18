@@ -7,7 +7,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { getJob, getJobForPublic, claimNextJob, deleteJob, listExpiredJobs, listRetainedJobs, updateJob, appendJobLog } from "../lib/db.js";
+import { getJob, getJobForPublic, claimNextJob, deleteJob, listExpiredJobs, listRetainedJobs, replaceRetainedJob, updateJob, appendJobLog } from "../lib/db.js";
 import { config, paths } from "../lib/config.js";
 import { acceptMultipartJob, likelyFileForTool, parseMultipart } from "../lib/job-intake.js";
 import { recognizePdfText } from "../lib/pdf-ocr.js";
@@ -334,6 +334,33 @@ async function cleanupJob(jobId) {
   deleteJob(jobId);
 }
 
+function retainedResultNames(excludeJobId) {
+  const names = new Set();
+  for (const tool of HISTORY_TOOLS) {
+    for (const row of listRetainedJobs(tool)) {
+      if (row.id === excludeJobId) continue;
+      const result = rawResult(row);
+      const resultPath = resultPathFor(row);
+      if (!result?.filename || !resultPath || !fs.existsSync(resultPath)) continue;
+      names.add(safeDownloadName(result.filename).toLowerCase());
+    }
+  }
+  return names;
+}
+
+function uniqueRetainedResultName(filename, occupiedNames) {
+  const candidate = safeDownloadName(filename || "result");
+  const extension = path.extname(candidate);
+  const stem = path.basename(candidate, extension) || "result";
+  let unique = candidate;
+  let suffix = 1;
+  while (occupiedNames.has(unique.toLowerCase())) {
+    unique = `${stem}(${suffix})${extension}`;
+    suffix += 1;
+  }
+  return unique;
+}
+
 async function moveKeptResult(job) {
   const result = rawResult(job);
   if (!result?.path || !fs.existsSync(result.path)) return;
@@ -341,11 +368,27 @@ async function moveKeptResult(job) {
   if (options.retention !== "keep") return;
   const resultsDirectory = path.join(config.dataDir, "Results");
   await fsp.mkdir(resultsDirectory, { recursive: true });
-  const filename = `${job.id.slice(0, 8)}-${safeDownloadName(result.filename || "result")}`;
+  const previousJob = options.replaceJobId ? getJob(options.replaceJobId) : null;
+  const previousPath = previousJob ? rawResult(previousJob)?.path : null;
+  const previousIsRetained = previousJob?.tool === job.tool && previousJob.status === "completed" && (() => {
+    try { return JSON.parse(previousJob.options_json || "{}").retention === "keep"; } catch { return false; }
+  })();
+  const filenamePrefix = previousIsRetained ? previousJob.id.slice(0, 8) : job.id.slice(0, 8);
+  const requestedFilename = safeDownloadName(result.filename || "result");
+  const logicalFilename = previousIsRetained ? requestedFilename : uniqueRetainedResultName(requestedFilename, retainedResultNames(job.id));
+  const filename = `${filenamePrefix}-${logicalFilename}`;
   const keptPath = path.join(resultsDirectory, filename);
+  if (previousIsRetained && previousPath && previousPath !== keptPath) await fsp.rm(previousPath, { force: true });
+  await fsp.rm(keptPath, { force: true });
   await fsp.rename(result.path, keptPath);
+  result.filename = logicalFilename;
   result.path = keptPath;
-  updateJob(job.id, { result });
+  if (previousIsRetained && replaceRetainedJob(previousJob.id, job.id, result)) {
+    appendJobLog(job.id, "Updated the existing local Results file instead of creating a duplicate.", "complete");
+  } else {
+    updateJob(job.id, { result });
+  }
+  if (logicalFilename !== requestedFilename) appendJobLog(job.id, `The saved result was renamed to ${logicalFilename} because ${requestedFilename} already exists.`, "info");
   appendJobLog(job.id, "Final result kept in the local Results folder.", "complete");
   await fsp.rm(path.dirname(job.source_path), { recursive: true, force: true });
 }

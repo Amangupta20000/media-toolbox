@@ -237,6 +237,8 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(offersComponent, /Unlimited redemptions/);
   assert.match(offersComponent, /One redemption per person/);
   assert.match(offersComponent, /redemptionPolicy: "unlimited"/);
+  assert.match(offersComponent, /InfinityIcon/);
+  assert.doesNotMatch(offersComponent, /\bInfinity\s*,/);
   assert.match(offersComponent, /statusEndpoint: "\/api\/license\/v1\/free-access"/);
   assert.match(styles, /\.offer-card \{/);
   assert.match(styles, /@keyframes offer-card-reveal/);

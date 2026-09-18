@@ -7,6 +7,7 @@ export function rememberHistoryEdit(value) {
     downloadUrl: value.downloadUrl,
     filename: value.filename || "saved-result",
     mime: value.mime || "",
+    retainedJobId: value.retainedJobId || "",
   }));
 }
 

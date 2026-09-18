@@ -139,7 +139,12 @@ test("PDF text editor supports constrained browser replacement and identity-chec
   assert.doesNotMatch(shell, /Keep final result on this device/);
   assert.doesNotMatch(shell, /keepResultTouchedRef/);
   assert.doesNotMatch(shell, /pdf-retention-info/);
-  assert.match(shell, /const effectiveKeepResult = processingMode === "local" && saveToDevice/);
+  assert.match(shell, /const replacementJobId = processingMode === "local" \? retainedJobIdRef\.current : ""/);
+  assert.match(shell, /const effectiveKeepResult = processingMode === "local" && \(saveToDevice \|\| Boolean\(replacementJobId\)\)/);
+  assert.match(shell, /form\.append\("replaceJobId", replacementJobId\)/);
+  assert.match(shell, /const saveReplacementJobIdRef = useRef\(""\)/);
+  assert.match(shell, /deleteProcessingJob\("local", replacedJobId\)\.catch\(\(\) => undefined\)/);
+  assert.match(shell, /replacementJobId=\{jobReplacementId\}/);
   assert.match(shell, /className="pdf-retention-name"/);
   assert.match(shell, /Saved PDF name/);
   assert.match(shell, /const \[saveJob, setSaveJob\] = useState\(null\)/);

@@ -573,7 +573,7 @@ export function ToolPage({ tool }) {
       form.append("removeColor", removeColor ? "1" : "0");
       form.append("customTargetMb", String(customTargetMb));
     } else if (reference) form.append("reference", reference, reference.name);
-    if (processingMode === "local") form.append("retention", keepResult ? "keep" : "delete");
+    if (processingMode === "local") { form.append("retention", keepResult ? "keep" : "delete"); form.append("historyStatus", "completed"); }
     try {
       setUploadProgress(1);
       const response = await uploadWithProgress(form, processingMode, setUploadProgress);

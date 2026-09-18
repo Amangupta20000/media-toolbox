@@ -401,7 +401,9 @@ test("history and protected PDF flows expose the new safe controls", async () =>
   assert.match(history, /Open Results folder/);
   assert.match(history, /type="search"/);
   assert.match(history, /File size/);
-  assert.match(history, /Duration/);
+  assert.match(history, /value="saved">Saved<\/option>/);
+  assert.match(history, /value="completed">Completed<\/option>/);
+  assert.doesNotMatch(history, /Duration/);
   assert.match(history, /history-status-badge/);
   assert.match(pdfEditor, /task\.onPassword/);
   assert.match(pdfEditor, /window\.prompt/);
@@ -1745,6 +1747,7 @@ test("agent saves a custom PDF-editor name in Results history", async () => {
   form.append("tool", "pdf-editor");
   form.append("filename", "Client presentation.pdf");
   form.append("retention", "keep");
+  form.append("historyStatus", "saved");
   form.append("operations", JSON.stringify([{ kind: "blank", width: 300, height: 400, rotation: 0, images: [] }]));
   const response = await fetch(url("/v1/jobs"), {
     method: "POST",
@@ -1763,6 +1766,7 @@ test("agent saves a custom PDF-editor name in Results history", async () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   assert.equal(completed.status, "completed", completed.error || completed.message);
+  assert.equal(completed.historyStatus, "saved");
   assert.equal(completed.result.filename, "Client_presentation.pdf");
 
   const resultsDirectory = path.join(process.env.DATA_DIR, "Results");
@@ -1775,11 +1779,112 @@ test("agent saves a custom PDF-editor name in Results history", async () => {
   const retained = history.items.find((item) => item.id === createdJob.jobId);
   assert.ok(retained);
   assert.equal(retained.result.filename, "Client_presentation.pdf");
+  assert.equal(retained.historyStatus, "saved");
   assert.match(retained.location, /Results folder/);
 
   const deleted = await fetch(url(`/v1/history/${createdJob.jobId}`), { method: "DELETE", headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" } });
   assert.equal(deleted.status, 200);
   assert.equal((await fs.readdir(resultsDirectory)).some((filename) => filename.endsWith("-Client_presentation.pdf")), false);
+});
+
+test("agent adds a numeric suffix when a new retained result reuses an existing name", async () => {
+  const submitBlankPdf = async () => {
+    const form = new FormData();
+    form.append("tool", "pdf-editor");
+    form.append("filename", "new-pdf-name.pdf");
+    form.append("retention", "keep");
+    form.append("operations", JSON.stringify([{ kind: "blank", width: 300, height: 400, rotation: 0, images: [] }]));
+    const response = await fetch(url("/v1/jobs"), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" },
+      body: form,
+    });
+    assert.equal(response.status, 202);
+    return (await response.json()).jobId;
+  };
+
+  const waitForRetainedHistory = async (jobIds) => {
+    let history;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const response = await fetch(url("/v1/history?tool=pdf-editor"), { headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" } });
+      history = await response.json();
+      if (jobIds.every((id) => history.items.some((item) => item.id === id))) return history.items;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return history.items;
+  };
+
+  const firstJobId = await submitBlankPdf();
+  const firstHistory = await waitForRetainedHistory([firstJobId]);
+  const first = firstHistory.find((item) => item.id === firstJobId);
+  assert.equal(first?.result?.filename, "new-pdf-name.pdf");
+
+  const secondJobId = await submitBlankPdf();
+  const history = await waitForRetainedHistory([firstJobId, secondJobId]);
+  const second = history.find((item) => item.id === secondJobId);
+  assert.equal(second?.result?.filename, "new-pdf-name(1).pdf");
+
+  for (const jobId of [firstJobId, secondJobId]) {
+    const deleted = await fetch(url(`/v1/history/${jobId}`), { method: "DELETE", headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" } });
+    assert.equal(deleted.status, 200);
+  }
+});
+
+test("agent replaces a retained PDF-editor result when exporting the same editing session", async () => {
+  const submitBlankPdf = async ({ filename, replaceJobId = "" }) => {
+    const form = new FormData();
+    form.append("tool", "pdf-editor");
+    form.append("filename", filename);
+    form.append("retention", "keep");
+    form.append("historyStatus", "completed");
+    form.append("operations", JSON.stringify([{ kind: "blank", width: 300, height: 400, rotation: 0, images: [] }]));
+    if (replaceJobId) form.append("replaceJobId", replaceJobId);
+    const response = await fetch(url("/v1/jobs"), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" },
+      body: form,
+    });
+    assert.equal(response.status, 202);
+    return (await response.json()).jobId;
+  };
+
+  const waitForCompletion = async (jobId) => {
+    let completed;
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const statusResponse = await fetch(url(`/v1/jobs/${jobId}`), { headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" } });
+      completed = await statusResponse.json();
+      if (["completed", "failed"].includes(completed.status)) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.equal(completed.status, "completed", completed.error || completed.message);
+    return completed;
+  };
+
+  const firstJobId = await submitBlankPdf({ filename: "saved-original.pdf" });
+  await waitForCompletion(firstJobId);
+  const firstResultFiles = await fs.readdir(path.join(process.env.DATA_DIR, "Results"));
+  assert.ok(firstResultFiles.includes(`${firstJobId.slice(0, 8)}-saved-original.pdf`));
+
+  const replacementJobId = await submitBlankPdf({ filename: "renamed-export.pdf", replaceJobId: firstJobId });
+  await waitForCompletion(replacementJobId);
+  const resultsDirectory = path.join(process.env.DATA_DIR, "Results");
+  let resultFiles;
+  let history;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    resultFiles = await fs.readdir(resultsDirectory);
+    const historyResponse = await fetch(url("/v1/history?tool=pdf-editor"), { headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" } });
+    history = await historyResponse.json();
+    if (resultFiles.includes(`${firstJobId.slice(0, 8)}-renamed-export.pdf`) && !resultFiles.includes(`${firstJobId.slice(0, 8)}-saved-original.pdf`) && history.items.some((item) => item.id === replacementJobId) && !history.items.some((item) => item.id === firstJobId)) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.ok(resultFiles.includes(`${firstJobId.slice(0, 8)}-renamed-export.pdf`));
+  assert.equal(resultFiles.includes(`${firstJobId.slice(0, 8)}-saved-original.pdf`), false);
+  assert.ok(history.items.some((item) => item.id === replacementJobId));
+  assert.equal(history.items.some((item) => item.id === firstJobId), false);
+  assert.equal(history.items.find((item) => item.id === replacementJobId)?.historyStatus, "completed");
+
+  const deleted = await fetch(url(`/v1/history/${replacementJobId}`), { method: "DELETE", headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" } });
+  assert.equal(deleted.status, 200);
 });
 
 test("agent supports automatic browser sessions and ending one or all sessions", async () => {

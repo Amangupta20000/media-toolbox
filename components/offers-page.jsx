@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, CalendarClock, Check, Copy, Gift, Infinity, ShieldCheck, UserRoundCheck } from "lucide-react";
+import { ArrowRight, CalendarClock, Check, Copy, Gift, InfinityIcon, ShieldCheck, UserRoundCheck } from "lucide-react";
 import { FREE_ACCESS_CODE } from "../lib/free-access.js";
 import { PRODUCT_NAME } from "../lib/site-metadata.js";
 import { pushAnalyticsEvent } from "../lib/analytics.js";
+
 
 const OFFER_REDEMPTION_POLICIES = Object.freeze({
   unlimited: {
@@ -133,7 +134,7 @@ export function OffersPage() {
     <div className="page-heading offers-page-heading"><div><div className="section-kicker"><span className="kicker-line" /> Local agent offers</div><h1>Offers and activation codes</h1><p>Find current promotions for the {PRODUCT_NAME} Local agent. Every offer explains how long an activation lasts and whether its code can be redeemed unlimited times until expiry or only once per person.</p></div><div className="heading-note"><Gift size={16} /><span>{LOCAL_AGENT_OFFERS.length} offer listed</span></div></div>
     <section className="offers-intro" aria-label="How offers work"><div className="offers-intro-icon"><CalendarClock size={22} aria-hidden="true" /></div><div><h2>Built for clear promotions</h2><p>Codes are redeemed inside the Local agent workflow. Your files remain on your computer, and the offer page never asks for your files.</p></div></section>
     <section className="offers-list" aria-labelledby="current-offers-title"><div className="offers-section-heading"><div><div className="section-kicker"><span className="kicker-line" /> Current offers</div><h2 id="current-offers-title">Available Local agent access</h2></div></div>{LOCAL_AGENT_OFFERS.map((offer) => <OfferCard key={offer.id} offer={offer} />)}</section>
-    <section className="offer-policy-guide" aria-labelledby="offer-policy-title"><div className="section-kicker"><span className="kicker-line" /> Redemption policies</div><h2 id="offer-policy-title">What each offer limit means</h2><div className="offer-policy-grid"><article><span><Infinity size={19} aria-hidden="true" /></span><div><h3>Unlimited until expiry</h3><p>Use the code again whenever you need another activation before the launch or promotional window closes.</p></div></article><article><span><UserRoundCheck size={19} aria-hidden="true" /></span><div><h3>One redemption per person</h3><p>Use the code once for the stated promotional period. Future offers will show this restriction clearly.</p></div></article></div></section>
+    <section className="offer-policy-guide" aria-labelledby="offer-policy-title"><div className="section-kicker"><span className="kicker-line" /> Redemption policies</div><h2 id="offer-policy-title">What each offer limit means</h2><div className="offer-policy-grid"><article><span><InfinityIcon size={19} aria-hidden="true" /></span><div><h3>Unlimited until expiry</h3><p>Use the code again whenever you need another activation before the launch or promotional window closes.</p></div></article><article><span><UserRoundCheck size={19} aria-hidden="true" /></span><div><h3>One redemption per person</h3><p>Use the code once for the stated promotional period. Future offers will show this restriction clearly.</p></div></article></div></section>
     <section className="offers-future" aria-label="Future offers"><div><div className="section-kicker"><span className="kicker-line" /> More to come</div><h2>New Local agent offers will appear here</h2><p>When a new code or promotion is available, this page will show its access duration, redemption limit, and expiry before you copy it.</p></div><Link className="secondary-button" href="/local-agent">Set up Local agent <ArrowRight size={16} /></Link></section>
   </>;
 }

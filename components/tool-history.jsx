@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Archive, Download, Eye, FileText, Film, FolderOpen, Image as ImageIcon, Pencil, RefreshCw, Trash2, X } from "lucide-react";
 import { formatBytes } from "./file-dropzone.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
@@ -40,13 +40,6 @@ function historyDate(value) {
   return Number.isNaN(date.getTime()) ? "Unknown date" : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
-function formatDuration(value) {
-  const seconds = Math.round(Number(value) / 1000);
-  if (!Number.isFinite(seconds) || seconds <= 0) return "—";
-  if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
-}
-
 async function loadLocalHistory(tool) {
   try {
     const payload = await getLocalHistory(tool);
@@ -67,18 +60,22 @@ export function ToolHistory({ tool }) {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [deletingId, setDeletingId] = useState("");
+  const [deletingIds, setDeletingIds] = useState(() => new Set());
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [previewItem, setPreviewItem] = useState(null);
   const [openingResults, setOpeningResults] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [sizeFilter, setSizeFilter] = useState("all");
-  const [durationFilter, setDurationFilter] = useState("all");
   const [sortBy, setSortBy] = useState("newest");
+  const selectVisibleRef = useRef(null);
   const Icon = toolIcons[tool] || FileText;
 
   const loadHistory = async () => {
     setLoading(true);
     setMessage("");
+    setSelectedIds(new Set());
     const localResult = await loadLocalHistory(tool);
     setLocal(localResult);
     setLoading(false);
@@ -95,11 +92,9 @@ export function ToolHistory({ tool }) {
     const filtered = items.filter((item) => {
       const result = item.result || {};
       const bytes = Number(result.bytes || 0);
-      const duration = Number(result.durationMs || 0);
       const haystack = `${result.filename || ""} ${item.location || ""} ${item.storage || ""}`.toLowerCase();
       const sizeMatches = sizeFilter === "all" || (sizeFilter === "small" && bytes < 1024 * 1024) || (sizeFilter === "medium" && bytes >= 1024 * 1024 && bytes < 10 * 1024 * 1024) || (sizeFilter === "large" && bytes >= 10 * 1024 * 1024);
-      const durationMatches = durationFilter === "all" || (durationFilter === "short" && duration > 0 && duration < 60 * 1000) || (durationFilter === "medium" && duration >= 60 * 1000 && duration < 10 * 60 * 1000) || (durationFilter === "long" && duration >= 10 * 60 * 1000);
-      return (!search || haystack.includes(search)) && (statusFilter === "all" || item.status === statusFilter) && sizeMatches && durationMatches;
+      return (!search || haystack.includes(search)) && (statusFilter === "all" || (item.historyStatus || "completed") === statusFilter) && sizeMatches;
     });
     return filtered.sort((left, right) => {
       const leftResult = left.result || {};
@@ -107,26 +102,69 @@ export function ToolHistory({ tool }) {
       if (sortBy === "oldest") return Number(left.updatedAt || left.createdAt || 0) - Number(right.updatedAt || right.createdAt || 0);
       if (sortBy === "name") return String(leftResult.filename || "").localeCompare(String(rightResult.filename || ""));
       if (sortBy === "size") return Number(rightResult.bytes || 0) - Number(leftResult.bytes || 0);
-      if (sortBy === "duration") return Number(rightResult.durationMs || 0) - Number(leftResult.durationMs || 0);
       return Number(right.updatedAt || right.createdAt || 0) - Number(left.updatedAt || left.createdAt || 0);
     });
-  }, [items, query, statusFilter, sizeFilter, durationFilter, sortBy]);
+  }, [items, query, statusFilter, sizeFilter, sortBy]);
 
-  const removeItem = async (item) => {
-    const resultName = item.result?.filename || "this result";
-    if (!window.confirm(`Delete ${resultName} from this device?`)) return;
-    setDeletingId(item.id);
+  const selectedItems = items.filter((item) => selectedIds.has(item.id));
+  const allVisibleSelected = filteredItems.length > 0 && filteredItems.every((item) => selectedIds.has(item.id));
+  const someVisibleSelected = filteredItems.some((item) => selectedIds.has(item.id));
+
+  useEffect(() => {
+    if (selectVisibleRef.current) selectVisibleRef.current.indeterminate = someVisibleSelected && !allVisibleSelected;
+  }, [someVisibleSelected, allVisibleSelected]);
+
+  const toggleSelected = (id) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleVisibleSelection = () => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) filteredItems.forEach((item) => next.delete(item.id));
+      else filteredItems.forEach((item) => next.add(item.id));
+      return next;
+    });
+  };
+
+  const removeItems = async (itemsToRemove) => {
+    const targets = itemsToRemove.filter((item) => item.storage === "local" && item.id);
+    if (!targets.length || bulkDeleting) return;
+    const prompt = targets.length === 1
+      ? `Delete ${targets[0].result?.filename || "this result"} from this device?`
+      : `Delete ${targets.length} selected results from this device?`;
+    if (!window.confirm(prompt)) return;
+    setDeletingId(targets.length === 1 ? targets[0].id : "");
+    setDeletingIds(new Set(targets.map((item) => item.id)));
+    setBulkDeleting(true);
     setMessage("");
     try {
-      await deleteLocalHistory(item.id);
-      setLocal((current) => ({ ...current, items: current.items.filter((entry) => entry.id !== item.id) }));
-      setPreviewItem((current) => current?.id === item.id ? null : current);
+      const results = await Promise.allSettled(targets.map((item) => deleteLocalHistory(item.id)));
+      const deletedIds = new Set(targets.filter((_, index) => results[index].status === "fulfilled").map((item) => item.id));
+      const failed = results.filter((result) => result.status === "rejected");
+      setLocal((current) => ({ ...current, items: current.items.filter((entry) => !deletedIds.has(entry.id)) }));
+      setSelectedIds((current) => {
+        const next = new Set(current);
+        deletedIds.forEach((id) => next.delete(id));
+        return next;
+      });
+      setPreviewItem((current) => current && deletedIds.has(current.id) ? null : current);
+      if (failed.length) setMessage(`${deletedIds.size} result${deletedIds.size === 1 ? "" : "s"} deleted. ${failed.length} could not be deleted.`);
+      else setMessage(`${deletedIds.size} result${deletedIds.size === 1 ? "" : "s"} deleted.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The saved result could not be deleted.");
     } finally {
       setDeletingId("");
+      setDeletingIds(new Set());
+      setBulkDeleting(false);
     }
   };
+
+  const removeItem = (item) => removeItems([item]);
 
   const localReady = local.status === "ready";
 
@@ -153,27 +191,28 @@ export function ToolHistory({ tool }) {
       setMessage("This saved result is no longer available for editing.");
       return;
     }
-    rememberHistoryEdit({ tool, downloadUrl: result.downloadUrl, filename: result.filename, mime: result.mime });
+    rememberHistoryEdit({ tool, downloadUrl: result.downloadUrl, filename: result.filename, mime: result.mime, retainedJobId: item.id });
     window.location.assign(tool === "pdf-editor" ? "/pdf-editor" : tool === "pdf-text-editor" ? "/pdf-text-editor" : tool === "pdf-compressor" ? "/pdf-compressor" : tool === "video-repair" ? "/video-repair" : tool === "svg-to-png" ? "/svg-to-png" : "/image-converter");
   };
 
   return <section className="history-panel" aria-labelledby={`${tool}-history-title`}>
     <div className="history-panel-heading">
       <div><span className="section-kicker"><span className="kicker-line" /> Saved results</span><h2 id={`${tool}-history-title`}><Icon size={21} /> {toolNames[tool] || "Tool"} history</h2><p>Download or remove results kept by the Local agent.</p></div>
-      <div className="history-heading-actions">{localReady && <button className="secondary-button" type="button" onClick={openResultsFolder} disabled={openingResults}><FolderOpen size={16} /> {openingResults ? "Opening…" : "Open Results folder"}</button>}<button className="secondary-button" type="button" onClick={loadHistory} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={16} /> Refresh</button></div>
+      <div className="history-heading-actions">{localReady && <button className="secondary-button" type="button" onClick={openResultsFolder} disabled={openingResults || bulkDeleting}><FolderOpen size={16} /> {openingResults ? "Opening…" : "Open Results folder"}</button>}{selectedItems.length > 0 && <button className="secondary-button history-bulk-delete" type="button" onClick={() => removeItems(selectedItems)} disabled={bulkDeleting}><Trash2 size={16} /> {bulkDeleting ? "Deleting…" : `Delete selected (${selectedItems.length})`}</button>}<button className="secondary-button" type="button" onClick={loadHistory} disabled={loading || bulkDeleting}><RefreshCw className={loading ? "spin" : ""} size={16} /> Refresh</button></div>
     </div>
     {loading && <div className="history-empty"><RefreshCw className="spin" size={24} /><strong>Loading history</strong><span>Checking saved results on this device.</span></div>}
     {!loading && !localReady && <div className="history-empty"><AlertTriangle size={22} /><strong>History is unavailable</strong><span>{local.message || "Authorize the Local agent to view saved results."}</span><Link className="secondary-button" href="/local-agent">Open Local agent setup</Link></div>}
     {!loading && local.status !== "ready" && <div className="history-source-note"><strong>{local.status === "unsupported" ? "Local history unavailable" : "Local agent"}</strong><span>{local.message || "Pair the Local agent to view files saved on this device."}</span><Link href="/local-agent">Open setup</Link></div>}
     {!loading && localReady && !items.length && <div className="history-empty"><Icon size={25} /><strong>No saved results yet</strong><span>Local results appear only when “Keep final result on this device” is selected.</span></div>}
-    {!loading && localReady && items.length > 0 && <div className="history-filters" aria-label="History filters"><label>Search<input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filename or location" /></label><label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="completed">Completed</option></select></label><label>File size<select value={sizeFilter} onChange={(event) => setSizeFilter(event.target.value)}><option value="all">Any size</option><option value="small">Under 1 MB</option><option value="medium">1–10 MB</option><option value="large">10 MB or more</option></select></label><label>Duration<select value={durationFilter} onChange={(event) => setDurationFilter(event.target.value)}><option value="all">Any duration</option><option value="short">Under 1 minute</option><option value="medium">1–10 minutes</option><option value="long">10 minutes or more</option></select></label><label>Sort<select value={sortBy} onChange={(event) => setSortBy(event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name</option><option value="size">Largest file</option><option value="duration">Longest duration</option></select></label></div>}
+    {!loading && localReady && items.length > 0 && <div className="history-filters" aria-label="History filters"><label>Search<input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filename or location" /></label><label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="saved">Saved</option><option value="completed">Completed</option></select></label><label>File size<select value={sizeFilter} onChange={(event) => setSizeFilter(event.target.value)}><option value="all">Any size</option><option value="small">Under 1 MB</option><option value="medium">1–10 MB</option><option value="large">10 MB or more</option></select></label><label>Sort<select value={sortBy} onChange={(event) => setSortBy(event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name</option><option value="size">Largest file</option></select></label></div>}
+    {!loading && localReady && filteredItems.length > 0 && <div className="history-selection-bar"><label><input ref={selectVisibleRef} type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleSelection} disabled={bulkDeleting} aria-label="Select visible history results" /> <span>Select visible</span></label><span>{selectedIds.size ? `${selectedIds.size} selected` : "Select results to delete them together."}</span></div>}
     {!loading && localReady && items.length > 0 && !filteredItems.length && <div className="history-empty history-filter-empty"><Icon size={25} /><strong>No matching results</strong><span>Change the search or filters to see saved results.</span></div>}
     {!loading && filteredItems.length > 0 && <div className="history-list">{filteredItems.map((item) => {
       const result = item.result || {};
       return <article className="history-item" key={`${item.storage}-${item.id}`}>
-        <div className="history-item-icon"><Icon size={19} /></div>
-        <div className="history-item-copy"><strong title={result.filename}>{result.filename || "Saved result"}</strong><span>{historyDate(item.updatedAt || item.createdAt)} · {formatBytes(result.bytes || 0)} · {item.storage === "local" ? "Local" : "Saved result"}</span><small><span className="history-status-badge">{item.status || "completed"}</span>{tool === "video-repair" && ` · Duration ${formatDuration(result.durationMs)}`} · {item.location || (item.storage === "local" ? "Local agent Results folder" : "Temporary processing storage")}</small></div>
-        <div className="history-item-actions"><button className="icon-button history-preview-button" type="button" onClick={() => setPreviewItem(item)} aria-label={`Preview ${result.filename || "saved result"}`} title="Preview"><Eye size={17} /></button><a className="secondary-button" href={result.downloadUrl} download={result.filename}><Download size={16} /> Download</a><button className="icon-button history-delete-button" type="button" onClick={() => removeItem(item)} disabled={deletingId === item.id} aria-label={`Delete ${result.filename || "saved result"}`} title={item.storage === "local" ? "Delete from device" : "Delete result"}><Trash2 size={17} /></button></div>
+        <label className="history-item-select"><input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelected(item.id)} disabled={bulkDeleting} aria-label={`Select ${result.filename || "saved result"}`} /></label><div className="history-item-icon"><Icon size={19} /></div>
+        <div className="history-item-copy"><strong title={result.filename}>{result.filename || "Saved result"}</strong><span>{historyDate(item.updatedAt || item.createdAt)} · {formatBytes(result.bytes || 0)} · {item.storage === "local" ? "Local" : "Saved result"}</span><small><span className="history-status-badge">{(item.historyStatus || "completed") === "saved" ? "Saved" : "Completed"}</span> · {item.location || (item.storage === "local" ? "Local agent Results folder" : "Temporary processing storage")}</small></div>
+        <div className="history-item-actions">{tool !== "pdf-compressor" && <button className="icon-button history-edit-button" type="button" onClick={() => editItem(item)} disabled={bulkDeleting} aria-label={`Edit ${result.filename || "saved result"}`} title="Edit file"><Pencil size={17} /></button>}<button className="icon-button history-preview-button" type="button" onClick={() => setPreviewItem(item)} disabled={bulkDeleting} aria-label={`Preview ${result.filename || "saved result"}`} title="Preview"><Eye size={17} /></button><a className="secondary-button" href={result.downloadUrl} download={result.filename} aria-disabled={bulkDeleting} onClick={(event) => { if (bulkDeleting) event.preventDefault(); }}><Download size={16} /> Download</a><button className="icon-button history-delete-button" type="button" onClick={() => removeItem(item)} disabled={deletingIds.has(item.id)} aria-label={`Delete ${result.filename || "saved result"}`} title={item.storage === "local" ? "Delete from device" : "Delete result"}><Trash2 size={17} /></button></div>
       </article>;
     })}</div>}
     {!loading && <p className="history-note">Delete removes the selected result from its current storage. If the file is missing or the Local agent is unavailable, the history listing stays.</p>}
