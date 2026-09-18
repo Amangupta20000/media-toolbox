@@ -292,7 +292,7 @@ async function inspectPage(pdfPage, pageIndex, pdfLibrary, sourceHash) {
 
 const PDF_TEXT_THUMBNAIL_QUALITY = 1.25;
 
-function PdfTextThumbnail({ model, onSelect }) {
+function PdfTextThumbnail({ model, onSelect, onKeyDown, elementRef }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     let renderTask;
@@ -309,11 +309,20 @@ function PdfTextThumbnail({ model, onSelect }) {
     renderTask.promise.catch(() => undefined);
     return () => renderTask?.cancel();
   }, [model]);
-  return <button className="pdf-text-thumbnail" type="button" onClick={onSelect} aria-label={`Select ${model.pageLabel}`}><canvas ref={canvasRef} /><span>{model.pageLabel}</span></button>;
+  return <button ref={elementRef} className="pdf-text-thumbnail" type="button" onClick={onSelect} onKeyDown={onKeyDown} aria-label={`Select ${model.pageLabel}`}><canvas ref={canvasRef} /><span>{model.pageLabel}</span></button>;
 }
 
 const MAX_VIRTUAL_ITEMS = 50;
 const VIRTUAL_OVERSCAN = 3;
+const PDF_TEXT_THUMBNAIL_SLOT_EXTRA = 42;
+
+function estimatePdfTextThumbnailSlot(model, availableWidth) {
+  const viewport = model?.page?.getViewport?.({ scale: 1 });
+  if (!viewport?.width || !viewport?.height) return 145;
+  const canvasWidth = Math.max(1, Number(availableWidth) - 16);
+  const canvasHeight = Math.max(80, canvasWidth * viewport.height / viewport.width);
+  return Math.ceil(canvasHeight + PDF_TEXT_THUMBNAIL_SLOT_EXTRA);
+}
 
 function useResponsiveVirtualAxis() {
   const [horizontal, setHorizontal] = useState(false);
@@ -329,7 +338,7 @@ function useResponsiveVirtualAxis() {
 
 function useVirtualWindow(containerRef, count, itemSize, axis = "vertical") {
   const horizontal = axis === "horizontal";
-  const [metrics, setMetrics] = useState({ offset: 0, viewport: 760 });
+  const [metrics, setMetrics] = useState({ offset: 0, viewport: 760, width: 240 });
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return undefined;
@@ -340,7 +349,8 @@ function useVirtualWindow(containerRef, count, itemSize, axis = "vertical") {
         frame = 0;
         const viewport = horizontal ? container.clientWidth : container.clientHeight;
         const offset = horizontal ? container.scrollLeft : container.scrollTop;
-        setMetrics({ offset, viewport: Math.max(1, viewport) });
+        const next = { offset, viewport: Math.max(1, viewport), width: Math.max(1, container.clientWidth) };
+        setMetrics((previous) => previous.offset === next.offset && previous.viewport === next.viewport && previous.width === next.width ? previous : next);
       });
     };
     update();
@@ -354,10 +364,39 @@ function useVirtualWindow(containerRef, count, itemSize, axis = "vertical") {
     };
   }, [containerRef, count, horizontal, itemSize]);
 
-  const visibleCount = Math.max(1, Math.ceil(metrics.viewport / Math.max(1, itemSize)));
-  const start = Math.max(0, Math.floor(metrics.offset / Math.max(1, itemSize)) - VIRTUAL_OVERSCAN);
-  const end = Math.min(count, start + Math.min(MAX_VIRTUAL_ITEMS, visibleCount + VIRTUAL_OVERSCAN * 2));
-  return { horizontal, start, end, totalSize: count * itemSize };
+  const sizes = useMemo(() => Array.from({ length: count }, (_, index) => {
+    const value = typeof itemSize === "function" ? itemSize(index, metrics.width) : itemSize;
+    return Math.max(1, Number(value) || 1);
+  }), [count, itemSize, metrics.width]);
+  const offsets = useMemo(() => {
+    const next = [];
+    let total = 0;
+    for (const size of sizes) {
+      next.push(total);
+      total += size;
+    }
+    return { values: next, total };
+  }, [sizes]);
+  const indexAtOffset = (value) => {
+    if (!sizes.length) return 0;
+    let low = 0;
+    let high = sizes.length - 1;
+    const target = Math.max(0, Number(value) || 0);
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const start = offsets.values[middle];
+      const end = start + sizes[middle];
+      if (target < start) high = middle - 1;
+      else if (target >= end) low = middle + 1;
+      else return middle;
+    }
+    return Math.max(0, Math.min(sizes.length - 1, low));
+  };
+  const firstVisible = indexAtOffset(metrics.offset);
+  const lastVisible = indexAtOffset(metrics.offset + metrics.viewport);
+  const start = Math.max(0, firstVisible - VIRTUAL_OVERSCAN);
+  const end = Math.min(count, Math.min(start + MAX_VIRTUAL_ITEMS, Math.max(start + 1, lastVisible + VIRTUAL_OVERSCAN + 1)));
+  return { horizontal, start, end, sizes, offsets: offsets.values, totalSize: offsets.total };
 }
 
 function useVariablePreviewWindow(containerRef, pages, previewZoom = 1, gap = 17) {
@@ -950,9 +989,23 @@ const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview(
 
 function VirtualizedPdfTextRail({ pages, onSelect }) {
   const scrollRef = useRef(null);
+  const thumbnailRefs = useRef(new Map());
   const horizontal = useResponsiveVirtualAxis();
-  const itemSize = horizontal ? 145 : 235;
+  const itemSize = useCallback((index, availableWidth) => horizontal ? 145 : estimatePdfTextThumbnailSlot(pages[index], availableWidth), [horizontal, pages]);
   const windowed = useVirtualWindow(scrollRef, pages.length, itemSize, horizontal ? "horizontal" : "vertical");
+  const handleThumbnailKeyDown = (event, index) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const nextIndex = index + (event.key === "ArrowUp" ? -1 : 1);
+    if (nextIndex < 0 || nextIndex >= pages.length) return;
+    onSelect(nextIndex);
+    window.requestAnimationFrame(() => {
+      const target = thumbnailRefs.current.get(nextIndex);
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+  };
   const contentStyle = horizontal
     ? { width: `${windowed.totalSize}px`, height: "100%" }
     : { width: "100%", height: `${windowed.totalSize}px` };
@@ -963,9 +1016,9 @@ function VirtualizedPdfTextRail({ pages, onSelect }) {
         {pages.slice(windowed.start, windowed.end).map((model, offset) => {
           const index = windowed.start + offset;
           const itemStyle = horizontal
-            ? { left: `${index * itemSize}px`, top: 0, width: `${itemSize}px`, height: "100%" }
-            : { left: 0, top: `${index * itemSize}px`, width: "100%", height: `${itemSize}px` };
-          return <div key={model.pageIndex} className="pdf-text-rail-virtual-item" style={itemStyle}><PdfTextThumbnail model={model} onSelect={() => onSelect(index)} /></div>;
+            ? { left: `${windowed.offsets[index] || 0}px`, top: 0, width: `${windowed.sizes[index]}px`, height: "100%" }
+            : { left: 0, top: `${windowed.offsets[index] || 0}px`, width: "100%", height: `${windowed.sizes[index]}px` };
+          return <div key={model.pageIndex} className="pdf-text-rail-virtual-item" style={itemStyle}><PdfTextThumbnail model={model} elementRef={(element) => { if (element) thumbnailRefs.current.set(index, element); else thumbnailRefs.current.delete(index); }} onSelect={() => onSelect(index)} onKeyDown={(event) => handleThumbnailKeyDown(event, index)} /></div>;
         })}
       </div>
     </div> : <div className="pdf-text-rail-empty">Thumbnails appear here.</div>}

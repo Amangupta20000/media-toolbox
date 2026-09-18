@@ -686,6 +686,7 @@ export function PdfEditor() {
   const pageElementRefs = useRef(new Map());
   const previewScrollRef = useRef(null);
   const previewElementRefs = useRef(new Map());
+  const keyboardThumbnailTargetRef = useRef(null);
   const dropAnimationTimerRef = useRef(null);
   const dragScrollFrameRef = useRef(null);
   const dragPointerRef = useRef({ x: 0, y: 0, forceBottom: false, forceRight: false, valid: false });
@@ -1505,7 +1506,7 @@ export function PdfEditor() {
   };
 
   const renderPageList = () => {
-    return pages.map((page, index) => <PdfPageThumbnail key={page.id} page={page} index={index} elementRef={(element) => { if (element) pageElementRefs.current.set(page.id, element); else pageElementRefs.current.delete(page.id); }} thumbnailRootRef={pageListRef} pdfDocument={page.kind === "source" ? documentsRef.current[page.pdfIndex] : null} nativeDraggable={!mobileLayout} onThumbnailError={() => setPreviewError("Some thumbnails could not be rendered, but the pages remain available in the full preview.")} selected={page.id === selectedPage?.id} draggedId={draggedId} dropTargetId={dropTargetId} dropPosition={dropPosition} recentlyDroppedId={recentlyDroppedId} onSelect={() => { if (suppressPageClickRef.current) { suppressPageClickRef.current = false; return; } selectPage(page.id); }} onDelete={() => deletePage(page.id)} onDragStart={(event) => startDraggingPage(page.id, event)} onDrag={handlePageDrag} onDragEnd={resetDragState} onDragOver={(event) => handlePageDragOver(event, page.id)} onDrop={(event) => handlePageDrop(event, page.id)} onPointerDown={(event) => handlePagePointerDown(event, page.id)} onPointerMove={handlePagePointerMove} onPointerUp={finishPagePointerDrag} onPointerCancel={(event) => finishPagePointerDrag(event, true)} />);
+    return pages.map((page, index) => <PdfPageThumbnail key={page.id} page={page} index={index} elementRef={(element) => { if (element) pageElementRefs.current.set(page.id, element); else pageElementRefs.current.delete(page.id); }} thumbnailRootRef={pageListRef} pdfDocument={page.kind === "source" ? documentsRef.current[page.pdfIndex] : null} nativeDraggable={!mobileLayout} onThumbnailError={() => setPreviewError("Some thumbnails could not be rendered, but the pages remain available in the full preview.")} selected={page.id === selectedPage?.id} draggedId={draggedId} dropTargetId={dropTargetId} dropPosition={dropPosition} recentlyDroppedId={recentlyDroppedId} onSelect={() => { if (suppressPageClickRef.current) { suppressPageClickRef.current = false; return; } selectPage(page.id); }} onKeyDown={(event) => handleThumbnailKeyDown(event, page.id)} onDelete={() => deletePage(page.id)} onDragStart={(event) => startDraggingPage(page.id, event)} onDrag={handlePageDrag} onDragEnd={resetDragState} onDragOver={(event) => handlePageDragOver(event, page.id)} onDrop={(event) => handlePageDrop(event, page.id)} onPointerDown={(event) => handlePagePointerDown(event, page.id)} onPointerMove={handlePagePointerMove} onPointerUp={finishPagePointerDrag} onPointerCancel={(event) => finishPagePointerDrag(event, true)} />);
   };
 
   const scrollThumbnailIntoView = (pageId) => {
@@ -1532,10 +1533,30 @@ export function PdfEditor() {
     container.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
   };
 
-  const selectPage = (pageId) => {
+  const selectPage = (pageId, { scrollThumbnail = true } = {}) => {
     setSelectedId(pageId);
-    scrollThumbnailIntoView(pageId);
+    if (scrollThumbnail) scrollThumbnailIntoView(pageId);
     window.requestAnimationFrame(() => scrollPreviewIntoView(pageId));
+  };
+
+  const handleThumbnailKeyDown = (event, pageId) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const currentIndex = pagesRef.current.findIndex((page) => page.id === pageId);
+    const nextIndex = currentIndex + (event.key === "ArrowUp" ? -1 : 1);
+    const nextPage = pagesRef.current[nextIndex];
+    if (!nextPage) return;
+    keyboardThumbnailTargetRef.current = nextPage.id;
+    window.setTimeout(() => {
+      if (keyboardThumbnailTargetRef.current === nextPage.id) keyboardThumbnailTargetRef.current = null;
+    }, 1000);
+    selectPage(nextPage.id, { scrollThumbnail: false });
+    window.requestAnimationFrame(() => {
+      const target = pageElementRefs.current.get(nextPage.id);
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
   };
 
   const handlePreviewScroll = () => {
@@ -1556,6 +1577,18 @@ export function PdfEditor() {
         bestPage = page;
         bestDistance = distance;
       }
+    }
+    const keyboardTargetId = keyboardThumbnailTargetRef.current;
+    if (keyboardTargetId) {
+      if (bestPage?.id === keyboardTargetId) {
+        if (bestPage.id !== selectedId) setSelectedId(bestPage.id);
+        window.requestAnimationFrame(() => {
+          if (keyboardThumbnailTargetRef.current !== keyboardTargetId) return;
+          pageElementRefs.current.get(keyboardTargetId)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+          keyboardThumbnailTargetRef.current = null;
+        });
+      }
+      return;
     }
     if (bestPage && bestPage.id !== selectedId) {
       setSelectedId(bestPage.id);
@@ -1937,8 +1970,8 @@ function PdfInsertPageButton({ pageNumber, onClick }) {
   return <div className="pdf-insert-page"><span className="pdf-insert-page-line" /><button className="pdf-insert-page-button" type="button" onClick={onClick} aria-label={`Add a blank page after page ${pageNumber}`} title={`Add a blank page after page ${pageNumber}`}><Plus size={17} /><span>Add page</span></button><span className="pdf-insert-page-line" /></div>;
 }
 
-function PdfPageThumbnail({ page, index, elementRef, thumbnailRootRef, pdfDocument, nativeDraggable = true, onThumbnailError, selected, draggedId, dropTargetId, dropPosition, recentlyDroppedId, onSelect, onDelete, onDragStart, onDrag, onDragEnd, onDragOver, onDrop, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }) {
-  return <>{dropTargetId === page.id && dropPosition === "before" && <div className="pdf-drop-gap" aria-hidden="true">Drop here</div>}<div ref={elementRef} className={`pdf-page-thumbnail ${selected ? "selected" : ""} ${draggedId === page.id ? "dragging" : ""} ${dropTargetId === page.id ? "drop-target" : ""} ${recentlyDroppedId === page.id && draggedId !== page.id ? "just-dropped" : ""}`} draggable={nativeDraggable} onClick={onSelect} onDragStart={onDragStart} onDrag={onDrag} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}>
+function PdfPageThumbnail({ page, index, elementRef, thumbnailRootRef, pdfDocument, nativeDraggable = true, onThumbnailError, selected, draggedId, dropTargetId, dropPosition, recentlyDroppedId, onSelect, onKeyDown, onDelete, onDragStart, onDrag, onDragEnd, onDragOver, onDrop, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }) {
+  return <>{dropTargetId === page.id && dropPosition === "before" && <div className="pdf-drop-gap" aria-hidden="true">Drop here</div>}<div ref={elementRef} className={`pdf-page-thumbnail ${selected ? "selected" : ""} ${draggedId === page.id ? "dragging" : ""} ${dropTargetId === page.id ? "drop-target" : ""} ${recentlyDroppedId === page.id && draggedId !== page.id ? "just-dropped" : ""}`} draggable={nativeDraggable} tabIndex={0} aria-label={`Select page ${index + 1}`} onClick={(event) => { event.currentTarget.focus(); onSelect?.(); }} onKeyDown={onKeyDown} onDragStart={onDragStart} onDrag={onDrag} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}>
     <div className="thumbnail-frame">{page.kind === "source" || page.kind === "raster" ? <div className="thumbnail-page-surface" style={{ "--page-ratio": pageDisplayRatio(page) }}><PdfThumbnailImage page={page} index={index} pdfDocument={pdfDocument} rootRef={thumbnailRootRef} onError={onThumbnailError} /><ThumbnailImageOverlayLayer page={page} /><ThumbnailTextBoxOverlayLayer page={page} /></div> : <BlankPageMiniature page={page} />}</div>
     <div className="thumbnail-meta"><span className="thumbnail-drag-handle" aria-label={`Drag page ${index + 1}`} title="Drag to reorder"><GripVertical className="thumbnail-grip" size={14} /></span><span><strong>Final {index + 1}</strong>{page.kind === "source" || page.kind === "raster" ? <> · <span className="thumbnail-original-page">Original {page.pageNumber}</span> · {page.sourceName}</> : " · New blank page"}</span><button type="button" aria-label={`Delete page ${index + 1}`} title="Delete page" onClick={(event) => { event.stopPropagation(); onDelete(); }}><X size={14} /></button></div>
   </div>{dropTargetId === page.id && dropPosition === "after" && <div className="pdf-drop-gap" aria-hidden="true">Drop here</div>}</>;

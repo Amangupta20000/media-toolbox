@@ -71,6 +71,16 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /className="thumbnail-page-image"[^>]*draggable="false"/);
   assert.match(shell, /className="thumbnail-image-overlay"[\s\S]*?draggable="false"/);
   assert.match(shell, /function PdfPageThumbnail\([\s\S]*?onDrag, onDragEnd/);
+  assert.match(shell, /const handleThumbnailKeyDown = \(event, pageId\) =>/);
+  assert.match(shell, /onKeyDown=\{\(event\) => handleThumbnailKeyDown\(event, page\.id\)\}/);
+  assert.match(shell, /tabIndex=\{0\} aria-label=\{`Select page \$\{index \+ 1\}`\}/);
+  assert.match(shell, /event\.key !== "ArrowUp" && event\.key !== "ArrowDown"/);
+  assert.match(shell, /event\.preventDefault\(\);\s*event\.stopPropagation\(\);/);
+  assert.match(shell, /selectPage\(nextPage\.id, \{ scrollThumbnail: false \}\)/);
+  assert.match(shell, /target\?\.scrollIntoView\(\{ block: "nearest", inline: "nearest" \}\)/);
+  assert.match(shell, /const keyboardThumbnailTargetRef = useRef\(null\)/);
+  assert.match(shell, /const keyboardTargetId = keyboardThumbnailTargetRef\.current/);
+  assert.match(shell, /if \(keyboardTargetId\) \{/);
   assert.match(shell, /emits drag events, so keep the auto-scroll pointer position fresh here/);
   assert.match(shell, /Keep the loop alive while a drag is active/);
   assert.match(shell, /pointerPageDragRef\.current\?\.active\) updatePointerPageDrop/);
