@@ -1552,14 +1552,15 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .agent-guide-diagram { min-width: 0; margin: 0; padding: 14px 14px 11px; background: rgba(255, 255, 255, .68); border: 1px solid rgba(93, 155, 166, .28); border-radius: 15px; overflow: hidden; }
 .agent-guide-diagram-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 0 2px 8px; color: #2d7180; font-size: 10px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
 .agent-guide-diagram-heading small { color: #8097a4; font-size: 9px; font-weight: 650; letter-spacing: 0; text-transform: none; }
-.agent-guide-diagram svg { display: block; width: 100%; height: auto; }
+.agent-guide-diagram > svg { display: block; width: 100%; height: auto; }
 .agent-guide-route { fill: none; stroke-width: 4; stroke-linecap: round; stroke-dasharray: 12 8; animation: agent-guide-route 2.4s linear infinite; }
 .agent-guide-flow-dot { fill: #39b9ba; filter: drop-shadow(0 0 5px rgba(57, 185, 186, .55)); animation: agent-guide-flow 3.6s ease-in-out infinite; }
 .agent-install-video { min-width: 0; max-width: 100%; overflow: hidden; contain: paint; }
-.agent-install-video-stage { position: relative; width: 100%; max-width: 100%; min-height: 205px; overflow: hidden; contain: paint; }
+.agent-install-video-stage { position: relative; width: 100%; max-width: 100%; height: clamp(205px, 24vw, 255px); min-height: 0; overflow: hidden; contain: paint; }
 .agent-install-frame { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 7px; max-width: 100%; overflow: hidden; opacity: 0; transform: translateY(8px) scale(.985); pointer-events: none; animation: agent-install-frame 16s ease-in-out infinite both; }
 .agent-install-frame-kicker { color: #2d7180; font-size: 9px; font-weight: 850; letter-spacing: .08em; line-height: 1.2; text-transform: uppercase; }
 .agent-install-window { position: relative; min-width: 0; max-width: 100%; min-height: 0; box-sizing: border-box; flex: 1 1 auto; overflow: hidden; padding: 11px; color: #3d6072; background: #f7fbfc; border: 1px solid #c7e0e2; border-radius: 11px; }
+.agent-install-window svg { display: block; width: auto; max-width: 100%; height: auto; flex: 0 0 auto; }
 .agent-install-window-bar { display: flex; align-items: center; gap: 4px; height: 14px; color: #8095a3; font-size: 8px; }
 .agent-install-window-bar > span { width: 6px; height: 6px; border-radius: 50%; background: #c1d7dc; }
 .agent-install-window-bar small { margin-left: auto; font-size: 8px; font-weight: 700; }
@@ -1585,6 +1586,20 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .agent-install-confirm { position: absolute; right: 16px; bottom: 12px; display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 10px; background: #fff; border: 1px solid #c7e0e2; border-radius: 7px; box-shadow: 0 5px 13px rgba(37, 62, 88, .14); animation: agent-install-confirm 4s ease-in-out infinite; }
 .agent-install-confirm strong { color: #3d6072; font-size: 8px; }
 .agent-install-confirm button { min-height: 21px; padding: 0 8px; color: #fff; background: #198f94; border: 0; border-radius: 5px; font: inherit; font-size: 8px; font-weight: 800; }
+.agent-install-setup-body { display: grid; align-content: center; justify-items: center; gap: 6px; height: calc(100% - 14px); text-align: center; }
+.agent-install-setup-body > svg { color: #168b8e; }
+.agent-install-progress { width: min(180px, 78%); height: 6px; margin-top: 4px; overflow: hidden; background: #dcebed; border-radius: 999px; }
+.agent-install-progress span { display: block; width: 72%; height: 100%; background: #39b9ba; border-radius: inherit; animation: agent-install-progress-fill 4s ease-in-out infinite; }
+.agent-install-launch-body { display: grid; align-content: center; justify-items: center; gap: 15px; height: calc(100% - 14px); text-align: center; }
+.agent-install-launch-app { display: flex; align-items: center; gap: 9px; min-width: 0; text-align: left; }
+.agent-install-launch-app > svg { flex: 0 0 auto; color: #168b8e; }
+.agent-install-launch-app > div { display: grid; gap: 3px; min-width: 0; }
+.agent-install-terminal-body { display: grid; align-content: center; gap: 9px; height: calc(100% - 14px); min-width: 0; padding: 10px; overflow: hidden; color: #3d6072; font: 700 9px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.agent-install-terminal-body > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-install-terminal-body > strong { color: #168b8e; font: inherit; }
+.agent-install-terminal-body > small { color: #8095a3; font-size: 8px; font-weight: 650; line-height: 1.35; }
+.agent-install-terminal-status { display: flex; align-items: center; gap: 6px; min-width: 0; color: #168b8e; }
+.agent-install-terminal-status strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-install-browser-bar { display: flex; align-items: center; gap: 6px; height: 25px; padding: 0 8px; color: #718b9a; background: #eef7f8; border-radius: 6px; font-size: 8px; }
 .agent-install-browser-bar svg { flex: 0 0 auto; color: #168b8e; }
 .agent-install-browser-bar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1650,6 +1665,7 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 @keyframes agent-install-drag { 0%, 12% { transform: translateX(-122px); opacity: 0; } 22% { opacity: 1; } 64% { transform: translateX(122px); opacity: 1; } 76%, 100% { transform: translateX(122px); opacity: 0; } }
 @keyframes agent-install-confirm { 0%, 38% { opacity: 0; transform: translateY(6px) scale(.96); } 46%, 74% { opacity: 1; transform: translateY(0) scale(1); } 82%, 100% { opacity: 0; transform: translateY(-3px) scale(1.01); } }
 @keyframes agent-install-progress-step { 0%, 100% { color: #8095a3; background: #eef7f8; border-color: #d5e7e9; opacity: .5; } 6%, 24% { color: #fff; background: #198f94; border-color: #198f94; opacity: 1; } 30% { opacity: .5; } }
+@keyframes agent-install-progress-fill { 0%, 18% { width: 16%; } 70%, 100% { width: 84%; } }
 @keyframes topbar-setup-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(83,184,181,.24); } 50% { box-shadow: 0 0 0 4px rgba(83,184,181,.12); } }
 @keyframes topbar-setup-ring { 0% { opacity: .65; transform: scale(.98); } 75%, 100% { opacity: 0; transform: scale(1.08); } }
 @keyframes topbar-setup-arrow { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(3px); } }
@@ -1663,10 +1679,16 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .agent-install-window-bar { color: #9aafbd; }
 [data-theme="dark"] .agent-install-window-bar > span { background: #486777; }
 [data-theme="dark"] .agent-install-dialog-body > svg, [data-theme="dark"] .agent-install-file-card svg, [data-theme="dark"] .agent-install-folder-card svg, [data-theme="dark"] .agent-install-settings-side { color: #8fe0d8; }
+[data-theme="dark"] .agent-install-setup-body > svg, [data-theme="dark"] .agent-install-launch-app > svg { color: #8fe0d8; }
+[data-theme="dark"] .agent-install-progress { background: #294e5b; }
+[data-theme="dark"] .agent-install-progress span { background: #55bfc0; }
 [data-theme="dark"] .agent-install-dialog-body strong, [data-theme="dark"] .agent-install-connect-heading strong, [data-theme="dark"] .agent-install-settings-main > strong, [data-theme="dark"] .agent-install-file-card strong, [data-theme="dark"] .agent-install-folder-card strong, [data-theme="dark"] .agent-install-settings-side strong { color: #dcebf2; }
 [data-theme="dark"] .agent-install-dialog-body small, [data-theme="dark"] .agent-install-connect-heading small, [data-theme="dark"] .agent-install-settings-main > small, [data-theme="dark"] .agent-install-file-card small, [data-theme="dark"] .agent-install-folder-card small, [data-theme="dark"] .agent-install-window-hint { color: #9aafbd; }
 [data-theme="dark"] .agent-install-file-card, [data-theme="dark"] .agent-install-folder-card, [data-theme="dark"] .agent-install-settings-side, [data-theme="dark"] .agent-install-settings-main, [data-theme="dark"] .agent-install-browser-bar, [data-theme="dark"] .agent-install-video-progress span { background: #102230; border-color: #2f5663; }
 [data-theme="dark"] .agent-install-drag-arrow { color: #8fe0d8; }
+[data-theme="dark"] .agent-install-terminal-body { color: #dcebf2; }
+[data-theme="dark"] .agent-install-terminal-body > strong, [data-theme="dark"] .agent-install-terminal-status { color: #8fe0d8; }
+[data-theme="dark"] .agent-install-terminal-body > small { color: #9aafbd; }
 [data-theme="dark"] .agent-install-drag-ghost { color: #dcebf2; background: #1b4e54; border-color: #55bfc0; }
 [data-theme="dark"] .agent-install-confirm { background: #17303d; border-color: #2f5663; }
 [data-theme="dark"] .agent-install-confirm strong { color: #dcebf2; }

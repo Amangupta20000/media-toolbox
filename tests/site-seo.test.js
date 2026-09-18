@@ -78,6 +78,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(footer, /href="\/terms" title="Terms and Conditions"/);
   assert.match(footer, /href="\/contact" title="Contact Us"/);
   assert.match(footer, /href="\/offers" title="Local agent offers">Offers<\/Link>/);
+  assert.match(footer, /href="\/local-agent" title="Check Local agent connection">Check Local agent connection<\/Link>/);
   assert.match(footer, /href="\/sitemap\.xml" title="Sitemap"/);
   assert.match(footer, /href="\/privacy"/);
   assert.match(footer, /href="\/terms"/);
@@ -143,9 +144,15 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(setupGuide, /Open Anyway/);
   assert.match(setupGuide, /agent-install-drag-ghost/);
   assert.match(setupGuide, /agent-install-confirm/);
-  assert.match(styles, /\.agent-install-video-stage \{[^}]*overflow: hidden/);
+  assert.match(setupGuide, /agent-install-setup-window/);
+  assert.match(setupGuide, /agent-install-launch-window/);
+  assert.match(setupGuide, /chmod \+x NativeMedia-Agent-\*\.AppImage/);
+  assert.match(setupGuide, /Terminal or package installer/);
+  assert.match(styles, /\.agent-install-video-stage \{[^}]*height: clamp\(205px, 24vw, 255px\)[^}]*overflow: hidden/);
   assert.match(styles, /\.agent-install-frame \{[^}]*overflow: hidden/);
   assert.match(styles, /\.agent-install-drag-stage \{[^}]*overflow: hidden/);
+  assert.match(styles, /\.agent-guide-diagram > svg \{[^}]*width: 100%[^}]*height: auto/);
+  assert.match(styles, /\.agent-install-window svg \{[^}]*width: auto[^}]*height: auto/);
   assert.match(styles, /\.agent-guide-visual-column \{[^}]*overflow: hidden/);
   assert.match(setupGuide, /agent-guide-flow-dot/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);

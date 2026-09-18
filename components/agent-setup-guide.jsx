@@ -103,38 +103,129 @@ function SetupFlowDiagram({ platformId = "overview", platformLabel = "your deskt
   </figure>;
 }
 
+const installFlowCopy = {
+  macos: {
+    download: "Download .dmg",
+    downloadWindow: "NativeMedia Agent installer",
+    downloadHeadline: "Ready to install",
+    downloadDetail: "NativeMedia Agent on macOS",
+    downloadAction: "Install",
+    file: "NativeMedia Agent.app",
+    install: "Move to Applications",
+    installWindow: "Move the app into place",
+    installDetail: "Drag & replace",
+    installHint: "Drag the app to Applications · Replace the old copy if asked",
+    permission: "Allow first launch",
+    permissionWindow: "System Settings",
+    permissionHeading: "Privacy & Security",
+    permissionDetail: "This app was blocked from opening",
+    permissionAction: "Open Anyway",
+    connect: "Connect website",
+    caption: "Watch the full macOS flow: click Install, move the app to Applications, allow the first launch, then connect the website.",
+  },
+  windows: {
+    download: "Download .exe",
+    downloadWindow: "NativeMedia Agent release",
+    downloadHeadline: "Windows installer ready",
+    downloadDetail: "NativeMedia Agent .exe",
+    downloadAction: "Download .exe",
+    file: "NativeMedia Agent",
+    install: "Install the app",
+    installWindow: "NativeMedia Agent Setup",
+    installDetail: "Follow the installer prompts",
+    installHint: "Choose Install, then wait for setup to finish",
+    permission: "Launch the agent",
+    permissionWindow: "Start menu",
+    permissionHeading: "NativeMedia Agent",
+    permissionDetail: "Open the app and keep it running",
+    permissionAction: "Open app",
+    connect: "Connect website",
+    caption: "Watch the Windows flow: download the .exe, install the app, launch it from the Start menu, then connect the website.",
+  },
+  linux: {
+    download: "Download package",
+    downloadWindow: "NativeMedia Agent release",
+    downloadHeadline: "Choose a Linux package",
+    downloadDetail: "AppImage or .deb",
+    downloadAction: "Download package",
+    file: "NativeMedia Agent",
+    install: "Install or make it executable",
+    installWindow: "Terminal or package installer",
+    installDetail: "AppImage or .deb",
+    installHint: "Run chmod +x for AppImage · Open .deb normally",
+    permission: "Start the agent",
+    permissionWindow: "Terminal",
+    permissionHeading: "NativeMedia Agent running",
+    permissionDetail: "Leave the agent running",
+    permissionAction: "Start agent",
+    connect: "Connect website",
+    caption: "Watch the Linux flow: choose AppImage or .deb, install or make it executable, start the agent, then connect the website.",
+  },
+};
+
+function InstallDownloadScene({ copy, platformLabel }) {
+  return <div className="agent-install-window agent-install-download-window">
+    <div className="agent-install-window-bar"><span /><span /><span /><small>{copy.downloadWindow}</small></div>
+    <div className="agent-install-dialog-body"><Download size={25} /><strong>{copy.downloadHeadline}</strong><small>{copy.downloadDetail || `NativeMedia Agent on ${platformLabel}`}</small><button className="agent-install-demo-button" type="button">{copy.downloadAction}</button><MousePointerClick className="agent-install-cursor" size={24} aria-hidden="true" /></div>
+  </div>;
+}
+
+function InstallPlacementScene({ copy, platformId }) {
+  if (platformId === "macos") {
+    return <div className="agent-install-window agent-install-drag-window">
+      <div className="agent-install-window-bar"><span /><span /><span /><small>{copy.installWindow}</small></div>
+      <div className="agent-install-drag-stage"><div className="agent-install-file-card"><FolderOpen size={22} /><strong>{copy.file}</strong><small>from the installer</small></div><ArrowRight className="agent-install-drag-arrow" size={25} /><div className="agent-install-folder-card"><FolderOpen size={25} /><strong>Applications</strong><small>{copy.installDetail}</small></div><div className="agent-install-drag-ghost"><FolderOpen size={18} /> {copy.file}</div></div>
+      <div className="agent-install-window-hint">{copy.installHint}</div>
+    </div>;
+  }
+
+  if (platformId === "windows") {
+    return <div className="agent-install-window agent-install-setup-window">
+      <div className="agent-install-window-bar"><span /><span /><span /><small>{copy.installWindow}</small></div>
+      <div className="agent-install-setup-body"><Download size={22} /><strong>Installing NativeMedia Agent</strong><small>{copy.installDetail}</small><div className="agent-install-progress"><span /></div><button className="agent-install-demo-button" type="button">Install</button></div>
+      <div className="agent-install-window-hint">{copy.installHint}</div>
+    </div>;
+  }
+
+  return <div className="agent-install-window agent-install-terminal-window">
+    <div className="agent-install-window-bar"><span /><span /><span /><small>{copy.installWindow}</small></div>
+    <div className="agent-install-terminal-body"><span>$ chmod +x NativeMedia-Agent-*.AppImage</span><span>or open the .deb package</span><strong>Ready to start</strong></div>
+    <div className="agent-install-window-hint">{copy.installHint}</div>
+  </div>;
+}
+
+function InstallLaunchScene({ copy, platformId }) {
+  if (platformId === "macos") {
+    return <div className="agent-install-window agent-install-settings-window">
+      <div className="agent-install-window-bar"><span /><span /><span /><small>{copy.permissionWindow}</small></div>
+      <div className="agent-install-settings-layout"><div className="agent-install-settings-side"><Settings2 size={18} /><strong>{copy.permissionHeading}</strong></div><div className="agent-install-settings-main"><strong>NativeMedia Agent</strong><small>{copy.permissionDetail}</small><button className="agent-install-demo-button" type="button">{copy.permissionAction}</button></div></div>
+      <div className="agent-install-confirm"><strong>Open NativeMedia Agent?</strong><button type="button">Open</button></div>
+    </div>;
+  }
+
+  if (platformId === "windows") {
+    return <div className="agent-install-window agent-install-launch-window">
+      <div className="agent-install-window-bar"><span /><span /><span /><small>{copy.permissionWindow}</small></div>
+      <div className="agent-install-launch-body"><div className="agent-install-launch-app"><Monitor size={21} /><div><strong>{copy.permissionHeading}</strong><small>{copy.permissionDetail}</small></div></div><button className="agent-install-demo-button" type="button">{copy.permissionAction}</button></div>
+    </div>;
+  }
+
+  return <div className="agent-install-window agent-install-terminal-window">
+    <div className="agent-install-window-bar"><span /><span /><span /><small>{copy.permissionWindow}</small></div>
+    <div className="agent-install-terminal-body"><span>$ ./NativeMedia-Agent-*.AppImage</span><div className="agent-install-terminal-status"><span className="agent-install-online-dot" /> <strong>{copy.permissionHeading}</strong></div><small>{copy.permissionDetail}</small></div>
+  </div>;
+}
+
+function InstallConnectScene() {
+  return <div className="agent-install-window agent-install-connect-window">
+    <div className="agent-install-browser-bar"><Globe2 size={16} /><span>native-media-agent.vercel.app/local-agent</span></div>
+    <div className="agent-install-connect-body"><div className="agent-install-connect-heading"><span className="agent-install-online-dot" /><div><strong>Local agent</strong><small>Ready to connect</small></div></div><button className="agent-install-demo-button" type="button">Check connection <ArrowRight size={15} /></button><div className="agent-install-connected"><CheckCircle2 size={16} /> Agent connected</div></div>
+  </div>;
+}
+
 function InstallStepsDiagram({ platformId = "macos", platformLabel = "your desktop" }) {
   const titleId = `agent-guide-install-title-${platformId}`;
-  const copyByPlatform = {
-    macos: {
-      download: "Download .dmg",
-      file: "NativeMedia Agent.app",
-      install: "Move to Applications",
-      installDetail: "Drag & replace",
-      permission: "Allow first launch",
-      permissionDetail: "Open Anyway",
-      connect: "Connect website",
-    },
-    windows: {
-      download: "Download .exe",
-      file: "NativeMedia Agent",
-      install: "Install the app",
-      installDetail: "Follow prompts",
-      permission: "Launch the agent",
-      permissionDetail: "Keep it running",
-      connect: "Connect website",
-    },
-    linux: {
-      download: "Download package",
-      file: "NativeMedia Agent",
-      install: "Install or run",
-      installDetail: "AppImage or .deb",
-      permission: "Start the agent",
-      permissionDetail: "Leave it running",
-      connect: "Connect website",
-    },
-  };
-  const copy = copyByPlatform[platformId] || copyByPlatform.macos;
+  const copy = installFlowCopy[platformId] || installFlowCopy.macos;
   const title = `${platformLabel} installation: ${copy.download}, ${copy.install}, ${copy.permission}, ${copy.connect}`;
   return <figure className="agent-guide-diagram agent-install-diagram">
     <div className="agent-guide-diagram-heading"><span>Installation walkthrough</span><small>watch the four steps</small></div>
@@ -143,38 +234,24 @@ function InstallStepsDiagram({ platformId = "macos", platformLabel = "your deskt
       <div className="agent-install-video-stage">
         <div className="agent-install-frame" style={{ animationDelay: "0s" }}>
           <div className="agent-install-frame-kicker">01 · {copy.download}</div>
-          <div className="agent-install-window agent-install-download-window">
-            <div className="agent-install-window-bar"><span /><span /><span /><small>NativeMedia Agent installer</small></div>
-            <div className="agent-install-dialog-body"><Download size={25} /><strong>Ready to install</strong><small>NativeMedia Agent on {platformLabel}</small><button className="agent-install-demo-button" type="button">Install</button><MousePointerClick className="agent-install-cursor" size={24} aria-hidden="true" /></div>
-          </div>
+          <InstallDownloadScene copy={copy} platformLabel={platformLabel} />
         </div>
         <div className="agent-install-frame" style={{ animationDelay: "4s" }}>
           <div className="agent-install-frame-kicker">02 · {copy.install}</div>
-          <div className="agent-install-window agent-install-drag-window">
-            <div className="agent-install-window-bar"><span /><span /><span /><small>Move the app into place</small></div>
-            <div className="agent-install-drag-stage"><div className="agent-install-file-card"><FolderOpen size={22} /><strong>{copy.file}</strong><small>from the installer</small></div><ArrowRight className="agent-install-drag-arrow" size={25} /><div className="agent-install-folder-card"><FolderOpen size={25} /><strong>{platformId === "macos" ? "Applications" : "Install location"}</strong><small>{copy.installDetail}</small></div><div className="agent-install-drag-ghost"><FolderOpen size={18} /> {copy.file}</div></div>
-            <div className="agent-install-window-hint">{platformId === "macos" ? "Drag the app to Applications · Replace the old copy if asked" : copy.installDetail}</div>
-          </div>
+          <InstallPlacementScene copy={copy} platformId={platformId} />
         </div>
         <div className="agent-install-frame" style={{ animationDelay: "8s" }}>
           <div className="agent-install-frame-kicker">03 · {copy.permission}</div>
-          <div className="agent-install-window agent-install-settings-window">
-            <div className="agent-install-window-bar"><span /><span /><span /><small>System Settings</small></div>
-            <div className="agent-install-settings-layout"><div className="agent-install-settings-side"><Settings2 size={18} /><strong>{platformId === "macos" ? "Privacy & Security" : "Security"}</strong></div><div className="agent-install-settings-main"><strong>{platformId === "macos" ? "NativeMedia Agent" : copy.file}</strong><small>{platformId === "macos" ? "This app was blocked from opening" : "Allow the app to run"}</small><button className="agent-install-demo-button" type="button">{platformId === "macos" ? "Open Anyway" : "Allow"}</button></div></div>
-            {platformId === "macos" && <div className="agent-install-confirm"><strong>Open NativeMedia Agent?</strong><button type="button">Open</button></div>}
-          </div>
+          <InstallLaunchScene copy={copy} platformId={platformId} />
         </div>
         <div className="agent-install-frame" style={{ animationDelay: "12s" }}>
           <div className="agent-install-frame-kicker">04 · {copy.connect}</div>
-          <div className="agent-install-window agent-install-connect-window">
-            <div className="agent-install-browser-bar"><Globe2 size={16} /><span>native-media-agent.vercel.app/local-agent</span></div>
-            <div className="agent-install-connect-body"><div className="agent-install-connect-heading"><span className="agent-install-online-dot" /><div><strong>Local agent</strong><small>Ready to connect</small></div></div><button className="agent-install-demo-button" type="button">Check connection <ArrowRight size={15} /></button><div className="agent-install-connected"><CheckCircle2 size={16} /> Agent connected</div></div>
-          </div>
+          <InstallConnectScene />
         </div>
       </div>
       <div className="agent-install-video-progress" aria-hidden="true"><span style={{ animationDelay: "0s" }}>01</span><span style={{ animationDelay: "4s" }}>02</span><span style={{ animationDelay: "8s" }}>03</span><span style={{ animationDelay: "12s" }}>04</span></div>
     </div>
-    <figcaption>{platformId === "macos" ? "Watch the full macOS flow: click Install, move the app to Applications, allow the first launch, then connect the website." : `Watch the ${platformLabel} flow: install the app, start the agent, then connect the website.`}</figcaption>
+    <figcaption>{copy.caption}</figcaption>
   </figure>;
 }
 
