@@ -211,6 +211,6 @@ export function AppShell({ children }) {
         <AppFooter />
       </main>
     </div>
-    <FreeAccessModal pathname={pathname} />
+    <FreeAccessModal pathname={pathname} localAgentStatus={localAgentStatus} />
   </div>;
 }

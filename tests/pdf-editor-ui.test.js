@@ -154,8 +154,12 @@ test("PDF editor keeps advanced editing Local-agent-only in Browser mode", async
   assert.match(shell, /processingMode === "browser"/);
   assert.match(shell, /browserPdfProjectError/);
   assert.match(shell, /browserOnly: processingMode === "browser"/);
-  assert.match(shell, /function buildBrowserPdf\(pageOutputs\)/);
-  assert.match(shell, /canvas\.toDataURL\("image\/jpeg", 0\.92\)/);
+  assert.match(shell, /const preservedData = data\.slice\(\)/);
+  assert.match(shell, /sourceBytes: loaded\.data/);
+  assert.match(shell, /assembleBrowserPdf/);
+  assert.match(shell, /BROWSER_PDF_FIDELITY_WARNING/);
+  assert.match(shell, /Copying and arranging original pages/);
+  assert.doesNotMatch(shell, /function buildBrowserPdf\(pageOutputs\)/);
   assert.match(shell, /rasterizeBrowserPage\(page, sourceDocuments, preparedPage\)/);
   assert.match(shell, /if \(\/\^\(blob:\|data:\)\/i\.test\(downloadUrl\)\) return downloadUrl/);
   assert.match(shell, /if \(mode === "browser"\) setJob\(initialJob\)/);

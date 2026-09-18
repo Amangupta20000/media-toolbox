@@ -16,6 +16,7 @@ import { BROWSER_PDF_EDITOR_IMAGE_MAX_BYTES, BROWSER_PDF_EDITOR_MAX_TOTAL_BYTES 
 import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, preferredProcessingMode, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
 import { MAX_PDF_COUNT, MAX_PDF_TOTAL_BYTES } from "../lib/pdf-limits.js";
 import { normalizeImageRotation, rotatedImageDrawPlacement } from "../lib/pdf-image-placement.js";
+import { assembleBrowserPdf, BROWSER_PDF_FIDELITY_WARNING } from "../lib/pdf-browser-editor.js";
 import { PDF_TEXT_BOX_FONTS, textBoxCssFontFamily, textBoxTextRuns } from "../lib/pdf-text-box.js";
 import { pushAnalyticsEvent } from "../lib/analytics.js";
 
@@ -436,11 +437,15 @@ async function loadPdfDocumentWithPassword(pdfLibrary, data, filename) {
 
 async function loadPdfFile(file, pdfLibrary, { allowServerFallback = false, browserOnly = false } = {}) {
   const data = new Uint8Array(await file.arrayBuffer());
+  // PDF.js may transfer the input buffer to its worker. Keep an independent
+  // copy for native Browser export so preview loading cannot detach the
+  // original PDF bytes before pages are copied into the output document.
+  const preservedData = data.slice();
   let browserError = null;
   if (pdfLibrary) {
     try {
       const loaded = await loadPdfDocumentWithPassword(pdfLibrary, data, file.name);
-      return { data, documentProxy: loaded.documentProxy, pageCount: loaded.documentProxy.numPages, fallbackDocument: null, pageSizes: null, serverFallback: false, passwordProtected: loaded.passwordProtected };
+      return { data: preservedData, documentProxy: loaded.documentProxy, pageCount: loaded.documentProxy.numPages, fallbackDocument: null, pageSizes: null, serverFallback: false, passwordProtected: loaded.passwordProtected };
     } catch (error) {
       browserError = error;
     }
@@ -452,12 +457,12 @@ async function loadPdfFile(file, pdfLibrary, { allowServerFallback = false, brow
   }
   try {
     const { PDFDocument } = await import("pdf-lib");
-    const fallbackDocument = await PDFDocument.load(data);
+    const fallbackDocument = await PDFDocument.load(preservedData);
     let inspection = null;
     if (allowServerFallback) {
       try { inspection = await inspectPdfOnServer(file); } catch { /* the local fallback can still provide page metadata */ }
     }
-    return { data, documentProxy: null, pageCount: fallbackDocument.getPageCount(), fallbackDocument, pageSizes: inspection?.pages || null, previewToken: inspection?.previewToken || null, serverFallback: false, passwordProtected: false };
+    return { data: preservedData, documentProxy: null, pageCount: fallbackDocument.getPageCount(), fallbackDocument, pageSizes: inspection?.pages || null, previewToken: inspection?.previewToken || null, serverFallback: false, passwordProtected: false };
   } catch (fallbackError) {
     if (!allowServerFallback) {
       const detail = fallbackError instanceof Error ? fallbackError.message : browserError?.message;
@@ -559,12 +564,6 @@ async function rasterizeBrowserPage(page, sourceDocuments, preparedPage) {
   return { kind: "raster", width: page.width, height: page.height, rotation: page.rotation || 0, baseImage: { extension: ".jpg", bytes }, images: preparedPage.images || [], textBoxes: preparedPage.textBoxes || [] };
 }
 
-function browserPdfNumber(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "0";
-  return number.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
-}
-
 async function loadBrowserImage(bytes, mime, name) {
   const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
   try {
@@ -613,53 +612,6 @@ async function composeBrowserPageJpeg(page, sourceDocuments, preparedPage) {
   return { bytes: dataUrlToBytes(canvas.toDataURL("image/jpeg", 0.92)), width: canvas.width, height: canvas.height };
 }
 
-function buildBrowserPdf(pageOutputs) {
-  const pageObjectNumbers = pageOutputs.map((_, index) => 3 + index * 3);
-  const objects = [
-    { parts: ["<< /Type /Catalog /Pages 2 0 R >>"] },
-    { parts: [`<< /Type /Pages /Kids [${pageObjectNumbers.map((number) => `${number} 0 R`).join(" ")}] /Count ${pageOutputs.length} >>`] },
-  ];
-  for (const [index, page] of pageOutputs.entries()) {
-    const pageObjectNumber = 3 + index * 3;
-    const contentObjectNumber = pageObjectNumber + 1;
-    const imageObjectNumber = pageObjectNumber + 2;
-    const hasImage = Boolean(page.bytes?.byteLength);
-    const content = hasImage ? `q\n${browserPdfNumber(page.width)} 0 0 ${browserPdfNumber(page.height)} 0 0 cm\n/Im0 Do\nQ\n` : "q\nQ\n";
-    const resources = hasImage ? `<< /XObject << /Im0 ${imageObjectNumber} 0 R >> >>` : "<< >>";
-    objects.push({ parts: [`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${browserPdfNumber(page.width)} ${browserPdfNumber(page.height)}]${page.rotation ? ` /Rotate ${normalizeRotation(page.rotation)}` : ""} /Resources ${resources} /Contents ${contentObjectNumber} 0 R >>`] });
-    objects.push({ parts: [`<< /Length ${new TextEncoder().encode(content).byteLength} >>\nstream\n`, content, "endstream"] });
-    objects.push(hasImage ? { parts: [`<< /Type /XObject /Subtype /Image /Width ${page.imageWidth} /Height ${page.imageHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${page.bytes.byteLength} >>\nstream\n`, page.bytes, "\nendstream"] } : { parts: ["<< >>"] });
-  }
-
-  const encoder = new TextEncoder();
-  const chunks = [];
-  const offsets = [0];
-  let byteLength = 0;
-  const append = (value) => {
-    const chunk = typeof value === "string" ? encoder.encode(value) : value;
-    chunks.push(chunk);
-    byteLength += chunk.byteLength;
-  };
-  append("%PDF-1.4\n%\xFF\xFF\xFF\xFF\n");
-  for (const [index, object] of objects.entries()) {
-    offsets.push(byteLength);
-    append(`${index + 1} 0 obj\n`);
-    object.parts.forEach(append);
-    append("\nendobj\n");
-  }
-  const xrefOffset = byteLength;
-  append(`xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`);
-  offsets.slice(1).forEach((offset) => append(`${String(offset).padStart(10, "0")} 00000 n \n`));
-  append(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
-  const result = new Uint8Array(byteLength);
-  let cursor = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, cursor);
-    cursor += chunk.byteLength;
-  }
-  return result;
-}
-
 async function exportPdfInBrowser(pdfFiles, pages, sourceDocuments, onProgress) {
   onProgress?.(1);
   for (const [index] of pdfFiles.entries()) onProgress?.(Math.max(2, Math.round(((index + 1) / Math.max(1, pdfFiles.length)) * 8)));
@@ -678,24 +630,11 @@ async function exportPdfInBrowser(pdfFiles, pages, sourceDocuments, onProgress) 
     preparedPages.push({ kind: page.kind, pdfIndex: page.pdfIndex, pageIndex: page.pageIndex, width: page.width, height: page.height, rotation: page.rotation, images, textBoxes: getPageTextBoxes(page) });
     onProgress?.(10 + Math.round(((index + 1) / Math.max(1, pages.length)) * 6));
   }
-
   onProgress?.(16);
-  const pageOutputs = [];
-  for (const [index, page] of pages.entries()) {
-    const preparedPage = preparedPages[index];
-    onProgress?.(17);
-    if (page.kind !== "source" && !(preparedPage.images || []).length) {
-      pageOutputs.push({ bytes: null, imageWidth: 0, imageHeight: 0, width: page.width, height: page.height, rotation: page.rotation });
-      onProgress?.(20 + Math.round(((index + 1) / Math.max(1, pages.length)) * 44));
-      continue;
-    }
-    const output = await composeBrowserPageJpeg(page, sourceDocuments, preparedPage);
-    pageOutputs.push({ bytes: output.bytes, imageWidth: output.width, imageHeight: output.height, width: page.width, height: page.height, rotation: page.rotation });
-    onProgress?.(20 + Math.round(((index + 1) / Math.max(1, pages.length)) * 44));
-  }
-  onProgress?.(64);
-  const bytes = buildBrowserPdf(pageOutputs);
-  onProgress?.(72);
+  const assembled = await assembleBrowserPdf(pdfFiles, pages, preparedPages, {
+    onProgress,
+    rasterizePage: (page, preparedPage) => composeBrowserPageJpeg(page, sourceDocuments, preparedPage),
+  });
   // Do not render the output preview as part of export. In some embedded browsers
   // PDF.js never settles after loading an in-memory PDF, which used to leave a
   // valid export stuck on the processing screen. PdfResultPreview renders the
@@ -703,12 +642,12 @@ async function exportPdfInBrowser(pdfFiles, pages, sourceDocuments, onProgress) 
   const previewImages = [];
   const previewError = null;
   onProgress?.(100);
-  const blob = new Blob([bytes], { type: "application/pdf" });
+  const blob = new Blob([assembled.bytes], { type: "application/pdf" });
   const downloadUrl = URL.createObjectURL(blob);
   const filename = pdfFiles.length === 1
     ? `${pdfFiles[0].name.replace(/\.pdf$/i, "")}_edited.pdf`
     : pdfFiles.length > 1 ? "merged_edited.pdf" : "blank_pages_edited.pdf";
-  return { filename, bytes: bytes.byteLength, pageCount: pages.length, method: "Browser PDF editor", downloadUrl, previewUrl: downloadUrl, previewImages, previewError };
+  return { filename, bytes: assembled.bytes.byteLength, pageCount: pages.length, nativePageCount: assembled.nativePageCount, fallbackPageCount: assembled.fallbackPageCount, fallbackPages: assembled.fallbackPages, method: assembled.method, warnings: assembled.warnings, fidelityWarning: assembled.warnings.includes(BROWSER_PDF_FIDELITY_WARNING), downloadUrl, previewUrl: downloadUrl, previewImages, previewError };
 }
 
 export function PdfEditor() {
@@ -1773,9 +1712,9 @@ export function PdfEditor() {
         if (!pdfLibrary) setPdfLibrary(activePdfLibrary);
         const browserId = `browser-${makeId()}`;
         setJob({ id: browserId, status: "processing", progress: 0, stage: "Creating PDF in this browser", message: "Your PDF project is staying in this browser.", logs: [{ time: new Date().toISOString(), level: "info", message: "Browser PDF export started." }], warnings: [], error: null, result: null });
-        const result = await exportPdfInBrowser(pdfFiles, pages, documentsRef.current, (progress) => setJob((current) => current ? { ...current, progress, stage: progress < 15 ? "Loading source PDFs" : progress < 20 ? "Preparing browser pages" : progress < 64 ? "Rendering and arranging pages" : progress < 75 ? "Creating final PDF" : "Preparing download", logs: [...(current.logs || []), { time: new Date().toISOString(), level: "info", message: `Browser export progress: ${progress}%.` }] } : current));
+        const result = await exportPdfInBrowser(pdfFiles, pages, documentsRef.current, (progress) => setJob((current) => current ? { ...current, progress, stage: progress < 15 ? "Loading source PDFs" : progress < 20 ? "Preparing browser pages" : progress < 64 ? "Copying and arranging original pages" : progress < 75 ? "Creating final PDF" : "Preparing download", logs: [...(current.logs || []), { time: new Date().toISOString(), level: "info", message: `Browser export progress: ${progress}%.` }] } : current));
         browserResultUrlRef.current = result.downloadUrl;
-        setJob((current) => current ? { ...current, status: "completed", progress: 100, stage: "Complete", message: result.previewError ? "The PDF was created in this browser. Its download is ready; the on-page preview could not be rendered." : "The PDF was created in this browser.", logs: [...(current.logs || []), ...(result.previewError ? [{ time: new Date().toISOString(), level: "warn", message: "The PDF was created successfully, but the browser preview could not be rendered." }] : []), { time: new Date().toISOString(), level: "info", message: "Browser PDF export completed." }], result } : current);
+        setJob((current) => current ? { ...current, status: "completed", progress: 100, stage: "Complete", message: result.fidelityWarning ? "The PDF was created in this browser, but some pages used a reduced-fidelity fallback." : result.previewError ? "The PDF was created in this browser. Its download is ready; the on-page preview could not be rendered." : "The PDF was created in this browser.", logs: [...(current.logs || []), ...(result.warnings || []).map((warning) => ({ time: new Date().toISOString(), level: "warn", message: warning })), ...(result.previewError ? [{ time: new Date().toISOString(), level: "warn", message: "The PDF was created successfully, but the browser preview could not be rendered." }] : []), { time: new Date().toISOString(), level: "info", message: "Browser PDF export completed." }], warnings: result.warnings || [], result } : current);
       } catch (browserError) {
         setJob((current) => current ? { ...current, status: "failed", error: browserError instanceof Error ? browserError.message : "The PDF could not be created in the browser." } : current);
       }
@@ -2574,5 +2513,5 @@ function PdfJobCard({ job: initialJob, mode = "local", keepResult = false, onRes
   const failed = job.status === "failed";
   const progress = Math.max(0, Math.min(100, job.progress || 0));
   const downloadName = done && job.result ? downloadFilename(filenameStemValue || filenameStem(job.result.filename), job.result.filename) : "";
-  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : job.status === "queued" ? "Queued" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be created" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<div className="pdf-job-log"><div className="job-log-heading"><span>Worker log</span><span>{(job.logs || []).length} events</span></div><div className="job-log-list">{job.logs?.length ? job.logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for progress…</div>}</div></div>{done && job.result && <><div className="pdf-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>All {job.result.pageCount || ""} pages</small></div><PdfResultPreview result={job.result} /></div><div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Pages</span><strong>{job.result.pageCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div></>} {done && job.result && <ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={downloadName} />} {done && job.result && <ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} />} {printError && <DismissibleMessage className="error-banner" resetKey={printError}><AlertTriangle size={17} /><span>{printError}</span></DismissibleMessage>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, downloadName)} download={downloadName} onClick={() => pushAnalyticsEvent("result_downloaded", { tool: "pdf-editor", result_type: "pdf" })}><Download size={18} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button><button className="secondary-button" type="button" onClick={() => onContinue?.(job.result)}><FilePlus2 size={17} /> Continue editing</button></>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
+  return <section className={`job-card pdf-job-card ${done ? "success" : failed ? "failed" : ""}`}><div className="job-topline"><span className="job-status-pill">{done ? <CheckCircle2 size={15} /> : failed ? <AlertTriangle size={15} /> : <LoaderCircle className="spin" size={15} />}{done ? "Complete" : failed ? "Needs attention" : job.status === "queued" ? "Queued" : "Processing"}</span><span className="job-id">Job {job.id.slice(0, 8)}</span></div><div className="job-icon">{done ? <CheckCircle2 size={30} /> : failed ? <AlertTriangle size={30} /> : <LoaderCircle className="spin" size={30} />}</div><h2>{done ? "Your edited PDF is ready" : failed ? "The PDF could not be created" : job.stage}</h2><p className="job-message">{failed ? job.error : job.message}</p>{!done && !failed && <><div className="progress-track"><span style={{ width: `${progress}%` }} /></div><div className="progress-meta"><span>{job.stage}</span><strong>{progress}%</strong></div></>}<div className="pdf-job-log"><div className="job-log-heading"><span>Worker log</span><span>{(job.logs || []).length} events</span></div><div className="job-log-list">{job.logs?.length ? job.logs.slice(-80).map((entry, index) => <div className={`job-log-entry ${entry.level === "error" ? "error" : ""}`} key={`${entry.time}-${index}`}><time>{new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time><span>{entry.message}</span></div>) : <div className="job-log-empty">Waiting for progress…</div>}</div></div>{job.warnings?.length > 0 && <div className="warning-list">{job.warnings.map((warning) => <DismissibleMessage key={warning} resetKey={warning}><AlertTriangle size={16} /><span>{warning}</span></DismissibleMessage>)}</div>}{done && job.result && <><div className="pdf-result-preview"><div className="preview-heading"><span>Edited PDF preview</span><small>All {job.result.pageCount || ""} pages</small></div><PdfResultPreview result={job.result} /></div><div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div><div><span>Pages</span><strong>{job.result.pageCount}</strong></div><div><span>Method</span><strong>{job.result.method}</strong></div></div></>} {done && job.result && <ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={downloadName} />} {done && job.result && <ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} />} {printError && <DismissibleMessage className="error-banner" resetKey={printError}><AlertTriangle size={17} /><span>{printError}</span></DismissibleMessage>}<div className="job-actions">{done && job.result && <><a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, downloadName)} download={downloadName} onClick={() => pushAnalyticsEvent("result_downloaded", { tool: "pdf-editor", result_type: "pdf" })}><Download size={18} /> Download PDF</a><button className="secondary-button" type="button" onClick={printPdf} disabled={printing}><Printer size={17} /> {printing ? "Preparing print…" : "Print PDF"}</button><button className="secondary-button" type="button" onClick={() => onContinue?.(job.result)}><FilePlus2 size={17} /> Continue editing</button></>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Edit another PDF" : "Cancel"}</button></div></section>;
 }

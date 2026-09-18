@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, Copy, Gift, X } from "lucide-react";
-import { FREE_ACCESS_CODE } from "../lib/free-access.js";
+import { FREE_ACCESS_CODE, hasActiveAuthorizedLicense } from "../lib/free-access.js";
 import { PRODUCT_NAME } from "../lib/site-metadata.js";
 import { pushAnalyticsEvent } from "../lib/analytics.js";
 
@@ -36,14 +36,19 @@ async function copyText(value) {
   if (!copied) throw new Error("Copy is unavailable. Select the code and copy it manually.");
 }
 
-export function FreeAccessModal({ pathname }) {
+export function FreeAccessModal({ pathname, localAgentStatus }) {
   const [visible, setVisible] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
   const [codeExpiryLabel, setCodeExpiryLabel] = useState("");
   const offerViewTrackedRef = useRef(false);
+  const authorizedLicenseActive = hasActiveAuthorizedLicense(localAgentStatus);
 
   useEffect(() => {
+    if (authorizedLicenseActive) {
+      setVisible(false);
+      return undefined;
+    }
     if (["/admin", "/license-admin", "/offers"].includes(pathname) || hasSessionCookie()) return undefined;
     const showOnScroll = () => {
       if (window.scrollY <= 0) return;
@@ -60,7 +65,7 @@ export function FreeAccessModal({ pathname }) {
     };
     window.addEventListener("scroll", showOnScroll, { passive: true });
     return () => window.removeEventListener("scroll", showOnScroll);
-  }, [pathname]);
+  }, [authorizedLicenseActive, pathname]);
 
   useEffect(() => {
     if (!visible) return undefined;
@@ -81,7 +86,7 @@ export function FreeAccessModal({ pathname }) {
     };
   }, [visible]);
 
-  if (!visible) return null;
+  if (!visible || authorizedLicenseActive) return null;
 
   const close = () => setVisible(false);
   const copy = async () => {
