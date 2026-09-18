@@ -29,6 +29,9 @@ export default function ContactPage({ updatedAt }) {
           <Mail size={22} aria-hidden="true" />
           <span>{AUTHOR_EMAIL}</span>
         </a>
+        <h2>What to include</h2>
+        <p>For a bug report, include the tool or page, browser and operating system, and the steps that reproduce the issue. Please do not email files containing personal or confidential information, credentials, activation codes, or license/device identifiers unless we specifically request them and you are authorized to share them.</p>
+        <p>Privacy, data-access, correction, erasure, and consent questions can also be sent to this address. See the <a href="/privacy">Privacy Policy</a> for details.</p>
         <p className="contact-operator">{PRODUCT_NAME} is operated by {AUTHOR_NAME}.</p>
       </section>
     </article>
