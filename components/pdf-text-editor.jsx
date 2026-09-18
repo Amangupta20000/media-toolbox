@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { Fragment, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Bold, CheckCircle2, Download, FileText, Italic, Keyboard, LoaderCircle, LockKeyhole, Pencil, Printer, Redo2, RotateCcw, Save, ShieldCheck, Underline, Undo2, UploadCloud, X, ZoomIn, ZoomOut } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { FileDropzone, formatBytes } from "./file-dropzone.jsx";
@@ -21,6 +21,7 @@ import { graphemeCount } from "../lib/text-metrics.js";
 import { takeHistoryEdit } from "./history-edit.js";
 import { fontFamilyFromPdfName, hasTextFormat, normalizeTextFormat, scaleTextFormat, textFormatDefaults } from "../lib/pdf-text-format.js";
 import { PDF_TEXT_BOX_FONTS } from "../lib/pdf-text-box.js";
+import { buildPreviewOffsets, calculatePreviewPageLayout, estimatePreviewPageCardHeight, previewIndexAtOffset, previewViewportLimits } from "../lib/pdf-preview-layout.js";
 import { pushAnalyticsEvent } from "../lib/analytics.js";
 
 async function loadPdfLibrary() {
@@ -359,26 +360,108 @@ function useVirtualWindow(containerRef, count, itemSize, axis = "vertical") {
   return { horizontal, start, end, totalSize: count * itemSize };
 }
 
-function useEstimatedPreviewPageHeight(previewZoom = 1) {
-  const [height, setHeight] = useState(890);
+function useVariablePreviewWindow(containerRef, pages, previewZoom = 1, gap = 17) {
+  const [metrics, setMetrics] = useState({ offset: 0, viewport: 760, width: 760 });
+  const [measuredHeights, setMeasuredHeights] = useState(() => new Map());
+  const pageNodesRef = useRef(new Map());
+  const resizeObserverRef = useRef(null);
+  const pageSignature = pages.map((model) => {
+    const viewport = model.page?.getViewport?.({ scale: 1 });
+    return `${model.pageIndex}:${viewport?.width || 0}x${viewport?.height || 0}`;
+  }).join(",");
+
   useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+    let frame = 0;
     const update = () => {
-      const mobile = window.matchMedia("(max-width: 760px)").matches;
-      const frameHeight = Math.min(window.innerHeight * (mobile ? 0.68 : 0.7), mobile ? 520 : 760);
-      // The virtual slot only needs to cover the page heading, frame, and
-      // the page card's padding. The old 125/130px allowance left a large
-      // empty gap after every rendered page, especially on mobile.
-      // A zoomed page is allowed to grow beyond the frame instead of creating
-      // a nested scrollbar, so reserve a larger virtual slot for the outer
-      // preview scroller as the page zoom increases.
-      const zoom = Math.max(0.6, Number(previewZoom) || 1);
-      setHeight(Math.max(mobile ? 560 : 580, Math.ceil((frameHeight + 60) * zoom)));
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        const styles = window.getComputedStyle(container);
+        const paddingWidth = (Number.parseFloat(styles.paddingLeft) || 0) + (Number.parseFloat(styles.paddingRight) || 0);
+        const next = {
+          offset: container.scrollTop,
+          viewport: Math.max(1, container.clientHeight),
+          width: Math.max(1, container.clientWidth - paddingWidth),
+        };
+        setMetrics((previous) => previous.offset === next.offset && previous.viewport === next.viewport && previous.width === next.width ? previous : next);
+      });
     };
     update();
+    container.addEventListener("scroll", update, { passive: true });
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(update) : null;
+    observer?.observe(container);
     window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, [previewZoom]);
-  return height;
+    return () => {
+      container.removeEventListener("scroll", update);
+      observer?.disconnect();
+      window.removeEventListener("resize", update);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [containerRef, pages.length, previewZoom]);
+
+  useEffect(() => {
+    setMeasuredHeights(new Map());
+  }, [pageSignature, previewZoom]);
+
+  useEffect(() => {
+    if (typeof ResizeObserver !== "function") return undefined;
+    const observer = new ResizeObserver((entries) => {
+      const updates = entries.map((entry) => ({ index: Number(entry.target.dataset.previewPageIndex), height: entry.target.getBoundingClientRect().height }));
+      setMeasuredHeights((previous) => {
+        let next = previous;
+        for (const { index, height } of updates) {
+          if (!Number.isInteger(index) || !Number.isFinite(height) || height < 1 || Math.abs((previous.get(index) || 0) - height) < 0.5) continue;
+          if (next === previous) next = new Map(previous);
+          next.set(index, height);
+        }
+        return next;
+      });
+    });
+    resizeObserverRef.current = observer;
+    for (const node of pageNodesRef.current.values()) observer.observe(node);
+    return () => {
+      observer.disconnect();
+      if (resizeObserverRef.current === observer) resizeObserverRef.current = null;
+    };
+  }, []);
+
+  const setPageRef = useCallback((index, node) => {
+    const previousNode = pageNodesRef.current.get(index);
+    if (previousNode && resizeObserverRef.current) resizeObserverRef.current.unobserve(previousNode);
+    if (!node) {
+      pageNodesRef.current.delete(index);
+      return;
+    }
+    node.dataset.previewPageIndex = String(index);
+    pageNodesRef.current.set(index, node);
+    const height = node.getBoundingClientRect().height;
+    if (Number.isFinite(height) && height > 0) {
+      setMeasuredHeights((previous) => Math.abs((previous.get(index) || 0) - height) < 0.5 ? previous : new Map(previous).set(index, height));
+    }
+    resizeObserverRef.current?.observe(node);
+  }, []);
+
+  const estimatedSizes = useMemo(() => {
+    const viewportWidth = typeof window === "undefined" ? 1024 : window.innerWidth;
+    const viewportHeight = typeof window === "undefined" ? 768 : window.innerHeight;
+    const { mobile, maxPreviewHeight } = previewViewportLimits({ viewportWidth, viewportHeight });
+    const framePadding = mobile ? 22 : 36;
+    return pages.map((model, index) => {
+      const viewport = model.page?.getViewport?.({ scale: 1 });
+      const estimate = estimatePreviewPageCardHeight({ pageWidth: viewport?.width, pageHeight: viewport?.height, availableWidth: Math.max(1, metrics.width - framePadding), maxPreviewHeight, zoom: previewZoom });
+      return Math.max(1, measuredHeights.get(index) || estimate);
+    });
+  }, [measuredHeights, metrics.width, pages, previewZoom]);
+
+  const { offsets, totalSize } = useMemo(() => buildPreviewOffsets(estimatedSizes, gap), [estimatedSizes, gap]);
+  const startIndex = pages.length ? previewIndexAtOffset(metrics.offset, offsets, estimatedSizes, gap) : 0;
+  const endIndex = pages.length ? previewIndexAtOffset(metrics.offset + metrics.viewport, offsets, estimatedSizes, gap) + 1 : 0;
+  const start = Math.max(0, startIndex - VIRTUAL_OVERSCAN);
+  const end = Math.min(pages.length, Math.max(start + 1, endIndex + VIRTUAL_OVERSCAN));
+
+  return { start, end, offsets, sizes: estimatedSizes, totalSize, setPageRef };
 }
 
 function pointerAngle(event, center) {
@@ -555,17 +638,12 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
       const canvas = canvasRef.current;
       if (!frame || !surface || !canvas) return;
       const base = model.page.getViewport({ scale: 1 });
-      const availableWidth = Math.max(1, frame.clientWidth - 36);
-      const mobile = window.matchMedia("(max-width: 760px)").matches;
-      const containerHeight = Math.max(mobile ? 300 : 420, Math.min(window.innerHeight * (mobile ? 0.68 : 0.7), mobile ? 520 : 760));
-      // The frame grows with a zoomed page. Keep the fit calculation tied to
-      // the viewport-sized minimum, otherwise the grown frame would trigger a
-      // feedback loop that keeps enlarging the page on every resize event.
-      const availableHeight = Math.max(1, Math.min(frame.clientHeight - 36, containerHeight - 36));
-      const fitScale = Math.min(availableWidth / base.width, availableHeight / base.height);
-      // Keep zoom attached to the page surface so the frame can scroll when
-      // the user magnifies beyond the available preview area.
-      const scale = Math.min(1.35, Math.max(0.45, fitScale)) * previewZoom;
+      const frameStyle = window.getComputedStyle(frame);
+      const paddingWidth = (Number.parseFloat(frameStyle.paddingLeft) || 0) + (Number.parseFloat(frameStyle.paddingRight) || 0);
+      const availableWidth = Math.max(1, frame.clientWidth - paddingWidth);
+      const { maxPreviewHeight } = previewViewportLimits({ viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
+      const layout = calculatePreviewPageLayout({ pageWidth: base.width, pageHeight: base.height, availableWidth, maxPreviewHeight, zoom: previewZoom });
+      const scale = layout.scale;
       // Keep the layout viewport in CSS pixels, but render the canvas at the
       // device pixel ratio so uploaded PDFs stay crisp on Retina/high-density
       // displays. The canvas is then downsampled by CSS without changing the
@@ -573,7 +651,9 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
       const pixelRatio = Math.min(3, Math.max(1, Number(window.devicePixelRatio) || 1));
       const nextViewport = model.page.getViewport({ scale });
       const renderViewport = model.page.getViewport({ scale: scale * pixelRatio });
-      setSurfaceSize({ width: nextViewport.width, height: nextViewport.height });
+      setSurfaceSize((previous) => previous && Math.abs(previous.width - nextViewport.width) < 0.1 && Math.abs(previous.height - nextViewport.height) < 0.1 && previous.isZoomed === layout.isZoomed
+        ? previous
+        : { width: nextViewport.width, height: nextViewport.height, isZoomed: layout.isZoomed });
       canvas.width = Math.ceil(renderViewport.width);
       canvas.height = Math.ceil(renderViewport.height);
       canvas.style.width = "100%";
@@ -790,7 +870,7 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
   };
   return <article ref={pageRef} className="pdf-text-page" aria-label={model.pageLabel}>
     <div className="pdf-text-page-heading"><strong>{model.pageLabel}</strong><span>{model.runs.length ? `${model.runs.length} ${model.ocr ? "OCR text regions" : "detected text runs"}` : "No editable text detected"}</span></div>
-    <div ref={frameRef} className="pdf-text-page-frame">
+    <div ref={frameRef} className="pdf-text-page-frame" data-preview-zoomed={surfaceSize?.isZoomed ? "true" : "false"}>
       <div ref={surfaceRef} className="pdf-text-page-surface" style={{ "--page-ratio": baseViewport.width / baseViewport.height, ...(surfaceSize ? { width: `${surfaceSize.width}px`, height: `${surfaceSize.height}px` } : {}) }}>
         <canvas ref={canvasRef} aria-label={`Preview of ${model.pageLabel}`} />
         {positions.map(renderRun)}
@@ -803,10 +883,8 @@ function PdfTextPage({ model, selectedRunId, edits, textOffsets, textTransforms,
 const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview({ pages, selectedRunId, edits, textOffsets, textTransforms, textFormats, pdfLibrary, previewZoom, previewRevision, onSelectRun, onMoveRun, onMoveRunEnd, onAppearanceChange, onInferredTextFormat, onPinchZoom, browserMode = false }, ref) {
   const scrollRef = useRef(null);
   const previewZoomRef = useRef(previewZoom);
-  const pageHeight = useEstimatedPreviewPageHeight(previewZoom);
   const gap = 17;
-  const stride = pageHeight + gap;
-  const windowed = useVirtualWindow(scrollRef, pages.length, stride);
+  const windowed = useVariablePreviewWindow(scrollRef, pages, previewZoom, gap);
 
   useEffect(() => { previewZoomRef.current = previewZoom; }, [previewZoom]);
 
@@ -853,16 +931,17 @@ const VirtualizedPdfTextPreview = forwardRef(function VirtualizedPdfTextPreview(
   useImperativeHandle(ref, () => ({
     scrollToIndex(index) {
       const target = Math.max(0, Math.min(pages.length - 1, Number(index) || 0));
-      scrollRef.current?.scrollTo({ top: target * stride, behavior: "smooth" });
+      scrollRef.current?.scrollTo({ top: windowed.offsets[target] || 0, behavior: "smooth" });
     },
-  }), [pages.length, stride]);
+  }), [pages.length, windowed.offsets]);
 
   return <div ref={scrollRef} className="pdf-text-preview-scroll" aria-label="PDF page previews">
-    <div className="pdf-text-virtual-content" style={{ height: `${Math.max(0, pages.length * stride - gap)}px` }}>
+    <div className="pdf-text-virtual-content" style={{ height: `${windowed.totalSize}px` }}>
       {pages.slice(windowed.start, windowed.end).map((model, offset) => {
         const index = windowed.start + offset;
-        return <div key={`${model.pageIndex}-${previewRevision}`} className="pdf-text-virtual-item" style={{ top: `${index * stride}px`, left: 0, width: "100%", height: `${pageHeight}px` }}>
-          <PdfTextPage model={model} selectedRunId={selectedRunId} edits={edits} textOffsets={textOffsets} textTransforms={textTransforms} textFormats={textFormats} pdfLibrary={pdfLibrary} previewZoom={previewZoom} onSelectRun={onSelectRun} onMoveRun={onMoveRun} onMoveRunEnd={onMoveRunEnd} onAppearanceChange={onAppearanceChange} onInferredTextFormat={onInferredTextFormat} browserMode={browserMode} />
+        const itemHeight = windowed.sizes[index];
+        return <div key={`${model.pageIndex}-${previewRevision}`} className="pdf-text-virtual-item" style={{ top: `${windowed.offsets[index] || 0}px`, left: 0, width: "100%", height: `${itemHeight}px` }}>
+          <PdfTextPage pageRef={(element) => windowed.setPageRef(index, element)} model={model} selectedRunId={selectedRunId} edits={edits} textOffsets={textOffsets} textTransforms={textTransforms} textFormats={textFormats} pdfLibrary={pdfLibrary} previewZoom={previewZoom} onSelectRun={onSelectRun} onMoveRun={onMoveRun} onMoveRunEnd={onMoveRunEnd} onAppearanceChange={onAppearanceChange} onInferredTextFormat={onInferredTextFormat} browserMode={browserMode} />
         </div>;
       })}
     </div>
@@ -1681,6 +1760,7 @@ export function PdfTextEditor() {
                 </div>}
               </section>
               <div className="pdf-text-editor-shell">
+                {processingMode === "local" && <div className="pdf-retention-row pdf-text-retention-row"><div className="pdf-retention-name"><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem || filenameStem(defaultResultFilename)} label="Saved PDF name" description="This name is used for export and for PDF text editor History when the result is retained." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(filenameStem(value)); }} /></div><button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!canSubmit || Boolean(saveJob)} title="Save the current PDF to the Local agent Results folder without leaving the editor"><Save size={17} /> {saveJob ? "Saving…" : "Save to device"}</button></div>}
                 <div className="pdf-text-toolbar">
                   <div>
                     <strong>{ocrDetected && !nativePages ? "Replace OCR-detected text" : "Replace text in your PDF"}</strong>
@@ -1699,10 +1779,8 @@ export function PdfTextEditor() {
                     <button className="primary-button" type="button" onClick={submit} disabled={!canSubmit || Boolean(saveJob)} data-analytics-cta="export_pdf_text_edit" data-analytics-surface="pdf-text-editor">
                       {uploadProgress ? <><LoaderCircle className="spin" size={17} /> Uploading {uploadProgress}%</> : checkingLocation ? <><LoaderCircle className="spin" size={17} /> Checking worker…</> : <><Pencil size={17} /> Export edited PDF</>}
                     </button>
-                    {processingMode === "local" && <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!canSubmit || Boolean(saveJob)} title="Save the current PDF to the Local agent Results folder without leaving the editor"><Save size={17} /> {saveJob ? "Saving…" : "Save to device"}</button>}
                   </div>
                 </div>
-                {processingMode === "local" && <div className="pdf-retention-row pdf-text-retention-row"><div className="pdf-retention-name"><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem || filenameStem(defaultResultFilename)} label="Saved PDF name" description="This name is used for export and for PDF text editor History when the result is retained." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(filenameStem(value)); }} /></div></div>}
                 {ocrDetected && <DismissibleMessage className="pdf-text-ocr-notice" resetKey={`${nativePages}-${ocrPageScope}`}><AlertTriangle size={17} /><div><strong>{nativePages ? "Mixed text mode" : "OCR mode"}</strong><span>{nativePages ? `${ocrPageScope}. The other ${nativePages} page${nativePages === 1 ? " stays" : "s stay"} on the original selectable text path.` : "OCR is used because the PDF does not expose a usable visible text layer or its text is hidden behind page artwork. OCR regions are reconstructed visually with an approximate font; exact original font, opacity, and hidden pixels cannot be recovered."}</span></div></DismissibleMessage>}
                 <div className="pdf-text-editor-layout">
                   <VirtualizedPdfTextRail pages={pages} onSelect={scrollToPage} />

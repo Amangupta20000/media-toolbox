@@ -21,7 +21,12 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /canvas\.style\.width = "100%"/);
   assert.match(previewRoute, /request\.query\.thumbnail === "1" \? "40" : "180"/);
   assert.match(shell, /GlobalWorkerOptions\.workerSrc = "\/api\/pdf\/worker"/);
-  assert.match(shell, /const scale = .*previewZoom/);
+  assert.match(shell, /previewViewportLimits/);
+  assert.match(shell, /calculatePreviewPageLayout/);
+  assert.match(shell, /const scale = layout\.scale/);
+  assert.match(shell, /data-preview-zoomed/);
+  assert.match(styles, /\.pdf-page-canvas-wrap \{[^}]*height: auto[^}]*min-height: 0[^}]*overflow: auto/);
+  assert.match(styles, /\.pdf-page-canvas-wrap\[data-preview-zoomed="false"\] \.pdf-page-canvas-surface/);
   assert.match(shell, /surfaceSize/);
   assert.match(shell, /imagePreviewStyle\(page, image, placement\)/);
   assert.match(shell, /rotation: normalizeImageRotation\(image\.rotation\)/);
@@ -34,6 +39,8 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(styles, /\.pdf-image-overlay\.selected/);
   assert.match(styles, /\.pdf-text-box-overlay\.selected/);
   assert.match(styles, /\.pdf-object-transform-handles/);
+  assert.match(styles, /\.text-box-remove-handle \{[^}]*z-index: 4[^}]*top: -31px[^}]*left: -8px/);
+  assert.match(styles, /\.image-remove-handle \{[^}]*z-index: 4[^}]*top: -31px[^}]*left: -8px/);
   assert.match(styles, /\.processing-format-table thead th:first-child \{ width: 28%; \}/);
   assert.match(styles, /\.processing-format-table tbody th \{[^}]*white-space: normal;[^}]*overflow-wrap: anywhere;/);
   assert.match(shell, /Text box/);
@@ -99,6 +106,7 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /form\.append\("filename"/);
   assert.match(shell, /Saved PDF name/);
   assert.match(shell, /Save to device/);
+  assert.ok(shell.indexOf('className="pdf-retention-row"') < shell.indexOf('className={`pdf-editor-toolbar'), "the saved-file row should precede the PDF tools row");
   assert.match(styles, /\.pdf-more-tools-menu \{[^}]*z-index: 1000/);
   assert.match(styles, /\.pdf-more-tools \{[^}]*z-index: 2/);
   assert.match(await read("lib/job-intake.js"), /safePdfOutputFilename/);
@@ -204,9 +212,13 @@ test("PDF editor saves to the device in place without opening the export result 
   assert.ok(toolbarActions, "PDF editor toolbar action placement could not be located");
   assert.match(toolbarActions, /pdf-more-tools/);
   assert.doesNotMatch(toolbarActions, /pdf-save-button/);
-  const retentionRow = shell.match(/<div className="pdf-retention-row">[\s\S]*?<\/div>\s*\{!pdfFiles\.length/)?.[0];
-  assert.ok(retentionRow, "PDF retention row placement could not be located");
+  const retentionStart = shell.indexOf('<div className="pdf-retention-row">');
+  const toolbarStart = shell.indexOf('<div className={`pdf-editor-toolbar');
+  assert.ok(retentionStart >= 0 && toolbarStart > retentionStart, "PDF retention row placement could not be located");
+  const retentionRow = shell.slice(retentionStart, toolbarStart);
+  assert.match(retentionRow, /Build your document/);
   assert.match(retentionRow, /pdf-save-button/);
+  assert.match(shell.slice(toolbarStart), /pdf-editor-toolbar-tools-only/);
   assert.match(styles, /\.pdf-save-progress \{/);
   assert.match(styles, /\.pdf-save-notice \{/);
   assert.match(styles, /\.pdf-retention-name/);

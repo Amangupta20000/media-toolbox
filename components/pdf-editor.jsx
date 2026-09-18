@@ -17,6 +17,7 @@ import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, prefe
 import { MAX_PDF_COUNT, MAX_PDF_TOTAL_BYTES } from "../lib/pdf-limits.js";
 import { normalizeImageRotation, rotatedImageDrawPlacement } from "../lib/pdf-image-placement.js";
 import { assembleBrowserPdf, BROWSER_PDF_FIDELITY_WARNING } from "../lib/pdf-browser-editor.js";
+import { calculatePreviewPageLayout, previewViewportLimits } from "../lib/pdf-preview-layout.js";
 import { PDF_TEXT_BOX_FONTS, textBoxCssFontFamily, textBoxTextRuns } from "../lib/pdf-text-box.js";
 import { pushAnalyticsEvent } from "../lib/analytics.js";
 
@@ -1845,8 +1846,13 @@ export function PdfEditor() {
     {activeView === "history" ? <ToolHistory tool="pdf-editor" /> : activeView === "guide" ? <ToolSeoContent pathname="/pdf-editor" /> : activeView === "processing" ? null : <>
     {!job && <ProcessingMode value={processingMode} onChange={selectProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool="pdf-editor" />}
     {job ? <PdfJobCard job={job} mode={jobMode} keepResult={jobKeepResult} onReset={reset} onContinue={continueEditing} /> : <section className={`pdf-editor-shell ${pdfDragActive ? "pdf-drop-active" : ""}`} onDragOver={handlePdfDragOver} onDragLeave={handlePdfDragLeave} onDrop={handlePdfDrop}>
-      <div className="pdf-editor-toolbar">
-        <div className="pdf-editor-toolbar-heading"><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDF_COUNT} PDFs · {pages.length} pages · {Math.ceil(pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0) / (1024 * 1024)) || 0} MB of {processingMode === "browser" ? 50 : 200} MB</span></div>
+      {processingMode === "local" && <div className="pdf-retention-row">
+        <div className="pdf-editor-toolbar-heading pdf-retention-heading"><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDF_COUNT} PDFs · {pages.length} pages · {Math.ceil(pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0) / (1024 * 1024)) || 0} MB of {processingMode === "browser" ? 50 : 200} MB</span></div>
+        <div className="pdf-retention-name"><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem || filenameStem(defaultResultFilename)} label="Saved PDF name" description="This name is used for the export and, when retained, for PDF editor History in the Results folder." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(filenameStem(value)); }} /></div>
+        <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles || Boolean(saveJob)} title="Save the current PDF to the Local agent Results folder without leaving the editor"><Save size={17} /> {saveJob ? "Saving…" : "Save to device"}</button>
+      </div>}
+      <div className={`pdf-editor-toolbar${processingMode === "local" ? " pdf-editor-toolbar-tools-only" : ""}`}>
+        {processingMode !== "local" && <div className="pdf-editor-toolbar-heading"><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDF_COUNT} PDFs · {pages.length} pages · {Math.ceil(pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0) / (1024 * 1024)) || 0} MB of {processingMode === "browser" ? 50 : 200} MB</span></div>}
         <div className="pdf-editor-actions">
           <button className="secondary-button" type="button" onClick={openPdfPicker} disabled={loadingFiles || pdfFiles.length >= MAX_PDF_COUNT} title="Add PDF"><Plus size={17} /> Add PDF</button>
           <button className="secondary-button" type="button" onClick={addBlankPage}><FilePlus2 size={17} /> Blank page</button>
@@ -1876,10 +1882,6 @@ export function PdfEditor() {
       </div>
       <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { addPdfFiles(event.target.files); event.target.value = ""; }} />
       <input ref={imageInputRef} type="file" accept={processingMode === "browser" ? "image/png,image/jpeg,.png,.jpg,.jpeg" : "image/png,image/jpeg,image/heic,image/heif,image/tiff,image/gif,image/bmp,.png,.jpg,.jpeg,.heic,.heif,.tif,.tiff,.gif,.bmp"} multiple hidden onChange={(event) => { const targetPageId = imageTargetPageIdRef.current; imageTargetPageIdRef.current = null; addImages(event.target.files, targetPageId || undefined); event.target.value = ""; }} />
-      <div className="pdf-retention-row">
-        {processingMode === "local" && <div className="pdf-retention-name"><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem || filenameStem(defaultResultFilename)} label="Saved PDF name" description="This name is used for the export and, when retained, for PDF editor History in the Results folder." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(filenameStem(value)); }} /></div>}
-        {processingMode === "local" && <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles || Boolean(saveJob)} title="Save the current PDF to the Local agent Results folder without leaving the editor"><Save size={17} /> {saveJob ? "Saving…" : "Save to device"}</button>}
-      </div>
       {!pdfFiles.length && !pages.length ? <PdfEmptyState onBrowse={openPdfPicker} onBlank={addBlankPage} loading={loadingFiles} dragActive={pdfDragActive} browserMode={processingMode === "browser"} /> : !pages.length ? <PdfNoPagesState onBrowse={openPdfPicker} onBlank={addBlankPage} browserMode={processingMode === "browser"} /> : <div className="pdf-editor-layout">
         <aside className="pdf-page-rail"><div className="pdf-rail-heading"><span>Pages</span><small>Pages load as you scroll</small></div><div ref={pageListRef} className="pdf-page-list" onDragOver={handlePageListDragOver} onDrop={handlePageListDrop} onWheel={handlePageListWheel} onPointerDown={handlePageListPointerDown} onPointerMove={(event) => { handlePagePointerMove(event); handlePageListPointerMove(event); }} onPointerUp={(event) => { finishPagePointerDrag(event); finishPageListPointerScroll(event); }} onPointerCancel={(event) => { finishPagePointerDrag(event, true); finishPageListPointerScroll(event); }}>{renderPageList()}</div></aside>
         <section className="pdf-selected-panel"><div className="pdf-selected-heading"><div><span>Selected page {selectedPage ? pages.findIndex((page) => page.id === selectedPage.id) + 1 : "—"}</span><small>{selectedPage?.kind === "blank" ? "Blank page" : selectedPage?.sourceName || "Choose a page"}{selectedPage?.kind === "source" ? ` · Original page ${selectedPage.pageNumber}` : ""}</small></div></div><div ref={previewScrollRef} className="pdf-document-preview" onScroll={handlePreviewScroll}>{pages.map((page, index) => <Fragment key={page.id}><PdfPreviewPage page={page} index={index} selected={page.id === selectedPage?.id} previewZoom={previewZoom} pdfDocument={documentsRef.current[page.pdfIndex]} previewRootRef={previewScrollRef} elementRef={(element) => { if (element) previewElementRefs.current.set(page.id, element); else previewElementRefs.current.delete(page.id); }} selectedObject={selectedObject?.pageId === page.id ? selectedObject : null} onSelectObject={(object) => setSelectedObject(object ? { ...object, pageId: page.id } : null)} onChange={(images, history) => updatePage(page.id, { images }, history)} onRemove={(imageId) => removeImage(page.id, imageId)} onChangeTextBoxes={(textBoxes, history) => updatePage(page.id, { textBoxes }, history)} onRemoveTextBox={(textBoxId) => removeTextBox(page.id, textBoxId)} onAddImages={() => openImagePickerForPage(page.id)} onError={setPreviewError} /><PdfInsertPageButton pageNumber={index + 1} onClick={() => addBlankPageAfter(page.id)} /></Fragment>)}</div>{previewError && <DismissibleMessage className="pdf-preview-error" resetKey={previewError}><AlertTriangle size={16} /><span>{previewError}</span></DismissibleMessage>}<p className="pdf-editor-tip"><GripVertical size={15} /> Scroll the preview to select a page. Click + Add page between previews to insert a blank page. {processingMode === "browser" ? "Add images up to 1 MB each; duplicate pages and styled text boxes require Local agent." : "Use Text box to add editable text to the selected page."}</p></section>
@@ -2055,19 +2057,21 @@ function PdfPageCanvas({ page, pdfDocument, pageNumber, previewZoom = 1, selecte
       const surface = surfaceRef.current;
       const rotation = normalizeRotation(page.rotation);
       const baseViewport = pageInfo.pdfPage.getViewport({ scale: 1, rotation });
-      const availableWidth = Math.max(1, frame.clientWidth - 36);
-      const availableHeight = Math.max(1, frame.clientHeight - 36);
-      const fitScale = Math.min(availableWidth / baseViewport.width, availableHeight / baseViewport.height);
-      // Zoom is applied to the actual page dimensions, not only to the
-      // surrounding card. Once the page exceeds the frame, the frame scrolls.
-      const scale = Math.min(1.35, Math.max(0.45, fitScale)) * previewZoom;
+      const frameStyle = window.getComputedStyle(frame);
+      const paddingWidth = (Number.parseFloat(frameStyle.paddingLeft) || 0) + (Number.parseFloat(frameStyle.paddingRight) || 0);
+      const availableWidth = Math.max(1, frame.clientWidth - paddingWidth);
+      const { maxPreviewHeight } = previewViewportLimits({ viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
+      const layout = calculatePreviewPageLayout({ pageWidth: baseViewport.width, pageHeight: baseViewport.height, availableWidth, maxPreviewHeight, zoom: previewZoom });
+      const scale = layout.scale;
       // Keep the displayed page at the same CSS size, but render its backing
       // canvas at 2x (or the display's native density) so text and vector
       // artwork stay sharp in the full preview. Thumbnails intentionally use
       // their smaller render path.
       const pixelRatio = Math.min(3, Math.max(2, Number(window.devicePixelRatio) || 1));
       const displayViewport = pageInfo.pdfPage.getViewport({ scale, rotation });
-      setSurfaceSize({ width: displayViewport.width, height: displayViewport.height });
+      setSurfaceSize((previous) => previous && Math.abs(previous.width - displayViewport.width) < 0.1 && Math.abs(previous.height - displayViewport.height) < 0.1 && previous.isZoomed === layout.isZoomed
+        ? previous
+        : { width: displayViewport.width, height: displayViewport.height, isZoomed: layout.isZoomed });
       const renderViewport = pageInfo.pdfPage.getViewport({ scale: scale * pixelRatio, rotation });
       const canvas = canvasRef.current;
       canvas.width = Math.ceil(renderViewport.width);
@@ -2087,7 +2091,7 @@ function PdfPageCanvas({ page, pdfDocument, pageNumber, previewZoom = 1, selecte
   }, [pageInfo, page.rotation, previewZoom, onError]);
 
   const ratio = pageInfo ? pageDisplayRatio({ ...page, width: pageInfo.width, height: pageInfo.height }) : pageDisplayRatio(page);
-  return <div ref={frameRef} className="pdf-page-canvas-wrap"><div ref={surfaceRef} className="pdf-page-canvas-surface" style={{ "--page-ratio": ratio, ...(surfaceSize ? { width: `${surfaceSize.width}px`, height: `${surfaceSize.height}px` } : {}) }} onPointerDown={(event) => { if (event.target === event.currentTarget || event.target === canvasRef.current) onSelectObject?.(null); }}><canvas ref={canvasRef} aria-label={`PDF page ${pageNumber}`} /><ImageOverlayLayer page={page} selectedImageId={selectedObject?.type === "image" ? selectedObject.id : null} onSelect={(id) => onSelectObject?.({ type: "image", id })} onChange={onChange} onRemove={onRemove} /><TextBoxOverlayLayer page={page} selectedTextBoxId={selectedObject?.type === "textBox" ? selectedObject.id : null} onSelect={(id) => onSelectObject?.({ type: "textBox", id })} onChange={onChangeTextBoxes} onRemove={onRemoveTextBox} /></div></div>;
+  return <div ref={frameRef} className="pdf-page-canvas-wrap" data-preview-zoomed={surfaceSize?.isZoomed ? "true" : "false"}><div ref={surfaceRef} className="pdf-page-canvas-surface" style={{ "--page-ratio": ratio, ...(surfaceSize ? { width: `${surfaceSize.width}px`, height: `${surfaceSize.height}px` } : {}) }} onPointerDown={(event) => { if (event.target === event.currentTarget || event.target === canvasRef.current) onSelectObject?.(null); }}><canvas ref={canvasRef} aria-label={`PDF page ${pageNumber}`} /><ImageOverlayLayer page={page} selectedImageId={selectedObject?.type === "image" ? selectedObject.id : null} onSelect={(id) => onSelectObject?.({ type: "image", id })} onChange={onChange} onRemove={onRemove} /><TextBoxOverlayLayer page={page} selectedTextBoxId={selectedObject?.type === "textBox" ? selectedObject.id : null} onSelect={(id) => onSelectObject?.({ type: "textBox", id })} onChange={onChangeTextBoxes} onRemove={onRemoveTextBox} /></div></div>;
 }
 
 function PdfFallbackPreview({ page, compact = false, selectedObject, onSelectObject, onChange, onRemove, onChangeTextBoxes, onRemoveTextBox }) {
