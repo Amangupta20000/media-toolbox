@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { normalizeSvgMarkup, normalizeSvgOptions, validateSvgMarkup } from "../lib/svg-options.js";
+import { MAX_CUSTOM_DIMENSION, MAX_SVG_MARKUP_BYTES, normalizeSvgMarkup, normalizeSvgOptions, validateSvgMarkup } from "../lib/svg-options.js";
 import { metadataForPathname, PUBLIC_ROUTES } from "../lib/site-metadata.js";
 
 const projectDirectory = path.resolve(new URL("..", import.meta.url).pathname);
@@ -22,7 +22,7 @@ test("SVG to PNG is exposed as a tool with crawlable SEO metadata", async () => 
   assert.match(shell, /href: "\/svg-to-png", label: "SVG to PNG"/);
   assert.doesNotMatch(shell, /href: "\/svg-to-png"[^\n]+beta: true/);
   assert.match(route, /SvgToPngTool/);
-  assert.match(tool, /Convert an SVG file or paste SVG code/);
+  assert.match(tool, /Convert SVG files or pasted SVG code/);
   assert.match(tool, /1×/);
   assert.match(tool, /2×/);
   assert.match(tool, /3×/);
@@ -34,6 +34,13 @@ test("SVG to PNG is exposed as a tool with crawlable SEO metadata", async () => 
   assert.match(tool, /Background opacity/);
   assert.match(tool, /Keep aspect ratio/);
   assert.match(tool, /Live PNG preview/);
+  assert.match(tool, /Quick start/);
+  assert.match(tool, /Turn vector artwork into a PNG copy/);
+  assert.match(tool, /Maximum SVG input/);
+  assert.match(tool, /Browser mode supports 1×–4×/);
+  assert.match(tool, /Local agent supports custom output/);
+  assert.match(tool, /Export size/);
+  assert.match(tool, /Background/);
   assert.match(tool, /const \[livePreviewUrl, setLivePreviewUrl\]/);
   assert.match(tool, /processBrowserSvg\(source, options\)/);
   assert.match(tool, /const customScaleAvailable = processingMode !== "browser";/);
@@ -59,6 +66,8 @@ test("SVG to PNG is exposed as a tool with crawlable SEO metadata", async () => 
 });
 
 test("SVG options and markup validation keep conversion local and bounded", async () => {
+  assert.equal(MAX_SVG_MARKUP_BYTES, 25 * 1000 * 1000);
+  assert.equal(MAX_CUSTOM_DIMENSION, 8192);
   assert.deepEqual(normalizeSvgOptions({ scale: "4", background: "transparent", backgroundColor: "#ffffff" }), { scale: "4", background: "transparent", backgroundColor: "#ffffff", backgroundOpacity: 100, gradientStartColor: "#ffffff", gradientEndColor: "#d9f3f1", gradientAngle: 135, preserveAspectRatio: true });
   assert.deepEqual(normalizeSvgOptions({ scale: "custom", width: "1200", height: "800", background: "color", backgroundColor: "#123ABC", backgroundOpacity: "72", preserveAspectRatio: false }), { scale: "custom", width: 1200, height: 800, background: "color", backgroundColor: "#123abc", backgroundOpacity: 72, gradientStartColor: "#ffffff", gradientEndColor: "#d9f3f1", gradientAngle: 135, preserveAspectRatio: false });
   assert.deepEqual(normalizeSvgOptions({ scale: "1", background: "gradient", gradientStartColor: "#FF0000", gradientEndColor: "#00ff00", gradientAngle: "45", backgroundOpacity: "60" }), { scale: "1", background: "gradient", backgroundColor: "#ffffff", backgroundOpacity: 60, gradientStartColor: "#ff0000", gradientEndColor: "#00ff00", gradientAngle: 45, preserveAspectRatio: true });

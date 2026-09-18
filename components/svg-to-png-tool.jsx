@@ -12,7 +12,7 @@ import { ProcessingOptionsPanel } from "./processing-options.jsx";
 import { processBrowserSvg } from "./browser-processing.js";
 import { takeHistoryEdit } from "./history-edit.js";
 import { isProcessingLocationReady, getProcessingJob, preferredProcessingMode, probeProcessingLocations, uploadWithProgress, deleteProcessingJob } from "./processing-client.js";
-import { normalizeSvgMarkup, normalizeSvgOptions, validateSvgMarkup } from "../lib/svg-options.js";
+import { MAX_CUSTOM_DIMENSION, MAX_SVG_MARKUP_BYTES, normalizeSvgMarkup, normalizeSvgOptions, validateSvgMarkup } from "../lib/svg-options.js";
 import { pushAnalyticsEvent } from "../lib/analytics.js";
 
 const scaleOptions = [
@@ -154,7 +154,7 @@ export function SvgToPngTool() {
 
   const handleFile = async (file) => {
     if (!file) return;
-    if (file.size > 25 * 1000 * 1000) {
+    if (file.size > MAX_SVG_MARKUP_BYTES) {
       setError("SVG files must be 25 MB or smaller.");
       return;
     }
@@ -295,14 +295,15 @@ export function SvgToPngTool() {
   }, [job, jobMode]);
 
   return <AppShell>
-    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> Rasterize & export</div><h1>Free SVG to PNG converter</h1><p>Convert an SVG file or paste SVG code to PNG at 1×, 2×, 3×, 4×, or a custom size with a transparent, solid, or gradient background.</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Local or browser processing</span></div></div>
+    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> Rasterize & export</div><h1>Free SVG to PNG converter with transparent backgrounds</h1><p>Convert SVG files or pasted SVG code into crisp PNG images at 1×, 2×, 3×, 4×, or an exact size without uploading in Browser mode.</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Local or browser processing</span></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
     <ProcessingOptionsPanel tool="svg-to-png" locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={selectProcessingMode} />
     {activeView === "history" ? <ToolHistory tool="svg-to-png" /> : activeView === "guide" ? <ToolSeoContent pathname="/svg-to-png" /> : activeView === "processing" ? null : <>
       <ProcessingMode value={processingMode} onChange={selectProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool="svg-to-png" />
+      <section className="tool-quick-start svg-quick-start" aria-labelledby="svg-quick-start-title"><div className="tool-quick-start-heading"><span className="section-kicker"><span className="kicker-line" /> Quick start</span><strong id="svg-quick-start-title">Turn vector artwork into a PNG copy</strong></div><ol className="tool-quick-start-steps"><li><b>1</b><span><strong>Add artwork</strong><small>Upload an SVG or paste its markup.</small></span></li><li><b>2</b><span><strong>Choose size</strong><small>Pick a scale or exact dimensions.</small></span></li><li><b>3</b><span><strong>Style the canvas</strong><small>Keep transparency or add a colour.</small></span></li><li><b>4</b><span><strong>Preview and download</strong><small>Review the PNG before saving it.</small></span></li></ol><div className="tool-quick-start-note"><Info size={16} /><span><strong>Limits:</strong> SVG input up to {formatBytes(MAX_SVG_MARKUP_BYTES)}. Browser mode supports 1×–4×; Local agent supports custom output up to {MAX_CUSTOM_DIMENSION} × {MAX_CUSTOM_DIMENSION} px.</span></div></section>
       <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${processingReady ? "ready" : ""}`} /><span>{processingReady ? `${processingMode === "browser" ? "Browser" : processingMode === "server" ? "Server worker" : "Local agent"} ready for SVG conversion` : processingMode === "browser" ? "Browser conversion unavailable" : processingMode === "server" ? "Server worker unavailable" : "Connect the Local agent to convert"}</span></div><span>SVG input · PNG output</span></div>
       {job ? <JobStatusCard job={job} tool="svg-to-png" isImage mode={jobMode} keepResult={false} onReset={reset} /> : <div className="workspace-grid svg-workspace-grid">
-        <section className="tool-card primary-card svg-source-card"><div className="card-heading"><div><span className="card-index">01</span><h2>Add SVG source</h2></div><span className="required-label">Required</span></div><FileDropzone file={source} onFile={handleFile} onClear={() => { setSource(null); setSvgCode(""); setError(""); }} variant="image" accept=".svg,image/svg+xml" label="Drop an SVG file here" hint="or click to browse from your device" required disabled={busy} />
+        <section className="tool-card primary-card svg-source-card"><div className="card-heading"><div><span className="card-index">01</span><h2>Add SVG source</h2></div><span className="required-label">Required</span></div><FileDropzone file={source} onFile={handleFile} onClear={() => { setSource(null); setSvgCode(""); setError(""); }} variant="image" accept=".svg,image/svg+xml" label="Drop an SVG file here" hint="or click to browse from your device" required disabled={busy} /><div className="limit-row"><span>Maximum SVG input</span><strong>{formatBytes(MAX_SVG_MARKUP_BYTES)}</strong></div>
           <div className="svg-code-divider"><span>or paste SVG code</span><button type="button" className="text-button" onClick={pasteFromClipboard} disabled={busy}><ClipboardPaste size={14} /> Paste from clipboard</button></div>
           <textarea className="svg-code-input" value={svgCode} onChange={(event) => setSvgCode(event.target.value)} onPaste={handleCodePaste} onBlur={handleCodeBlur} placeholder="<svg viewBox=&quot;0 0 800 600&quot; ...>" aria-label="Paste SVG code" disabled={busy} />
           {source && previewUrl && <div className="svg-preview-card"><div className="preview-heading"><span>Live PNG preview</span><small>{formatBytes(source.size)} · current settings</small></div><div className="svg-preview-frame"><img src={livePreviewUrl || previewUrl} alt="Preview of the selected SVG with current PNG background" /></div></div>}
