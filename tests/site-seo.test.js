@@ -43,8 +43,8 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(document, /name="theme-color"/);
   assert.match(document, /media-toolbox-theme/);
   assert.match(document, /document\.documentElement\.dataset\.theme/);
-  assert.match(seo, /import Script from "next\/script"/);
-  assert.match(seo, /<Script id="adsense-publisher" strategy="beforeInteractive" async src=\{`https:\/\/pagead2\.googlesyndication\.com\/pagead\/js\/adsbygoogle\.js\?client=\$\{ADSENSE_CLIENT_ID\}`\} crossOrigin="anonymous" \/>/);
+  assert.doesNotMatch(seo, /next\/script/);
+  assert.match(seo, /<script async src=\{`https:\/\/pagead2\.googlesyndication\.com\/pagead\/js\/adsbygoogle\.js\?client=\$\{ADSENSE_CLIENT_ID\}`\} crossOrigin="anonymous" \/>/);
   assert.match(seo, /crossOrigin="anonymous"/);
   assert.equal(adsTxt.trim(), "google.com, pub-8789714270333969, DIRECT, f08c47fec0942fa0");
   assert.match(styles, /\[data-theme="dark"\] \.section-kicker \{ color: #8fe0d8; \}/);
