@@ -20,6 +20,7 @@ if (!app.requestSingleInstanceLock()) {
   let licenseServerManager;
   let runtimeUpdater;
   let installedRuntimeDirectory = "";
+  let activeAgentVersion = app.getVersion();
   let appReplacementWatcher;
   let appReplacementRestarting = false;
   const latestReleaseUrl = "https://github.com/Amangupta20000/media-toolbox/releases/latest";
@@ -61,7 +62,7 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   function withDesktopMetadata(value = {}) {
-    return { ...value, appVersion: app.getVersion() };
+    return { ...value, appVersion: activeAgentVersion };
   }
 
   function executableIdentity(filename) {
@@ -550,10 +551,12 @@ if (!app.requestSingleInstanceLock()) {
     const bundledRuntimeIsCurrentOrNewer = !installedRuntime || compareVersions(app.getVersion(), installedRuntime.manifest.version) >= 0;
     installedRuntimeDirectory = bundledRuntimeIsCurrentOrNewer ? "" : installedRuntime.directory;
     if (installedRuntime && !bundledRuntimeIsCurrentOrNewer) {
+      activeAgentVersion = installedRuntime.manifest.version;
       process.env.AGENT_VERSION = installedRuntime.manifest.version;
       agent = await import(`${pathToFileURL(path.join(installedRuntime.directory, "agent", "server.js")).href}?runtime=${encodeURIComponent(installedRuntime.manifest.version)}`);
       console.log(`Using verified local agent runtime ${installedRuntime.manifest.version}`);
     } else {
+      activeAgentVersion = app.getVersion();
       if (installedRuntime) console.log(`Using bundled agent runtime ${app.getVersion()} instead of older saved runtime ${installedRuntime.manifest.version}`);
       agent = await import("./server.js");
     }

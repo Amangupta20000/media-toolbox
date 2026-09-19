@@ -287,6 +287,9 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(electronMain, /updateType: "full"/);
   assert.match(electronMain, /readInstalledRuntime/);
   assert.match(electronMain, /compareVersions\(app\.getVersion\(\), installedRuntime\.manifest\.version\)/);
+  assert.match(electronMain, /let activeAgentVersion = app\.getVersion\(\)/);
+  assert.match(electronMain, /appVersion: activeAgentVersion/);
+  assert.match(electronMain, /activeAgentVersion = installedRuntime\.manifest\.version/);
   assert.match(electronMain, /pathToFileURL/);
   assert.match(dashboardRenderer, /check-updates-bottom/);
   assert.match(builderConfig, /provider: github/);
