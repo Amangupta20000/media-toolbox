@@ -177,7 +177,7 @@ test("localhost mock APIs support browser preflight and integration requests", a
     const postResponse = await fetch(url("/v1/mock/cors-api/users"), {
       method: "POST",
       headers: { Origin: "http://localhost:5173", "Content-Type": "application/json", "X-Client-Id": "frontend" },
-      body: JSON.stringify({ name: "Grace" }),
+      body: JSON.stringify({ id: "2", name: "Grace" }),
     });
     assert.equal(postResponse.status, 201);
     assert.equal(postResponse.headers.get("access-control-allow-origin"), "http://localhost:5173");

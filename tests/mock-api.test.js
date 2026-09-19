@@ -13,9 +13,9 @@ test("mock API CRUD engine implements collection and record semantics", () => {
   let result = applyMockRequest(value, { method: "GET", pathname: "/users" });
   assert.equal(result.status, 200);
   assert.deepEqual(result.body, [{ id: "1", name: "Ada", role: "admin" }]);
-  result = applyMockRequest(value, { method: "POST", pathname: "/users", body: { name: "Grace" } });
+  result = applyMockRequest(value, { method: "POST", pathname: "/users", body: { id: "2", name: "Grace" } });
   assert.equal(result.status, 201);
-  assert.match(result.body.id, /^users-/);
+  assert.equal(result.body.id, "2");
   value = result.project;
   result = applyMockRequest(value, { method: "PUT", pathname: `/users/${result.body.id}`, body: { name: "Grace Hopper", active: true } });
   assert.deepEqual(result.body, { id: result.body.id, name: "Grace Hopper", active: true });
@@ -44,6 +44,13 @@ test("mock API validation enforces identifiers, records, and manifest limits", (
   const tooMany = Array.from({ length: MOCK_API_LIMITS.maxRecordsPerCollection + 1 }, (_, index) => ({ id: String(index) }));
   assert.throws(() => normalizeMockProject({ id: "large", name: "Large", collections: [{ name: "items", methods: ["GET"], records: tooMany }] }), /at most 1000 records/);
   assert.throws(() => normalizeMockProject({ id: "unsafe", name: "Unsafe", collections: [{ name: "items", methods: ["GET"], records: [JSON.parse('{"__proto__":"bad"}')] }] }), /not allowed/);
+});
+
+test("mock API preserves seed records without IDs and requires IDs for new records", () => {
+  const value = normalizeMockProject({ id: "no-auto-ids", name: "No automatic IDs", collections: [{ name: "users", methods: ["GET", "POST"], records: [{ name: "Ada" }, { name: "Grace" }] }] });
+  assert.deepEqual(value.collections[0].records, [{ name: "Ada" }, { name: "Grace" }]);
+  assert.deepEqual(applyMockRequest(value, { method: "GET", pathname: "/users" }).body, [{ name: "Ada" }, { name: "Grace" }]);
+  assert.throws(() => applyMockRequest(value, { method: "POST", pathname: "/users", body: { name: "Alan" } }), (error) => error instanceof MockApiError && error.code === "missing_record_id" && error.status === 400);
 });
 
 test("mock API filesystem storage persists and deletes projects in Results", async () => {
@@ -97,9 +104,22 @@ test("mock API supports multiple database APIs in one project", () => {
     ],
   });
   assert.equal(applyMockRequest(value, { method: "GET", pathname: "/users" }).body.length, 1);
-  const created = applyMockRequest(value, { method: "POST", pathname: "/users", body: { name: "Grace" } });
+  const created = applyMockRequest(value, { method: "POST", pathname: "/users", body: { id: "2", name: "Grace" } });
   assert.equal(created.status, 201);
   assert.equal(created.project.collections[0].records.length, 2);
+});
+
+test("database endpoints keep working when their public route is renamed", () => {
+  const value = normalizeMockProject({
+    id: "renamed-route",
+    name: "Renamed route",
+    mode: "database",
+    collections: [{ name: "users", methods: ["GET", "POST", "PUT", "PATCH", "DELETE"], records: [{ id: "1", name: "Ada" }] }],
+    endpoints: [{ id: "users-get", name: "People", mode: "database", collection: "users", method: "GET", path: "/people" }],
+  });
+  const result = applyMockRequest(value, { method: "GET", pathname: "/people" });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, [{ id: "1", name: "Ada" }]);
 });
 
 test("mock API parses cURL locally and redacts sensitive headers", () => {

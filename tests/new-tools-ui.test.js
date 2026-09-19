@@ -98,6 +98,7 @@ test("Mock API JSON fields use a growing beautifier and collapsible node view", 
   assert.match(page, />Close 3<\/button>/);
   assert.match(page, />Node view<\/button>/);
   assert.match(page, /onPaste=\{handlePaste\}/);
+  assert.match(page, /const isOpen = event\.currentTarget\.open/);
   assert.match(page, /height: `min\(/);
   assert.match(styles, /\.json-beautifier-textarea[^\n]*max-height: 75vh/);
   assert.match(styles, /\.json-beautifier-tree[^\n]*max-height: 75vh/);

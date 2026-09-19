@@ -21,6 +21,7 @@ function parseJsonText(text, label, fallback = null) { if (!String(text || "").t
 function projectCollections(project) { return Array.isArray(project?.collections) ? project.collections : []; }
 function projectEndpoints(project) { return Array.isArray(project?.endpoints) ? project.endpoints : []; }
 function collectionFromPath(path) { const firstSegment = String(path || "").split("?")[0].split("/").filter(Boolean)[0] || "users"; const safeName = firstSegment.replace(/[^a-zA-Z0-9_-]/g, ""); return safeName || "users"; }
+function collectionForDraft(endpoints, draft) { const savedEndpoint = endpoints.find((item) => item.id === draft.endpointId); const matchingGet = endpoints.find((item) => item.method === "GET" && item.path === draft.path); return savedEndpoint?.collection || matchingGet?.collection || collectionFromPath(draft.path); }
 function emptyDraft(project) { const collections = projectCollections(project); const collection = collections[0]?.name || "users"; const records = collections[0]?.records || []; const defaultPath = "/" + collection; const usedGetPaths = new Set(projectEndpoints(project).filter((item) => item.method === "GET").map((item) => item.path)); let path = defaultPath; let suffix = 2; while (usedGetPaths.has(path)) path = "/" + collection + "-" + suffix++; return { endpointId: "", name: "", method: "GET", path, collection: collectionFromPath(path), requestHeaders: "{}", requestBody: "", successStatus: "200", successHeaders: '{\n  "Content-Type": "application/json"\n}', successBody: "{\n  \"message\": \"ok\"\n}", successOverride: false, errorStatus: "400", errorHeaders: '{\n  "Content-Type": "application/json"\n}', errorBody: '{\n  "error": "Mock API error"\n}', seedText: pretty(path === defaultPath ? records : []) }; }
 function endpointDraft(project, endpointIdValue) {
   const endpoint = projectEndpoints(project).find((item) => item.id === endpointIdValue) || projectEndpoints(project)[0];
@@ -67,7 +68,16 @@ function JsonTreeNode({ value, label, path, collapsedPaths, setCollapsedPaths })
   const collapsed = collapsedPaths.has(path);
   const entries = jsonEntries(value);
   const nodeLabel = label || (Array.isArray(value) ? "Array" : "Object");
-  return <details className="json-beautifier-node" open={!collapsed} onToggle={(event) => setCollapsedPaths((current) => { const next = new Set(current); if (event.currentTarget.open) next.delete(path); else next.add(path); return next; })}><summary><span className="json-beautifier-key">{nodeLabel}</span><span className="json-beautifier-node-type">{Array.isArray(value) ? `Array · ${entries.length}` : `Object · ${entries.length}`}</span></summary><div className="json-beautifier-children">{entries.map(([key, child]) => <JsonTreeNode key={`${path}.${key}`} value={child} label={String(key)} path={`${path}.${key}`} collapsedPaths={collapsedPaths} setCollapsedPaths={setCollapsedPaths} />)}</div></details>;
+  const handleToggle = (event) => {
+    const isOpen = event.currentTarget.open;
+    setCollapsedPaths((current) => {
+      const next = new Set(current);
+      if (isOpen) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+  return <details className="json-beautifier-node" open={!collapsed} onToggle={handleToggle}><summary><span className="json-beautifier-key">{nodeLabel}</span><span className="json-beautifier-node-type">{Array.isArray(value) ? `Array · ${entries.length}` : `Object · ${entries.length}`}</span></summary><div className="json-beautifier-children">{entries.map(([key, child]) => <JsonTreeNode key={`${path}.${key}`} value={child} label={String(key)} path={`${path}.${key}`} collapsedPaths={collapsedPaths} setCollapsedPaths={setCollapsedPaths} />)}</div></details>;
 }
 function JsonBeautifierEditor({ label, value, onChange, helpText, placeholder }) {
   const [showTree, setShowTree] = useState(false);
@@ -208,7 +218,7 @@ export function MockApiPage() {
   useEffect(() => { if (surface === "history") listLocalMockProjects().then((items) => setLocalProjects(Array.isArray(items) ? items : [])).catch((cause) => setError(cause.message)); }, [surface]);
 
   const projectWithDraft = () => {
-    const databaseCollection = isDatabase ? (draft.endpointId ? draft.collection || collectionFromPath(draft.path) : collectionFromPath(draft.path)) : "";
+    const databaseCollection = isDatabase ? collectionForDraft(endpoints, draft) : "";
     const requestHeaders = parseJsonText(draft.requestHeaders, "Request headers", {});
     const requestBody = parseJsonText(draft.requestBody, "Request body", null);
     const successBody = parseJsonText(draft.successBody, "Success response", {});
@@ -240,7 +250,7 @@ export function MockApiPage() {
       if (scenario === "error") headers["X-Mock-Scenario"] = "error";
       const result = simulateMockRequest(next, { method: draft.method, pathname: draft.path, body, headers });
       setResponse(result); setProject(result.project); setError("");
-      if (isDatabase) { const collection = draft.endpointId ? draft.collection || collectionFromPath(draft.path) : collectionFromPath(draft.path); const records = projectCollections(result.project).find((item) => item.name === collection)?.records || []; setDraft((current) => ({ ...current, collection, seedText: pretty(records) })); }
+      if (isDatabase) { const collection = collectionForDraft(endpoints, draft); const records = projectCollections(result.project).find((item) => item.name === collection)?.records || []; setDraft((current) => ({ ...current, collection, seedText: pretty(records) })); }
       pushAnalyticsEvent("mock_api_request_simulated", { surface: "request_console", mode: "local", method: draft.method });
     } catch (cause) { setError(cause.message); setResponse({ status: cause.status || 400, headers: cause.headers || {}, body: { error: cause.message, code: cause.code || "mock_api_error" } }); }
   };
