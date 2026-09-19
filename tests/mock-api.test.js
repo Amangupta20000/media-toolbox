@@ -53,6 +53,16 @@ test("mock API preserves seed records without IDs and requires IDs for new recor
   assert.throws(() => applyMockRequest(value, { method: "POST", pathname: "/users", body: { name: "Alan" } }), (error) => error instanceof MockApiError && error.code === "missing_record_id" && error.status === 400);
 });
 
+test("mock API preserves an object-shaped database GET response", () => {
+  const value = normalizeMockProject({
+    id: "object-config",
+    name: "Object config",
+    collections: [{ name: "config", methods: ["GET"], responseShape: "object", records: { enabled: true, region: "eu" } }],
+  });
+  assert.deepEqual(value.collections[0].records, [{ enabled: true, region: "eu" }]);
+  assert.deepEqual(applyMockRequest(value, { method: "GET", pathname: "/config" }).body, { enabled: true, region: "eu" });
+});
+
 test("mock API migrates only legacy generated record IDs", () => {
   const value = normalizeMockProject({
     version: 2,

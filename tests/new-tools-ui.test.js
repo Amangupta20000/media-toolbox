@@ -100,9 +100,12 @@ test("Mock API JSON fields use one growing editor with formatting and collapsibl
   assert.match(page, /Use data from/);
   assert.match(page, /Its route can be different/);
   assert.match(page, /databaseEndpointId: event\.target\.value/);
-  assert.match(page, /const draftSeedIsUnchanged = draft\.method !== "GET" \|\| draft\.seedText === pretty\(localCollection\?\.records \|\| \[\]\)/);
+  assert.match(page, /function collectionSeedValue\(collection\)/);
+  assert.match(page, /const draftSeedIsUnchanged = draft\.method !== "GET" \|\| draft\.seedText === pretty\(collectionSeedValue\(localCollection\)\)/);
+  assert.match(page, /JSON config must be an object or an array of objects/);
+  assert.match(page, /Use one JSON object or an array of objects/);
   assert.match(page, /const latestProject = \(await listLocalMockProjects\(\)\)\.find\(\(item\) => item\.id === project\.id\)/);
-  assert.match(page, /saveDraft = \{ \.\.\.draft, seedText: pretty\(latestCollection\?\.records \|\| \[\]\) \}/);
+  assert.match(page, /saveDraft = \{ \.\.\.draft, seedText: pretty\(collectionSeedValue\(latestCollection\)\) \}/);
   assert.match(page, /function removeEmptyJsonLines/);
   assert.match(page, /filter\(\(line\) => line\.trim\(\) !== ""\)/);
   assert.match(page, /function prettifyJsonText/);
