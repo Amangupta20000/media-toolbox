@@ -139,6 +139,28 @@ test("database endpoints keep working when their public route is renamed", () =>
   assert.deepEqual(result.body, [{ id: "1", name: "Ada" }]);
 });
 
+test("renaming a database GET route keeps records created by POST", () => {
+  const value = normalizeMockProject({
+    id: "renamed-after-post",
+    name: "Renamed after POST",
+    mode: "database",
+    collections: [{ name: "users", methods: ["GET", "POST"], records: [{ id: "1", name: "Ada" }] }],
+    endpoints: [
+      { id: "users-get", name: "Users", mode: "database", collection: "users", method: "GET", path: "/users" },
+      { id: "users-post", name: "Create user", mode: "database", collection: "users", method: "POST", path: "/users" },
+    ],
+  });
+  const created = applyMockRequest(value, { method: "POST", pathname: "/users", body: { id: "2", name: "Grace" } });
+  const renamed = normalizeMockProject({
+    ...created.project,
+    endpoints: created.project.endpoints.map((endpoint) => endpoint.id === "users-get" ? { ...endpoint, path: "/myapi" } : endpoint),
+  });
+  assert.deepEqual(applyMockRequest(renamed, { method: "GET", pathname: "/myapi" }).body, [
+    { id: "1", name: "Ada" },
+    { id: "2", name: "Grace" },
+  ]);
+});
+
 test("mock API parses cURL locally and redacts sensitive headers", () => {
   const parsed = parseMockCurl("curl -X POST 'https://api.example.test/users?draft=1' -H 'Content-Type: application/json' -H 'Authorization: Bearer secret-value' -d '{\"name\":\"Ada\"}'");
   assert.equal(parsed.method, "POST");

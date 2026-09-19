@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, Copy, Download, FileDown, FileText, Play, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
 import { MockApiError, MOCK_METHODS, normalizeMockProject, parseMockCurl } from "../lib/mock-api.js";
@@ -15,13 +15,38 @@ const DEFAULT_PROJECT = { name: "Frontend mock API", id: "frontend-mock", mode: 
 function initialProject() { return normalizeMockProject(DEFAULT_PROJECT); }
 function nextProjectId(projects = []) { const used = new Set(projects.map((item) => item?.id).filter(Boolean)); const base = `mock-project-${Date.now().toString(36)}`; let candidate = base; let suffix = 2; while (used.has(candidate)) candidate = `${base}-${suffix++}`; return candidate; }
 function pretty(value) { return JSON.stringify(value, null, 2); }
+function removeEmptyJsonLines(value) {
+  return String(value ?? "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .join("\n")
+    .trim();
+}
+function prettifyJsonText(value) {
+  const normalized = removeEmptyJsonLines(value);
+  return JSON.stringify(JSON.parse(normalized), null, 2).replace(/\n{2,}/g, "\n");
+}
+function jsonParseErrorMessage(value) {
+  try {
+    JSON.parse(value);
+    return "";
+  } catch (error) {
+    const position = Number(String(error?.message || "").match(/position (\d+)/i)?.[1]);
+    if (!Number.isInteger(position)) return "Enter valid JSON before prettifying.";
+    const beforeError = String(value).slice(0, position);
+    const line = beforeError.split("\n").length;
+    const column = position - beforeError.lastIndexOf("\n");
+    return `Fix JSON syntax near line ${line}, column ${column}.`;
+  }
+}
 function downloadText(filename, value) { const blob = new Blob([value], { type: "application/json" }); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url); }
 function endpointId(method, path) { const value = `${method}-${path}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); return (value || "api").startsWith("api") ? value || "api" : `api-${value || "endpoint"}`; }
 function parseJsonText(text, label, fallback = null) { if (!String(text || "").trim()) return fallback; try { return JSON.parse(text); } catch { throw new MockApiError(`${label} must be valid JSON.`); } }
 function projectCollections(project) { return Array.isArray(project?.collections) ? project.collections : []; }
 function projectEndpoints(project) { return Array.isArray(project?.endpoints) ? project.endpoints : []; }
 function collectionFromPath(path) { const firstSegment = String(path || "").split("?")[0].split("/").filter(Boolean)[0] || "users"; const safeName = firstSegment.replace(/[^a-zA-Z0-9_-]/g, ""); return safeName || "users"; }
-function collectionForDraft(endpoints, draft) { const savedEndpoint = endpoints.find((item) => item.id === draft.endpointId); const matchingGet = endpoints.find((item) => item.method === "GET" && item.path === draft.path); return savedEndpoint?.collection || matchingGet?.collection || collectionFromPath(draft.path); }
+function collectionForDraft(endpoints, draft) { const savedEndpoint = endpoints.find((item) => item.id === draft.endpointId); const matchingGet = endpoints.find((item) => item.method === "GET" && item.path === draft.path); const firstGet = endpoints.find((item) => item.method === "GET"); return draft.collection || savedEndpoint?.collection || matchingGet?.collection || (draft.method !== "GET" ? firstGet?.collection : null) || collectionFromPath(draft.path); }
 function emptyDraft(project) { const collections = projectCollections(project); const collection = collections[0]?.name || "users"; const records = collections[0]?.records || []; const defaultPath = "/" + collection; const usedGetPaths = new Set(projectEndpoints(project).filter((item) => item.method === "GET").map((item) => item.path)); let path = defaultPath; let suffix = 2; while (usedGetPaths.has(path)) path = "/" + collection + "-" + suffix++; return { endpointId: "", name: "", method: "GET", path, collection: collectionFromPath(path), requestHeaders: "{}", requestBody: "", successStatus: "200", successHeaders: '{\n  "Content-Type": "application/json"\n}', successBody: "{\n  \"message\": \"ok\"\n}", successOverride: false, errorStatus: "400", errorHeaders: '{\n  "Content-Type": "application/json"\n}', errorBody: '{\n  "error": "Mock API error"\n}', seedText: pretty(path === defaultPath ? records : []) }; }
 function endpointDraft(project, endpointIdValue) {
   const endpoint = projectEndpoints(project).find((item) => item.id === endpointIdValue) || projectEndpoints(project)[0];
@@ -55,57 +80,353 @@ function ResponsePanel({ response }) {
   return <div className="mock-response mock-postman-response"><div className="mock-response-status"><strong className={response.status >= 400 ? "error" : "success"}>{response.status}</strong><span>{response.status === 204 ? "No content" : "JSON response"}</span>{response.durationMs !== undefined && <small>{response.durationMs} ms</small>}</div><div className="mock-response-tabs"><button type="button" className={tab === "body" ? "active" : ""} onClick={() => setTab("body")}>Body</button><button type="button" className={tab === "headers" ? "active" : ""} onClick={() => setTab("headers")}>Headers</button></div>{tab === "body" ? <pre>{response.body == null ? "" : JSON.stringify(response.body, null, 2)}</pre> : <pre>{JSON.stringify(response.headers || {}, null, 2)}</pre>}</div>;
 }
 
-function jsonEntries(value) { return Array.isArray(value) ? value.map((item, index) => [index, item]) : Object.entries(value); }
-function isJsonContainer(value) { return value !== null && typeof value === "object"; }
-function collapseJsonPaths(value, threshold, path = "root", depth = 0, paths = new Set()) {
-  if (!isJsonContainer(value)) return paths;
-  if (depth >= threshold) paths.add(path);
-  jsonEntries(value).forEach(([key, child]) => collapseJsonPaths(child, threshold, `${path}.${key}`, depth + 1, paths));
-  return paths;
+function jsonNestingDepth(text) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (const character of text) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') inString = true;
+    else if (character === "{" || character === "[") depth += 1;
+    else if (character === "}" || character === "]") depth = Math.max(0, depth - 1);
+  }
+  return depth;
 }
-function JsonTreeNode({ value, label, path, collapsedPaths, setCollapsedPaths }) {
-  if (!isJsonContainer(value)) return <div className="json-beautifier-value"><span className="json-beautifier-key">{label}</span><span className="json-beautifier-colon">:</span><span className="json-beautifier-primitive">{JSON.stringify(value)}</span></div>;
-  const collapsed = collapsedPaths.has(path);
-  const entries = jsonEntries(value);
-  const nodeLabel = label || (Array.isArray(value) ? "Array" : "Object");
-  const handleToggle = (event) => {
-    const isOpen = event.currentTarget.open;
-    setCollapsedPaths((current) => {
-      const next = new Set(current);
-      if (isOpen) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  };
-  return <details className="json-beautifier-node" open={!collapsed} onToggle={handleToggle}><summary><span className="json-beautifier-key">{nodeLabel}</span><span className="json-beautifier-node-type">{Array.isArray(value) ? `Array · ${entries.length}` : `Object · ${entries.length}`}</span></summary><div className="json-beautifier-children">{entries.map(([key, child]) => <JsonTreeNode key={`${path}.${key}`} value={child} label={String(key)} path={`${path}.${key}`} collapsedPaths={collapsedPaths} setCollapsedPaths={setCollapsedPaths} />)}</div></details>;
+
+function countFoldItems(text, openIndex, closeIndex) {
+  let depth = 0;
+  let commas = 0;
+  let hasValue = false;
+  let inString = false;
+  let escaped = false;
+  for (let index = openIndex + 1; index < closeIndex; index += 1) {
+    const character = text[index];
+    if (inString) {
+      hasValue = true;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') { inString = true; hasValue = true; }
+    else if (character === "{" || character === "[") { depth += 1; hasValue = true; }
+    else if (character === "}" || character === "]") depth = Math.max(0, depth - 1);
+    else if (character === "," && depth === 0) commas += 1;
+    else if (!/\s/.test(character)) hasValue = true;
+  }
+  return hasValue ? commas + 1 : 0;
 }
+
+function buildJsonFolds(text) {
+  const stack = [];
+  const folds = [];
+  let line = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === "\n") { line += 1; continue; }
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') { inString = true; continue; }
+    if (character === "{" || character === "[") stack.push({ index, line, character, depth: stack.length });
+    else if ((character === "}" || character === "]") && stack.length) {
+      const opening = stack.pop();
+      const matching = (opening.character === "{" && character === "}") || (opening.character === "[" && character === "]");
+      if (matching && opening.line < line) folds.push({ key: `${opening.line}:${opening.index}`, startLine: opening.line, endLine: line, open: opening.character, close: character, closeIndex: index, depth: opening.depth, items: countFoldItems(text, opening.index, index) });
+    }
+  }
+  return folds.sort((left, right) => left.startLine - right.startLine || left.depth - right.depth);
+}
+
+function jsonFoldSignature(fold) { return `${fold.open}:${fold.close}:${fold.depth}`; }
+function remapJsonFoldKeys(sourceFolds, targetFolds, activeKeys) {
+  const source = Array.isArray(sourceFolds) ? sourceFolds : [];
+  const target = Array.isArray(targetFolds) ? targetFolds : [];
+  const sourceGroups = new Map();
+  const targetGroups = new Map();
+  source.forEach((fold) => { const signature = jsonFoldSignature(fold); if (!sourceGroups.has(signature)) sourceGroups.set(signature, []); sourceGroups.get(signature).push(fold); });
+  target.forEach((fold) => { const signature = jsonFoldSignature(fold); if (!targetGroups.has(signature)) targetGroups.set(signature, []); targetGroups.get(signature).push(fold); });
+  return new Set([...activeKeys].map((key) => {
+    const fold = source.find((item) => item.key === key);
+    if (!fold) return null;
+    const signature = jsonFoldSignature(fold);
+    const sourceIndex = sourceGroups.get(signature)?.indexOf(fold) ?? -1;
+    return targetGroups.get(signature)?.[sourceIndex]?.key || null;
+  }).filter(Boolean));
+}
+
+function escapeJsonHtml(value) { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function highlightJsonLine(line) {
+  let commentStart = -1;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < line.length - 1; index += 1) {
+    const character = line[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+    } else if (character === '"') inString = true;
+    else if (character === "/" && line[index + 1] === "/") { commentStart = index; break; }
+  }
+  const code = commentStart >= 0 ? line.slice(0, commentStart) : line;
+  const comment = commentStart >= 0 ? `<span class="json-token-comment">${escapeJsonHtml(line.slice(commentStart))}</span>` : "";
+  const tokenPattern = /"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null|[{}\[\],:]/g;
+  let output = "";
+  let lastIndex = 0;
+  let match;
+  while ((match = tokenPattern.exec(code))) {
+    output += escapeJsonHtml(code.slice(lastIndex, match.index));
+    const token = match[0];
+    const className = token.startsWith('"') ? (/^\s*:/.test(code.slice(match.index + token.length)) ? "json-token-key" : "json-token-string") : (/^-?\d/.test(token) ? "json-token-number" : (/^(true|false)$/.test(token) ? "json-token-boolean" : (token === "null" ? "json-token-null" : "json-token-punctuation")));
+    output += `<span class="${className}">${escapeJsonHtml(token)}</span>`;
+    lastIndex = match.index + token.length;
+  }
+  return output + escapeJsonHtml(code.slice(lastIndex)) + comment;
+}
+
+function pastedJsonText(rawText, { propertySlot = false, indent = "" } = {}) {
+  const trimmed = rawText.trim();
+  if (!trimmed) return null;
+  if (propertySlot && !trimmed.startsWith("{") && !trimmed.startsWith("[") && trimmed.includes(":")) {
+    try {
+      const fragment = JSON.parse(`{${trimmed}}`);
+      const lines = JSON.stringify(fragment, null, 2).split("\n").slice(1, -1).map((line, index) => {
+        const relativeLine = line.startsWith("  ") ? line.slice(2) : line;
+        return index === 0 ? relativeLine : indent + relativeLine;
+      });
+      return lines.join("\n");
+    } catch { /* Try the normal value/object fragment shapes below. */ }
+  }
+  const candidates = [trimmed, `[${trimmed}]`, `{${trimmed}}`];
+  for (const candidate of candidates) {
+    try { return JSON.stringify(JSON.parse(candidate), null, 2); } catch { /* Try the next valid JSON fragment shape. */ }
+  }
+  return null;
+}
+
+function collapsedJsonLine(lines, fold) {
+  const openingLine = lines[fold.startLine] || "";
+  const closingLine = lines[fold.endLine] || "";
+  const openingColumn = openingLine.indexOf(fold.open);
+  const lineStart = lines.slice(0, fold.endLine).reduce((offset, line) => offset + line.length + 1, 0);
+  const closingColumn = Math.max(0, fold.closeIndex - lineStart);
+  const prefix = openingColumn >= 0 ? openingLine.slice(0, openingColumn) : openingLine;
+  const suffix = closingLine.slice(closingColumn + 1);
+  const countLabel = `${fold.items} ${fold.items === 1 ? "item" : "items"}`;
+  return `${prefix}${fold.open}...${fold.close}${suffix} // ${countLabel}`;
+}
+
 function JsonBeautifierEditor({ label, value, onChange, helpText, placeholder }) {
-  const [showTree, setShowTree] = useState(false);
-  const [collapsedPaths, setCollapsedPaths] = useState(new Set());
+  const editorRef = useRef(null);
+  const highlightRef = useRef(null);
+  const codeScrollRef = useRef(null);
+  const pendingSelectionRef = useRef(null);
+  const scrollRestoreRef = useRef(null);
+  const lastValidFoldsRef = useRef([]);
+  const [collapsedFolds, setCollapsedFolds] = useState(new Set());
   const [editorError, setEditorError] = useState("");
   const text = String(value ?? "");
-  const lineCount = Math.max(8, text.split("\n").length + 2);
-  let parsed = null;
+  const lineHeight = 24;
   let isValid = false;
-  try { parsed = text.trim() ? JSON.parse(text) : null; isValid = text.trim() !== ""; } catch { /* The textarea remains editable while JSON is incomplete. */ }
+  try { if (text.trim()) JSON.parse(text); isValid = text.trim() !== ""; } catch { /* Keep incomplete JSON editable. */ }
+  const parsedFolds = isValid ? buildJsonFolds(text) : [];
+  useEffect(() => { if (isValid) lastValidFoldsRef.current = parsedFolds; }, [isValid, text]);
+  const folds = isValid ? parsedFolds : lastValidFoldsRef.current;
+  const foldByLine = new Map(folds.map((fold) => [fold.startLine, fold]));
+  const collapsedFoldKeys = new Set([...collapsedFolds].filter((key) => folds.some((fold) => fold.key === key)));
+  const isFoldedView = collapsedFoldKeys.size > 0;
+  const hiddenLines = new Set();
+  folds.forEach((fold) => { if (collapsedFoldKeys.has(fold.key)) for (let index = fold.startLine + 1; index <= fold.endLine; index += 1) hiddenLines.add(index); });
+  const lines = text.split("\n");
+  const collapsedFoldByLine = new Map(folds.filter((fold) => collapsedFoldKeys.has(fold.key)).map((fold) => [fold.startLine, fold]));
+  const visibleLines = lines.map((lineText, index) => ({ lineText: collapsedFoldByLine.has(index) ? collapsedJsonLine(lines, collapsedFoldByLine.get(index)) : lineText, index })).filter(({ index }) => !hiddenLines.has(index));
+  const editorHeight = Math.max(230, visibleLines.length * lineHeight + 80);
+  useLayoutEffect(() => {
+    if (!pendingSelectionRef.current || !editorRef.current) return;
+    const selection = pendingSelectionRef.current;
+    const valueLength = editorRef.current.value.length;
+    const start = Math.min(selection.start, valueLength);
+    const end = Math.min(selection.end, valueLength);
+    editorRef.current.focus();
+    editorRef.current.selectionStart = start;
+    editorRef.current.selectionEnd = end;
+    pendingSelectionRef.current = null;
+  }, [text]);
+  useLayoutEffect(() => {
+    const snapshot = scrollRestoreRef.current;
+    if (!snapshot) return;
+    const restoreScroll = () => {
+      window.scrollTo(snapshot.pageX, snapshot.pageY);
+      if (codeScrollRef.current) {
+        codeScrollRef.current.scrollTop = snapshot.containerTop;
+        codeScrollRef.current.scrollLeft = snapshot.containerLeft;
+      }
+    };
+    restoreScroll();
+    requestAnimationFrame(() => {
+      restoreScroll();
+      if (scrollRestoreRef.current === snapshot) scrollRestoreRef.current = null;
+    });
+  }, [text]);
   const formatText = (nextText = text) => {
+    const scrollContainer = codeScrollRef.current;
+    scrollRestoreRef.current = {
+      pageX: window.scrollX,
+      pageY: window.scrollY,
+      containerTop: scrollContainer?.scrollTop || 0,
+      containerLeft: scrollContainer?.scrollLeft || 0,
+    };
     try {
-      const next = JSON.parse(nextText);
-      onChange(JSON.stringify(next, null, 2));
+      const formattedText = prettifyJsonText(nextText);
+      setCollapsedFolds(remapJsonFoldKeys(folds, buildJsonFolds(formattedText), collapsedFolds));
+      onChange(formattedText);
       setEditorError("");
       return true;
     } catch {
-      setEditorError("Enter valid JSON before prettifying.");
+      const cleanedText = removeEmptyJsonLines(nextText);
+      if (cleanedText !== nextText) {
+        onChange(cleanedText);
+      }
+      setEditorError(jsonParseErrorMessage(cleanedText));
       return false;
     }
   };
-  const handleChange = (event) => { onChange(event.target.value); setEditorError(""); };
-  const handlePaste = (event) => {
-    const target = event.currentTarget;
-    window.setTimeout(() => formatText(target.value), 0);
+  const preserveCollapsedFolds = (nextText) => {
+    try {
+      JSON.parse(nextText);
+      setCollapsedFolds(remapJsonFoldKeys(folds, buildJsonFolds(nextText), collapsedFolds));
+    } catch { /* Keep the current folds while the user is between valid JSON states. */ }
   };
-  const collapseToLevel = (level) => { if (!isValid || !isJsonContainer(parsed)) return; setCollapsedPaths(collapseJsonPaths(parsed, level)); setShowTree(true); };
-  return <div className="json-beautifier-editor"><div className="json-beautifier-toolbar"><strong>{label}</strong><div className="json-beautifier-actions"><button type="button" onClick={() => formatText()}>Prettify</button><button type="button" onClick={() => collapseToLevel(1)} disabled={!isValid}>Close 1</button><button type="button" onClick={() => collapseToLevel(2)} disabled={!isValid}>Close 2</button><button type="button" onClick={() => collapseToLevel(3)} disabled={!isValid}>Close 3</button><button type="button" onClick={() => { setCollapsedPaths(new Set()); setShowTree(true); }} disabled={!isValid}>Expand all</button><button type="button" className={showTree ? "active" : ""} onClick={() => setShowTree((current) => !current)} disabled={!isValid}>Node view</button></div></div><textarea className="json-beautifier-textarea" value={text} onChange={handleChange} onBlur={() => { if (text.trim()) formatText(); }} onPaste={handlePaste} spellCheck="false" placeholder={placeholder} rows={lineCount} style={{ height: `min(${Math.max(230, Math.min(1800, lineCount * 22 + 34))}px, 75vh)` }} />{helpText && <small className="mock-field-help">{helpText}</small>}{editorError && <small className="json-beautifier-error" role="alert">{editorError}</small>}{showTree && isValid && isJsonContainer(parsed) && <div className="json-beautifier-tree" aria-label={`${label} node view`}><div className="json-beautifier-tree-hint">Click any object or array header to close or open that node.</div><JsonTreeNode value={parsed} label="root" path="root" collapsedPaths={collapsedPaths} setCollapsedPaths={setCollapsedPaths} /></div>}</div>;
+  const replaceSelection = (nextText, caretPosition) => { pendingSelectionRef.current = { start: caretPosition, end: caretPosition }; preserveCollapsedFolds(nextText); onChange(nextText); setEditorError(""); };
+  const handleChange = (event) => {
+    pendingSelectionRef.current = { start: event.target.selectionStart, end: event.target.selectionEnd };
+    preserveCollapsedFolds(event.target.value);
+    onChange(event.target.value);
+    setEditorError("");
+  };
+  const handlePaste = (event) => {
+    const pasted = event.clipboardData?.getData("text/plain") || "";
+    const target = event.currentTarget;
+    const start = target.selectionStart;
+    const end = target.selectionEnd;
+    const before = text.slice(0, start);
+    const after = text.slice(end);
+    const propertySlot = /(?:\{|,)\s*$/.test(before) && /^\s*(?:,|})/.test(after);
+    const linePrefix = before.slice(before.lastIndexOf("\n") + 1).match(/^\s*/)?.[0] || "";
+    const formattedPaste = pastedJsonText(pasted, { propertySlot, indent: linePrefix });
+    if (!formattedPaste) return;
+    event.preventDefault();
+    const nextText = text.slice(0, start) + formattedPaste + text.slice(end);
+    try { const formattedDocument = prettifyJsonText(nextText); replaceSelection(formattedDocument, formattedDocument.length); }
+    catch { replaceSelection(nextText, start + formattedPaste.length); }
+  };
+  const handleKeyDown = (event) => {
+    const target = event.currentTarget;
+    if (event.key === "Tab") {
+      event.preventDefault();
+      const start = target.selectionStart;
+      const end = target.selectionEnd;
+      const indent = "  ";
+      if (event.shiftKey) {
+        const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+        const removeCount = text.slice(lineStart, start).startsWith(indent) ? indent.length : 0;
+        replaceSelection(text.slice(0, lineStart) + text.slice(lineStart + removeCount), Math.max(lineStart, start - removeCount));
+      } else replaceSelection(text.slice(0, start) + indent + text.slice(end), start + indent.length);
+      return;
+    }
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const start = target.selectionStart;
+    const end = target.selectionEnd;
+    const depth = jsonNestingDepth(text.slice(0, start));
+    const indent = "  ".repeat(depth);
+    replaceSelection(text.slice(0, start) + "\n" + indent + text.slice(end), start + 1 + indent.length);
+  };
+  const handleEditorMouseUp = (event) => {
+    if (event.button !== 0 || event.detail !== 1 || event.shiftKey || isFoldedView || !editorRef.current || !highlightRef.current) return;
+    if (editorRef.current.selectionStart !== editorRef.current.selectionEnd) return;
+    const editor = editorRef.current;
+    const highlight = highlightRef.current;
+    const previousEditorPointerEvents = editor.style.pointerEvents;
+    const previousHighlightPointerEvents = highlight.style.pointerEvents;
+    editor.style.pointerEvents = "none";
+    highlight.style.pointerEvents = "auto";
+    const caret = document.caretPositionFromPoint?.(event.clientX, event.clientY);
+    editor.style.pointerEvents = previousEditorPointerEvents;
+    highlight.style.pointerEvents = previousHighlightPointerEvents;
+    if (!caret || !highlight.contains(caret.offsetNode)) return;
+    const line = caret.offsetNode.nodeType === Node.ELEMENT_NODE
+      ? caret.offsetNode.closest(".json-beautifier-code-line")
+      : caret.offsetNode.parentElement?.closest(".json-beautifier-code-line");
+    if (!line) return;
+    const lineIndex = Number(line.dataset.lineIndex);
+    if (!Number.isInteger(lineIndex)) return;
+    const lineRange = document.createRange();
+    lineRange.setStart(line, 0);
+    lineRange.setEnd(caret.offsetNode, caret.offset);
+    const lineOffset = lineRange.toString().length;
+    const documentOffset = lines.slice(0, lineIndex).reduce((offset, lineText) => offset + lineText.length + 1, 0) + lineOffset;
+    editor.focus();
+    editor.setSelectionRange(documentOffset, documentOffset);
+  };
+  const collapseToLevel = (level) => { editorRef.current?.blur(); pendingSelectionRef.current = null; setCollapsedFolds(new Set(folds.filter((fold) => fold.depth >= level).map((fold) => fold.key))); };
+  const toggleFold = (fold) => { editorRef.current?.blur(); pendingSelectionRef.current = null; setCollapsedFolds((current) => { const next = new Set(current); if (next.has(fold.key)) next.delete(fold.key); else next.add(fold.key); return next; }); };
+  const handleFoldedViewClick = (event) => {
+    if (!isFoldedView || event.target.closest("button") || !editorRef.current || !highlightRef.current) return;
+    const editor = editorRef.current;
+    const highlight = highlightRef.current;
+    const scrollContainer = event.currentTarget;
+    const previousScrollTop = scrollContainer.scrollTop;
+    const previousScrollLeft = scrollContainer.scrollLeft;
+    const renderedLines = [...highlight.querySelectorAll(".json-beautifier-code-line")];
+    const firstLine = renderedLines[0];
+    if (!firstLine) return;
+    const firstLineTop = firstLine.getBoundingClientRect().top;
+    const clickedLine = event.target.closest?.(".json-beautifier-code-line");
+    const fallbackLineIndex = Math.max(0, Math.min(renderedLines.length - 1, Math.floor((event.clientY - firstLineTop) / lineHeight)));
+    const line = clickedLine || renderedLines[fallbackLineIndex];
+    if (!line) return;
+    const visibleLineIndex = renderedLines.indexOf(line);
+    if (visibleLineIndex < 0) return;
+    const lineIndex = Number(line.dataset.lineIndex);
+    if (!Number.isInteger(lineIndex)) return;
+    const collapsedFold = collapsedFoldByLine.get(lineIndex);
+    const targetLineIndex = collapsedFold ? collapsedFold.startLine : lineIndex;
+    const targetLine = lines[targetLineIndex] || "";
+    const lineStart = lines.slice(0, targetLineIndex).reduce((offset, lineText) => offset + lineText.length + 1, 0);
+    const lineText = line.textContent || "";
+    const lineRange = document.createRange();
+    lineRange.selectNodeContents(line);
+    const lineRect = lineRange.getBoundingClientRect();
+    const characterWidth = lineText ? lineRect.width / lineText.length : 0;
+    const clickedOffset = characterWidth > 0 ? Math.round((event.clientX - lineRect.left) / characterWidth) : 0;
+    const targetOffset = collapsedFold ? Math.max(0, targetLine.indexOf(collapsedFold.open)) : Math.max(0, Math.min(targetLine.length, clickedOffset));
+    const documentOffset = lineStart + targetOffset;
+    editor.focus();
+    editor.setSelectionRange(documentOffset, documentOffset);
+    const editorScrollTop = Math.max(0, (targetLineIndex - visibleLineIndex) * lineHeight);
+    editor.scrollTop = editorScrollTop;
+    scrollContainer.scrollTop = previousScrollTop;
+    scrollContainer.scrollLeft = previousScrollLeft;
+    requestAnimationFrame(() => {
+      if (editor !== document.activeElement) return;
+      editor.scrollTop = editorScrollTop;
+      scrollContainer.scrollTop = previousScrollTop;
+      scrollContainer.scrollLeft = previousScrollLeft;
+    });
+  };
+  return <div className="json-beautifier-editor"><div className="json-beautifier-heading"><strong>{label}</strong></div><div className="json-beautifier-surface"><div className="json-beautifier-toolbar" aria-label={`${label} formatting controls`}><div className="json-beautifier-actions"><button type="button" onClick={() => formatText()}>Prettify</button><button type="button" title="Collapse to level 1" onClick={() => collapseToLevel(1)}>Level 1</button><button type="button" title="Collapse to level 2" onClick={() => collapseToLevel(2)}>Level 2</button><button type="button" title="Collapse to level 3" onClick={() => collapseToLevel(3)}>Level 3</button><button type="button" onClick={() => setCollapsedFolds(new Set())}>Expand</button></div></div><div ref={codeScrollRef} className="json-beautifier-code-scroll" style={{ maxHeight: "75vh" }} onClick={handleFoldedViewClick}><div className="json-beautifier-code-layer" style={{ height: `${editorHeight}px` }}><pre ref={highlightRef} className="json-beautifier-highlight" aria-hidden="true">{visibleLines.map(({ lineText, index }) => <span className="json-beautifier-code-line" data-line-index={index} key={index} dangerouslySetInnerHTML={{ __html: highlightJsonLine(lineText) || " " }} />)}</pre><div className="json-beautifier-gutter" aria-hidden="true">{visibleLines.map(({ index }) => { const fold = foldByLine.get(index); return <span className="json-beautifier-gutter-line" key={index}><span className="json-beautifier-line-number">{index + 1}</span>{fold ? <button type="button" aria-label={`${collapsedFoldKeys.has(fold.key) ? "Expand" : "Collapse"} JSON node on line ${index + 1}`} onClick={() => toggleFold(fold)}>{collapsedFoldKeys.has(fold.key) ? "▸" : "▾"}</button> : <span className="json-beautifier-fold-placeholder" />}</span>; })}</div><textarea ref={editorRef} className={`json-beautifier-textarea json-beautifier-code-input${isFoldedView ? " json-beautifier-code-input-folded" : ""}`} aria-label={`${label} JSON editor`} tabIndex={isFoldedView ? -1 : 0} value={text} onChange={handleChange} onKeyDown={handleKeyDown} onMouseUp={handleEditorMouseUp} onBlur={() => { if (text.trim()) formatText(); }} onPaste={handlePaste} spellCheck="false" placeholder={placeholder} /></div></div></div>{helpText && <small className="mock-field-help">{helpText}</small>}{editorError && <small className="json-beautifier-error" role="alert">{editorError}</small>}</div>;
 }
 
 function PostmanWorkbench(props) { return <SeparatedPostmanWorkbench {...props} />; }
@@ -153,6 +474,12 @@ function SeparatedPostmanWorkbench({ project, draft, endpoints, isDatabase, resp
   const simpleGet = !isDatabase && draft.method === "GET";
   const databaseGet = isDatabase && draft.method === "GET";
   const isBodyMethod = !["GET", "DELETE"].includes(draft.method);
+  const databaseGetOptions = endpoints.filter((item) => item.method === "GET").reduce((options, item) => {
+    const collection = item.collection || collectionFromPath(item.path);
+    if (!options.some((option) => option.collection === collection)) options.push({ collection, endpoint: item });
+    return options;
+  }, []);
+  const selectedDatabase = draft.collection || databaseGetOptions[0]?.collection || "";
   const baseUrl = localMockApiUrl(project.id, "", agentBaseUrlValue).replace(/\/$/, "");
   const savedEndpoint = endpoints.find((item) => item.id === draft.endpointId);
   return <section className="mock-postman-shell" aria-label="Mock API workspace"><MockWorkspaceSidebar project={project} draft={draft} endpoints={endpoints} currentId={draft.endpointId} onNewProject={onNewProject} onNewApi={onNewApi} onSelectDraft={onSelectDraft} onSelectEndpoint={onSelectEndpoint} onDeleteEndpoint={onDeleteEndpoint} onClearDraft={onClearDraft} onProjectChange={onProjectChange} onProjectIdChange={onProjectIdChange} /><div className="mock-postman-main"><div className="mock-postman-toolbar"><div><span className="section-kicker"><span className="kicker-line" /> Workspace</span><h2>{workspaceTab === "create" ? "Create API" : "Simulate API"}</h2></div><div className="mock-draft-retained"><Check size={14} /> Draft retained in this browser</div></div><div className="mock-workspace-tabs" role="tablist" aria-label="API workspace tabs"><button type="button" role="tab" aria-selected={workspaceTab === "create"} className={workspaceTab === "create" ? "active" : ""} onClick={() => setWorkspaceTab("create")}>Create API</button><button type="button" role="tab" aria-selected={workspaceTab === "simulate"} className={workspaceTab === "simulate" ? "active" : ""} onClick={() => setWorkspaceTab("simulate")}>Simulate</button></div>{workspaceTab === "create" ? <>
@@ -160,7 +487,7 @@ function SeparatedPostmanWorkbench({ project, draft, endpoints, isDatabase, resp
     <div className="mock-request-bar"><select aria-label="Request method" value={draft.method} onChange={(event) => setValue("method", event.target.value)}>{MOCK_METHODS.map((method) => <option key={method}>{method}</option>)}</select><div className="mock-request-url"><span>{baseUrl}</span><input aria-label="API path" value={draft.path} onChange={(event) => setValue("path", event.target.value)} placeholder="/users" /></div><button type="button" className="secondary-button" onClick={() => setWorkspaceTab("simulate")}><Play size={16} /> Test</button></div>
     <div className="mock-request-meta"><label>API name<input value={draft.name} onChange={(event) => setValue("name", event.target.value)} placeholder={`${draft.method} ${draft.path}`} /></label><span className="mock-local-badge">Local agent · {isDatabase ? "dummy database" : "fixed response"}</span></div>
     {simpleGet || databaseGet ? <JsonBeautifierEditor label={databaseGet ? "JSON config" : "JSON response"} value={databaseGet ? draft.seedText : draft.successBody} onChange={(value) => setValue(databaseGet ? "seedText" : "successBody", value)} helpText={databaseGet ? <>Use an array of JSON objects, for example <code>[&#123; "id": "1", "name": "Ada" &#125;]</code>. The route identifies the shared data, so later CRUD APIs can use the same records.</> : "Returned on success."} /> : <div className="mock-create-fields"><JsonBeautifierEditor label="Request headers" value={draft.requestHeaders} onChange={(value) => setValue("requestHeaders", value)} /><>{isBodyMethod && <JsonBeautifierEditor label="Request body (JSON)" value={draft.requestBody} onChange={(value) => setValue("requestBody", value)} placeholder={'{\n  "name": "New item"\n}'} />}</></div>}
-    {isDatabase && !databaseGet && <div className="mock-db-use-note"><strong>Uses the shared JSON data for <code>/{collectionFromPath(draft.path)}</code></strong><p>This API reads and changes the records created by the GET setup. The route selects which shared data it uses.</p></div>}
+    {isDatabase && !databaseGet && <div className="mock-db-use-note"><label><strong>Use data from</strong><select aria-label="Database GET API" value={selectedDatabase} onChange={(event) => setValue("collection", event.target.value)}>{databaseGetOptions.length ? databaseGetOptions.map(({ collection, endpoint }) => <option key={collection} value={collection}>{endpoint.name || `GET ${endpoint.path}`} · {endpoint.path}</option>) : <option value="">Create a GET API first</option>}</select></label><p>This API reads and changes the records created by the selected GET API. Its route can be different.</p></div>}
     {!databaseGet && <details className="mock-request-options mock-simple-advanced" open={!simpleGet}><summary>{simpleGet ? "Advanced response options" : "Response configuration"}</summary><div className="mock-options-grid"><label>Success status<input value={draft.successStatus} onChange={(event) => setValue("successStatus", event.target.value)} inputMode="numeric" /></label><label>Error status<input value={draft.errorStatus} onChange={(event) => setValue("errorStatus", event.target.value)} inputMode="numeric" /></label><JsonBeautifierEditor label="Success headers" value={draft.successHeaders} onChange={(value) => setValue("successHeaders", value)} /><JsonBeautifierEditor label="Success response" value={draft.successBody} onChange={(value) => setValue("successBody", value)} /><JsonBeautifierEditor label="Error headers" value={draft.errorHeaders} onChange={(value) => setValue("errorHeaders", value)} /><JsonBeautifierEditor label="Error response" value={draft.errorBody} onChange={(value) => setValue("errorBody", value)} /></div></details>}
     <details className="mock-curl-import"><summary><FileText size={16} /> Import request from cURL</summary><div><textarea value={curlText} onChange={(event) => onCurlChange(event.target.value)} spellCheck="false" placeholder="Paste a cURL command here" /><button type="button" className="secondary-button" onClick={onImportCurl}><Upload size={16} /> Import request</button><small>Nothing is executed. Sensitive header values are redacted.</small></div></details>
     <div className="mock-postman-actions"><button type="button" className="primary-button" onClick={onSave}><FileDown size={16} /> Save API to Local agent</button><button type="button" className="secondary-button" onClick={onExport}><Download size={16} /> Export</button><button type="button" className="secondary-button" onClick={() => fileInput.current?.click()}><Upload size={16} /> Import</button><input ref={fileInput} type="file" accept="application/json,.json" hidden onChange={onImport} /></div>
@@ -217,28 +544,31 @@ export function MockApiPage() {
   useEffect(() => { if (surface === "local" || surface === "history") probeLocalAgent().then(setAgentStatus).catch((cause) => setAgentStatus({ connected: false, error: cause.message })); }, [surface]);
   useEffect(() => { if (surface === "history") listLocalMockProjects().then((items) => setLocalProjects(Array.isArray(items) ? items : [])).catch((cause) => setError(cause.message)); }, [surface]);
 
-  const projectWithDraft = () => {
-    const databaseCollection = isDatabase ? collectionForDraft(endpoints, draft) : "";
-    const requestHeaders = parseJsonText(draft.requestHeaders, "Request headers", {});
-    const requestBody = parseJsonText(draft.requestBody, "Request body", null);
-    const successBody = parseJsonText(draft.successBody, "Success response", {});
-    const errorBody = parseJsonText(draft.errorBody, "Error response", { error: "Mock API error" });
-    const endpoint = { id: draft.endpointId || endpointId(draft.method, draft.path), name: draft.name || `${draft.method} ${draft.path}`, mode: project.mode, method: draft.method, path: draft.path, collection: isDatabase ? databaseCollection : undefined, request: { headers: requestHeaders, body: requestBody }, responses: { success: { status: Number(draft.successStatus) || 200, headers: parseJsonText(draft.successHeaders, "Success headers", {}), body: successBody, override: isDatabase ? draft.successOverride : true }, error: { status: Number(draft.errorStatus) || 400, headers: parseJsonText(draft.errorHeaders, "Error headers", {}), body: errorBody } } };
-    const routeConflict = endpoints.find((item) => item.id !== draft.endpointId && item.method === endpoint.method && item.path === endpoint.path);
+  const projectWithDraft = (baseProject = project, draftValue = draft) => {
+    const baseCollections = projectCollections(baseProject);
+    const baseEndpoints = projectEndpoints(baseProject);
+    const databaseMode = baseProject.mode === "database";
+    const databaseCollection = databaseMode ? collectionForDraft(baseEndpoints, draftValue) : "";
+    const requestHeaders = parseJsonText(draftValue.requestHeaders, "Request headers", {});
+    const requestBody = parseJsonText(draftValue.requestBody, "Request body", null);
+    const successBody = parseJsonText(draftValue.successBody, "Success response", {});
+    const errorBody = parseJsonText(draftValue.errorBody, "Error response", { error: "Mock API error" });
+    const endpoint = { id: draftValue.endpointId || endpointId(draftValue.method, draftValue.path), name: draftValue.name || `${draftValue.method} ${draftValue.path}`, mode: baseProject.mode, method: draftValue.method, path: draftValue.path, collection: databaseMode ? databaseCollection : undefined, request: { headers: requestHeaders, body: requestBody }, responses: { success: { status: Number(draftValue.successStatus) || 200, headers: parseJsonText(draftValue.successHeaders, "Success headers", {}), body: successBody, override: databaseMode ? draftValue.successOverride : true }, error: { status: Number(draftValue.errorStatus) || 400, headers: parseJsonText(draftValue.errorHeaders, "Error headers", {}), body: errorBody } } };
+    const routeConflict = baseEndpoints.find((item) => item.id !== draftValue.endpointId && item.method === endpoint.method && item.path === endpoint.path);
     if (routeConflict) throw new MockApiError(`An API for ${endpoint.method} ${endpoint.path} already exists. Select it from Saved APIs to edit it, or choose a different method or route.`);
-    const idConflict = endpoints.find((item) => item.id === endpoint.id && item.id !== draft.endpointId);
+    const idConflict = baseEndpoints.find((item) => item.id === endpoint.id && item.id !== draftValue.endpointId);
     if (idConflict) throw new MockApiError("This API route would reuse the ID of an existing API. Choose a different method or route.");
-    let nextCollections = collections;
-    if (isDatabase) {
+    let nextCollections = baseCollections;
+    if (databaseMode) {
       const existing = nextCollections.find((item) => item.name === databaseCollection);
-      const records = draft.method === "GET" ? parseJsonText(draft.seedText, `${databaseCollection} JSON config`, []) : existing?.records || [];
+      const records = draftValue.method === "GET" ? parseJsonText(draftValue.seedText, `${databaseCollection} JSON config`, []) : existing?.records || [];
       if (!Array.isArray(records) || records.some((record) => !record || typeof record !== "object" || Array.isArray(record))) throw new MockApiError("JSON config must be an array of objects. Each object becomes one record in the shared dummy database.");
-      const methods = [...new Set([...(existing?.methods || []), draft.method])];
-      if (draft.method !== "GET" && !existing) throw new MockApiError(`Create a GET API with JSON data for /${databaseCollection} before adding ${draft.method}.`);
-      nextCollections = existing ? nextCollections.map((item) => item.name === databaseCollection ? { ...item, methods, records } : item) : [...nextCollections, { name: databaseCollection, methods: [draft.method], records }];
+      const methods = [...new Set([...(existing?.methods || []), draftValue.method])];
+      if (draftValue.method !== "GET" && !existing) throw new MockApiError(`Create a GET API with JSON data for /${databaseCollection} before adding ${draftValue.method}.`);
+      nextCollections = existing ? nextCollections.map((item) => item.name === databaseCollection ? { ...item, methods, records } : item) : [...nextCollections, { name: databaseCollection, methods: [draftValue.method], records }];
     } else nextCollections = [];
-    const nextEndpoints = endpoints.some((item) => item.id === endpoint.id) ? endpoints.map((item) => item.id === endpoint.id ? endpoint : item) : [...endpoints, endpoint];
-    return normalizeMockProject({ ...project, collections: nextCollections, endpoints: nextEndpoints });
+    const nextEndpoints = baseEndpoints.some((item) => item.id === endpoint.id) ? baseEndpoints.map((item) => item.id === endpoint.id ? endpoint : item) : [...baseEndpoints, endpoint];
+    return normalizeMockProject({ ...baseProject, collections: nextCollections, endpoints: nextEndpoints });
   };
 
   const setDraftValue = (value) => setDraft(value);
@@ -256,7 +586,22 @@ export function MockApiPage() {
   };
   const saveProject = async () => {
     try {
-      const next = projectWithDraft();
+      let saveBaseProject = project;
+      let saveDraft = draft;
+      if (isDatabase) {
+        const collectionName = collectionForDraft(endpoints, draft);
+        const localCollection = collections.find((item) => item.name === collectionName);
+        const draftSeedIsUnchanged = draft.method !== "GET" || draft.seedText === pretty(localCollection?.records || []);
+        const latestProject = (await listLocalMockProjects()).find((item) => item.id === project.id);
+        if (latestProject) {
+          saveBaseProject = latestProject;
+          if (draftSeedIsUnchanged && draft.method === "GET") {
+            const latestCollection = projectCollections(latestProject).find((item) => item.name === collectionName);
+            saveDraft = { ...draft, seedText: pretty(latestCollection?.records || []) };
+          }
+        }
+      }
+      const next = projectWithDraft(saveBaseProject, saveDraft);
       const saved = normalizeMockProject(await saveLocalMockProject(next));
       const savedId = draft.endpointId || endpointId(draft.method, draft.path);
       setProject(saved); setDraft(endpointDraft(saved, savedId)); setSurface("builder"); setError(""); setNotice("API saved. The Local agent is serving this project while authorization is active.");
