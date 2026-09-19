@@ -138,6 +138,57 @@ test("agent starts a persistent five-minute trial without login or activation", 
   assert.equal(deniedAfterExpiry.code, "activation_required");
 });
 
+test("localhost mock APIs support browser preflight and integration requests", async () => {
+  const { deleteMockProject, saveMockProject } = await import("../lib/mock-api-storage.js");
+  const project = {
+    id: "cors-api",
+    name: "CORS API",
+    mode: "database",
+    collections: [{ name: "users", methods: ["GET", "POST"], records: [{ id: "1", name: "Ada" }] }],
+    endpoints: [
+      { id: "users-get", mode: "database", collection: "users", method: "GET", path: "/users" },
+      { id: "users-post", mode: "database", collection: "users", method: "POST", path: "/users" },
+    ],
+  };
+  await saveMockProject(project);
+
+  try {
+    const preflight = await fetch(url("/v1/mock/cors-api/users"), {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:5173",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type, authorization, x-client-id",
+        "Access-Control-Request-Private-Network": "true",
+      },
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get("access-control-allow-origin"), "http://localhost:5173");
+    assert.match(preflight.headers.get("access-control-allow-headers"), /authorization/i);
+    assert.match(preflight.headers.get("access-control-allow-headers"), /x-client-id/i);
+    assert.equal(preflight.headers.get("access-control-allow-private-network"), "true");
+
+    const getResponse = await fetch(url("/v1/mock/cors-api/users"), { headers: { Origin: "http://localhost:5173" } });
+    assert.equal(getResponse.status, 200);
+    assert.equal(getResponse.headers.get("access-control-allow-origin"), "http://localhost:5173");
+    assert.equal(getResponse.headers.get("access-control-allow-private-network"), "true");
+    assert.deepEqual(await getResponse.json(), [{ id: "1", name: "Ada" }]);
+
+    const postResponse = await fetch(url("/v1/mock/cors-api/users"), {
+      method: "POST",
+      headers: { Origin: "http://localhost:5173", "Content-Type": "application/json", "X-Client-Id": "frontend" },
+      body: JSON.stringify({ name: "Grace" }),
+    });
+    assert.equal(postResponse.status, 201);
+    assert.equal(postResponse.headers.get("access-control-allow-origin"), "http://localhost:5173");
+
+    const rejected = await fetch(url("/v1/mock/cors-api/users"), { headers: { Origin: "https://evil.example" } });
+    assert.equal(rejected.status, 403);
+  } finally {
+    await deleteMockProject(project.id);
+  }
+});
+
 test("dashboard trial action starts the trial explicitly after legal consent", () => {
   const explicitTrialRoot = path.join(testRoot, "explicit-trial");
   const childScript = `import { acceptLegalConsent, startTrial, getAuthorizationState } from "./agent/auth.js";

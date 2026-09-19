@@ -599,7 +599,12 @@ function isLocalhostOrigin(value) {
 function mockOriginFor(request, response) {
   const requested = String(request.headers.origin || "").trim();
   const origin = !requested ? null : (isLocalhostOrigin(requested) ? requested : null);
-  response.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, X-Mock-Scenario");
+  const requestedHeaders = String(request.headers["access-control-request-headers"] || "")
+    .split(",")
+    .map((header) => header.trim())
+    .filter((header) => /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(header));
+  const allowedHeaders = [...new Set(["Authorization", "Content-Type", "Accept", "Range", "X-Requested-With", "X-Mock-Scenario", ...requestedHeaders])];
+  response.setHeader("Access-Control-Allow-Headers", allowedHeaders.join(", "));
   response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
   response.setHeader("Access-Control-Allow-Private-Network", "true");
   response.setHeader("Access-Control-Expose-Headers", "Allow, Content-Length");
