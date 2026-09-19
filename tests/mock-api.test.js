@@ -57,10 +57,30 @@ test("mock API preserves an object-shaped database GET response", () => {
   const value = normalizeMockProject({
     id: "object-config",
     name: "Object config",
+    endpoints: [{ id: "config-get", mode: "database", collection: "config", method: "GET", path: "/config" }],
     collections: [{ name: "config", methods: ["GET"], responseShape: "object", records: { enabled: true, region: "eu" } }],
   });
   assert.deepEqual(value.collections[0].records, [{ enabled: true, region: "eu" }]);
   assert.deepEqual(applyMockRequest(value, { method: "GET", pathname: "/config" }).body, { enabled: true, region: "eu" });
+});
+
+test("mock API infers object responses from raw object configs and endpoint metadata", () => {
+  const rawObject = normalizeMockProject({
+    id: "raw-object-config",
+    name: "Raw object config",
+    collections: [{ name: "config", methods: ["GET"], records: { enabled: true } }],
+  });
+  assert.equal(rawObject.collections[0].responseShape, "object");
+  assert.deepEqual(applyMockRequest(rawObject, { method: "GET", pathname: "/config" }).body, { enabled: true });
+
+  const endpointObject = normalizeMockProject({
+    id: "endpoint-object-config",
+    name: "Endpoint object config",
+    endpoints: [{ id: "config-get", mode: "database", collection: "config", responseShape: "object", method: "GET", path: "/config" }],
+    collections: [{ name: "config", methods: ["GET"], records: [{ enabled: true }] }],
+  });
+  assert.equal(endpointObject.collections[0].responseShape, "object");
+  assert.deepEqual(applyMockRequest(endpointObject, { method: "GET", pathname: "/config" }).body, { enabled: true });
 });
 
 test("mock API migrates only legacy generated record IDs", () => {

@@ -55,8 +55,9 @@ function endpointDraft(project, endpointIdValue) {
   const collection = endpoint?.collection || collections[0]?.name || "users";
   const collectionEntry = collections.find((item) => item.name === collection);
   const records = collectionEntry?.records || [];
+  const responseShape = endpoint?.responseShape === "object" || collectionEntry?.responseShape === "object" ? "object" : collectionEntry?.responseShape;
   const getEndpoint = projectEndpoints(project).find((item) => item.method === "GET" && (item.collection || collectionFromPath(item.path)) === collection) || projectEndpoints(project).find((item) => item.method === "GET");
-  return endpoint ? { endpointId: endpoint.id, databaseEndpointId: endpoint.method === "GET" ? endpoint.id : getEndpoint?.id || "", name: endpoint.name, method: endpoint.method, path: endpoint.path, collection, requestHeaders: pretty(endpoint.request?.headers || {}), requestBody: endpoint.request?.body ? pretty(endpoint.request.body) : "", successStatus: String(endpoint.responses?.success?.status || 200), successHeaders: pretty(endpoint.responses?.success?.headers || {}), successBody: pretty(endpoint.responses?.success?.body ?? {}), successOverride: Boolean(endpoint.responses?.success?.override), errorStatus: String(endpoint.responses?.error?.status || 400), errorHeaders: pretty(endpoint.responses?.error?.headers || {}), errorBody: pretty(endpoint.responses?.error?.body ?? { error: "Mock API error" }), seedText: pretty(collectionSeedValue(collectionEntry)) } : emptyDraft(project);
+  return endpoint ? { endpointId: endpoint.id, databaseEndpointId: endpoint.method === "GET" ? endpoint.id : getEndpoint?.id || "", name: endpoint.name, method: endpoint.method, path: endpoint.path, collection, requestHeaders: pretty(endpoint.request?.headers || {}), requestBody: endpoint.request?.body ? pretty(endpoint.request.body) : "", successStatus: String(endpoint.responses?.success?.status || 200), successHeaders: pretty(endpoint.responses?.success?.headers || {}), successBody: pretty(endpoint.responses?.success?.body ?? {}), successOverride: Boolean(endpoint.responses?.success?.override), errorStatus: String(endpoint.responses?.error?.status || 400), errorHeaders: pretty(endpoint.responses?.error?.headers || {}), errorBody: pretty(endpoint.responses?.error?.body ?? { error: "Mock API error" }), seedText: pretty(responseShape === "object" ? records[0] || {} : collectionSeedValue(collectionEntry)) } : emptyDraft(project);
 }
 function projectWithoutEndpoint(projectInput, endpointIdValue) {
   const project = normalizeMockProject(projectInput);
@@ -560,20 +561,25 @@ export function MockApiPage() {
     const baseEndpoints = projectEndpoints(baseProject);
     const databaseMode = baseProject.mode === "database";
     const databaseCollection = databaseMode ? collectionForDraft(baseEndpoints, draftValue) : "";
+    const existingCollection = databaseMode ? baseCollections.find((item) => item.name === databaseCollection) : null;
+    const seedValue = databaseMode && draftValue.method === "GET" ? parseJsonText(draftValue.seedText, `${databaseCollection} JSON config`, []) : null;
+    const responseShape = databaseMode
+      ? draftValue.method === "GET"
+        ? seedValue && typeof seedValue === "object" && !Array.isArray(seedValue) ? "object" : "array"
+        : existingCollection?.responseShape || "array"
+      : undefined;
     const requestHeaders = parseJsonText(draftValue.requestHeaders, "Request headers", {});
     const requestBody = parseJsonText(draftValue.requestBody, "Request body", null);
     const successBody = parseJsonText(draftValue.successBody, "Success response", {});
     const errorBody = parseJsonText(draftValue.errorBody, "Error response", { error: "Mock API error" });
-    const endpoint = { id: draftValue.endpointId || endpointId(draftValue.method, draftValue.path), name: draftValue.name || `${draftValue.method} ${draftValue.path}`, mode: baseProject.mode, method: draftValue.method, path: draftValue.path, collection: databaseMode ? databaseCollection : undefined, request: { headers: requestHeaders, body: requestBody }, responses: { success: { status: Number(draftValue.successStatus) || 200, headers: parseJsonText(draftValue.successHeaders, "Success headers", {}), body: successBody, override: databaseMode ? draftValue.successOverride : true }, error: { status: Number(draftValue.errorStatus) || 400, headers: parseJsonText(draftValue.errorHeaders, "Error headers", {}), body: errorBody } } };
+    const endpoint = { id: draftValue.endpointId || endpointId(draftValue.method, draftValue.path), name: draftValue.name || `${draftValue.method} ${draftValue.path}`, mode: baseProject.mode, method: draftValue.method, path: draftValue.path, collection: databaseMode ? databaseCollection : undefined, responseShape: databaseMode ? responseShape : undefined, request: { headers: requestHeaders, body: requestBody }, responses: { success: { status: Number(draftValue.successStatus) || 200, headers: parseJsonText(draftValue.successHeaders, "Success headers", {}), body: successBody, override: databaseMode ? draftValue.successOverride : true }, error: { status: Number(draftValue.errorStatus) || 400, headers: parseJsonText(draftValue.errorHeaders, "Error headers", {}), body: errorBody } } };
     const routeConflict = baseEndpoints.find((item) => item.id !== draftValue.endpointId && item.method === endpoint.method && item.path === endpoint.path);
     if (routeConflict) throw new MockApiError(`An API for ${endpoint.method} ${endpoint.path} already exists. Select it from Saved APIs to edit it, or choose a different method or route.`);
     const idConflict = baseEndpoints.find((item) => item.id === endpoint.id && item.id !== draftValue.endpointId);
     if (idConflict) throw new MockApiError("This API route would reuse the ID of an existing API. Choose a different method or route.");
     let nextCollections = baseCollections;
     if (databaseMode) {
-      const existing = nextCollections.find((item) => item.name === databaseCollection);
-      const seedValue = draftValue.method === "GET" ? parseJsonText(draftValue.seedText, `${databaseCollection} JSON config`, []) : null;
-      const responseShape = draftValue.method === "GET" && seedValue && typeof seedValue === "object" && !Array.isArray(seedValue) ? "object" : (existing?.responseShape || "array");
+      const existing = existingCollection;
       const records = draftValue.method === "GET" ? (Array.isArray(seedValue) ? seedValue : [seedValue]) : existing?.records || [];
       if (!Array.isArray(records) || records.some((record) => !record || typeof record !== "object" || Array.isArray(record))) throw new MockApiError("JSON config must be an object or an array of objects. Each object becomes one record in the shared dummy database.");
       const methods = [...new Set([...(existing?.methods || []), draftValue.method])];
@@ -615,7 +621,20 @@ export function MockApiPage() {
         }
       }
       const next = projectWithDraft(saveBaseProject, saveDraft);
-      const saved = normalizeMockProject(await saveLocalMockProject(next));
+      const savedPayload = await saveLocalMockProject(next);
+      // Older installed agents normalize unknown metadata away. Keep the shape
+      // from the browser draft in the current workspace until that agent is updated.
+      const saved = normalizeMockProject({
+        ...savedPayload,
+        collections: projectCollections(savedPayload).map((item) => {
+          const source = projectCollections(next).find((entry) => entry.name === item.name);
+          return source?.responseShape ? { ...item, responseShape: source.responseShape } : item;
+        }),
+        endpoints: projectEndpoints(savedPayload).map((item) => {
+          const source = projectEndpoints(next).find((entry) => entry.id === item.id);
+          return source?.responseShape ? { ...item, responseShape: source.responseShape } : item;
+        }),
+      });
       const savedId = draft.endpointId || endpointId(draft.method, draft.path);
       setProject(saved); setDraft(endpointDraft(saved, savedId)); setSurface("builder"); setError(""); setNotice("API saved. The Local agent is serving this project while authorization is active.");
       pushAnalyticsEvent("mock_api_local_host_started", { surface: "workspace", mode: "local" });
