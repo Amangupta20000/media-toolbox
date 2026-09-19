@@ -34,8 +34,8 @@ export function ToolSeoContent({ pathname }) {
       <h2 id="tool-seo-comparison-title">At a glance</h2>
       <div className="tool-seo-comparison-scroll">
         <table>
-          <thead><tr><th>Feature</th><th>Browser mode</th><th>Local agent</th></tr></thead>
-          <tbody>{content.comparison.map(([feature, browser, local]) => <tr key={feature}><th scope="row">{feature}</th><td>{browser}</td><td>{local}</td></tr>)}</tbody>
+          <thead><tr>{(content.comparisonHeaders || ["Feature", "Browser mode", "Local agent"]).map((header) => <th key={header}>{header}</th>)}</tr></thead>
+          <tbody>{content.comparison.map(([feature, ...values]) => <tr key={feature}><th scope="row">{feature}</th>{values.map((value, index) => <td key={`${feature}-${index}`}>{value}</td>)}</tr>)}</tbody>
         </table>
       </div>
     </section>}

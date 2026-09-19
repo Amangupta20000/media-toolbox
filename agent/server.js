@@ -599,11 +599,12 @@ function isLocalhostOrigin(value) {
 function mockOriginFor(request, response) {
   const requested = String(request.headers.origin || "").trim();
   const origin = !requested ? null : (isLocalhostOrigin(requested) ? requested : null);
-  response.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
+  response.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, X-Mock-Scenario");
   response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
   response.setHeader("Access-Control-Allow-Private-Network", "true");
   response.setHeader("Access-Control-Expose-Headers", "Allow, Content-Length");
   response.setHeader("Access-Control-Max-Age", "600");
+  response.setHeader("Allow", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
   if (origin) { response.setHeader("Access-Control-Allow-Origin", origin); response.setHeader("Vary", "Origin"); }
   return origin;
 }
@@ -621,7 +622,8 @@ async function handleMockRuntime(request, response, url, authorization) {
     const write = ["POST", "PUT", "PATCH", "DELETE"].includes(request.method);
     let body;
     if (write && request.method !== "DELETE") body = await readJson(request, MOCK_API_LIMITS.maxRequestBytes);
-    const result = applyMockRequest(project, { method: request.method, pathname: `${match[2] || "/"}${url.search}`, body });
+    const requestHeaders = Object.fromEntries(Object.entries(request.headers || {}).map(([key, value]) => [key, Array.isArray(value) ? value.join(", ") : String(value || "")]));
+    const result = applyMockRequest(project, { method: request.method, pathname: `${match[2] || "/"}${url.search}`, body, headers: requestHeaders });
     if (write && result.project && request.method !== "OPTIONS") await saveMockProject(result.project, { expectedId: projectId });
     Object.entries(result.headers || {}).forEach(([key, value]) => response.setHeader(key, value));
     response.setHeader("Cache-Control", "no-store");

@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { applyMockRequest, MOCK_API_LIMITS, MockApiError, normalizeMockProject } from "../lib/mock-api.js";
+import { applyMockRequest, MOCK_API_LIMITS, MockApiError, normalizeMockProject, parseMockCurl } from "../lib/mock-api.js";
 import { deleteMockProject, getMockProject, listMockProjects, saveMockProject } from "../lib/mock-api-storage.js";
 
 const project = () => normalizeMockProject({ id: "test-api", name: "Test API", collections: [{ name: "users", methods: ["GET", "POST", "PUT", "PATCH", "DELETE"], records: [{ id: "1", name: "Ada", role: "admin" }] }] });
@@ -57,4 +57,65 @@ test("mock API filesystem storage persists and deletes projects in Results", asy
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+test("mock API supports stateless fixed responses and error scenarios", () => {
+  const value = normalizeMockProject({
+    id: "status-api",
+    name: "Status API",
+    mode: "stateless",
+    endpoints: [{
+      id: "health-get",
+      name: "Health check",
+      method: "GET",
+      path: "/health",
+      responses: {
+        success: { status: 200, headers: { "X-Mock": "yes" }, body: { ok: true } },
+        error: { status: 503, body: { ok: false, error: "offline" } },
+      },
+    }],
+  });
+  const success = applyMockRequest(value, { method: "GET", pathname: "/health" });
+  assert.equal(success.status, 200);
+  assert.deepEqual(success.body, { ok: true });
+  assert.equal(success.headers["X-Mock"], "yes");
+  const failure = applyMockRequest(value, { method: "GET", pathname: "/health", headers: { "X-Mock-Scenario": "error" } });
+  assert.equal(failure.status, 503);
+  assert.deepEqual(failure.body, { ok: false, error: "offline" });
+  assert.throws(() => applyMockRequest(value, { method: "POST", pathname: "/health" }), (error) => error instanceof MockApiError && error.status === 405 && error.headers.Allow.includes("GET"));
+});
+
+test("mock API supports multiple database APIs in one project", () => {
+  const value = normalizeMockProject({
+    id: "users-api",
+    name: "Users API",
+    mode: "database",
+    collections: [{ name: "users", methods: ["GET", "POST"], records: [{ id: "1", name: "Ada" }] }],
+    endpoints: [
+      { id: "users-list", mode: "database", collection: "users", method: "GET", path: "/users" },
+      { id: "users-create", mode: "database", collection: "users", method: "POST", path: "/users" },
+    ],
+  });
+  assert.equal(applyMockRequest(value, { method: "GET", pathname: "/users" }).body.length, 1);
+  const created = applyMockRequest(value, { method: "POST", pathname: "/users", body: { name: "Grace" } });
+  assert.equal(created.status, 201);
+  assert.equal(created.project.collections[0].records.length, 2);
+});
+
+test("mock API parses cURL locally and redacts sensitive headers", () => {
+  const parsed = parseMockCurl("curl -X POST 'https://api.example.test/users?draft=1' -H 'Content-Type: application/json' -H 'Authorization: Bearer secret-value' -d '{\"name\":\"Ada\"}'");
+  assert.equal(parsed.method, "POST");
+  assert.equal(parsed.path, "/users?draft=1");
+  assert.equal(parsed.headers["Content-Type"], "application/json");
+  assert.equal(parsed.headers.Authorization, "[redacted]");
+  assert.equal(parsed.bodyText, '{"name":"Ada"}');
+  assert.equal(parsed.redacted, true);
+});
+
+test("legacy collection projects normalize without losing CRUD behavior", () => {
+  const value = normalizeMockProject({ id: "legacy", name: "Legacy", collections: [{ name: "items", methods: ["GET"], records: [] }] });
+  assert.equal(value.version, 2);
+  assert.equal(value.mode, "database");
+  assert.deepEqual(value.endpoints, []);
+  assert.equal(applyMockRequest(value, { method: "GET", pathname: "/items" }).status, 200);
 });
