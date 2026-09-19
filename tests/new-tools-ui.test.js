@@ -106,6 +106,11 @@ test("Mock API JSON fields use one growing editor with formatting and collapsibl
   assert.match(page, /Use one JSON object or an array of objects/);
   assert.match(page, /Single-record response format/);
   assert.match(page, /When one record matches/);
+  assert.match(page, /GET response data/);
+  assert.match(page, /GET response node path/);
+  assert.match(page, /Return the full matching record/);
+  assert.match(page, /Return a specific node/);
+  assert.match(page, /consentData\.data/);
   assert.match(page, /const latestProject = \(await listLocalMockProjects\(\)\)\.find\(\(item\) => item\.id === project\.id\)/);
   assert.match(page, /saveDraft = \{ \.\.\.draft, seedText: pretty\(collectionSeedValue\(latestCollection\)\) \}/);
   assert.match(page, /function removeEmptyJsonLines/);

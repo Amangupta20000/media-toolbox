@@ -84,6 +84,24 @@ test("database GET APIs can unwrap exactly one matching record", () => {
   assert.deepEqual(applyMockRequest(arrayOverride, { method: "GET", pathname: "/users" }).body, [{ id: "1", name: "Ada" }]);
 });
 
+test("database GET APIs can return a selected nested response node", () => {
+  const value = normalizeMockProject({
+    id: "response-node",
+    name: "Response node",
+    collections: [{ name: "consents", methods: ["GET"], records: [
+      { clientid: "123456", consentData: { success: true, data: { applicationId: "app-1", status: "active" } } },
+      { clientid: "654321", consentData: { success: true, data: { applicationId: "app-2", status: "pending" } } },
+    ] }],
+    endpoints: [{ id: "consents-get", mode: "database", collection: "consents", method: "GET", path: "/consents", responseNodePath: "consentData.data" }],
+  });
+  assert.deepEqual(applyMockRequest(value, { method: "GET", pathname: "/consents?clientid=123456" }).body, [{ applicationId: "app-1", status: "active" }]);
+  assert.deepEqual(applyMockRequest(value, { method: "GET", pathname: "/consents" }).body, [
+    { applicationId: "app-1", status: "active" },
+    { applicationId: "app-2", status: "pending" },
+  ]);
+  assert.throws(() => normalizeMockProject({ id: "bad-node", name: "Bad node", collections: [{ name: "users", records: [{}] }], endpoints: [{ id: "users-get", mode: "database", collection: "users", method: "GET", path: "/users", responseNodePath: "consentData..data" }] }), /dot notation/);
+});
+
 test("mock API validation enforces identifiers, records, and manifest limits", () => {
   assert.throws(() => normalizeMockProject({ id: "../escape", name: "Unsafe", collections: [] }), /Project IDs/);
   assert.throws(() => normalizeMockProject({ id: "unsafe", name: "Unsafe", collections: [{ name: "__proto__", methods: ["GET"], records: [] }] }), /invalid name/);
