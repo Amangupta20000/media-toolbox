@@ -171,6 +171,21 @@ test("mock API parses cURL locally and redacts sensitive headers", () => {
   assert.equal(parsed.redacted, true);
 });
 
+test("mock API parses standard multiline cURL line continuations", () => {
+  const command = [
+    "curl --location 'http://localhost:8890/sso/api/v1/consent/submit-user-consent'",
+    "--header 'Content-Type: application/json'",
+    "--header 'application_name: Live Hindustan App'",
+    "--header 'clientId: 1234567'",
+    "--data-raw '{\"purpose_ids\":[\"purpose-1\"],\"identifiers\":[{\"type\":\"email\",\"value\":\"user@example.com\",\"is_primary\":true}]}'",
+  ].join(" \\\n");
+  const parsed = parseMockCurl(command);
+  assert.equal(parsed.method, "POST");
+  assert.equal(parsed.path, "/sso/api/v1/consent/submit-user-consent");
+  assert.equal(parsed.headers.application_name, "Live Hindustan App");
+  assert.match(parsed.bodyText, /purpose_ids/);
+});
+
 test("legacy collection projects normalize without losing CRUD behavior", () => {
   const value = normalizeMockProject({ id: "legacy", name: "Legacy", collections: [{ name: "items", methods: ["GET"], records: [] }] });
   assert.equal(value.version, 3);
