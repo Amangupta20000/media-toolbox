@@ -52,3 +52,63 @@ test("new local tools are routed, indexable, and excluded from Browser mode", as
   assert.doesNotMatch(navigation, /href: "\/video-compressor"[^\n]+beta: true/);
   assert.doesNotMatch(navigation, /href: "\/pdf-to-images"[^\n]+beta: true/);
 });
+
+test("Mock API separates new-project and new-API actions", async () => {
+  const page = await read("components/mock-api-page.jsx");
+  assert.match(page, /title="Create a new project"/);
+  assert.match(page, /title="Create a new API"/);
+  assert.match(page, /title=\{`Delete \$\{endpoint\.name\}`\}/);
+  assert.match(page, /onDeleteEndpoint=\{deleteEndpoint\}/);
+  assert.match(page, /onNewProject=\{newProject\}/);
+  assert.match(page, /const newProject = \(\) =>/);
+});
+
+test("Mock API keeps collection terminology out of the workspace copy", async () => {
+  const page = await read("components/mock-api-page.jsx");
+  assert.doesNotMatch(page, /route name becomes the collection name/);
+  assert.doesNotMatch(page, /lightweight Postman collection/);
+  assert.match(page, /\$\{projectCollections\(item\)\.length\} collection/);
+});
+
+test("Mock API history exposes endpoint-level actions", async () => {
+  const page = await read("components/mock-api-page.jsx");
+  assert.match(page, /<details className="mock-history-item"/);
+  assert.match(page, /const itemEndpoints = projectEndpoints\(item\)/);
+  assert.match(page, /onClick=\{\(\) => editHistoryEndpoint\(item, endpoint\.id\)\}/);
+  assert.match(page, /onClick=\{\(\) => simulateHistoryEndpoint\(item, endpoint\.id\)\}/);
+  assert.match(page, /onClick=\{\(\) => deleteHistoryEndpoint\(item, endpoint\.id\)\}/);
+  assert.match(page, /const url = localMockApiUrl\(item\.id, endpoint\.path, agentBaseUrlValue\)/);
+});
+
+test("Mock API sidebar shows an unsaved draft before it is saved", async () => {
+  const page = await read("components/mock-api-page.jsx");
+  assert.match(page, /const hasUnsavedDraft = !draft\.endpointId/);
+  assert.match(page, /draftName = draft\.name \|\| `\$\{draft\.method\} \$\{draft\.path\}`/);
+  assert.match(page, /Unsaved draft/);
+  assert.match(page, /onSelectDraft=\{selectDraft\}/);
+});
+
+test("Mock API JSON fields use a growing beautifier and collapsible node view", async () => {
+  const page = await read("components/mock-api-page.jsx");
+  const styles = await read("styles/globals.css");
+  assert.match(page, /function JsonBeautifierEditor/);
+  assert.match(page, />Prettify<\/button>/);
+  assert.match(page, />Close 1<\/button>/);
+  assert.match(page, />Close 2<\/button>/);
+  assert.match(page, />Close 3<\/button>/);
+  assert.match(page, />Node view<\/button>/);
+  assert.match(page, /onPaste=\{handlePaste\}/);
+  assert.match(page, /height: `min\(/);
+  assert.match(styles, /\.json-beautifier-textarea[^\n]*max-height: 75vh/);
+  assert.match(styles, /\.json-beautifier-tree[^\n]*max-height: 75vh/);
+});
+
+test("Mock API URLs use a hydration-safe initial transport", async () => {
+  const page = await read("components/mock-api-page.jsx");
+  const client = await read("components/mock-api-client.js");
+  assert.match(page, /useState\("http:\/\/127\.0\.0\.1:4789"\)/);
+  assert.match(page, /setAgentBaseUrlValue\(agentBaseUrl\(\)\)/);
+  assert.match(page, /agentBaseUrlValue=\{agentBaseUrlValue\}/);
+  assert.match(client, /baseUrl = agentBaseUrl\(\)/);
+  assert.ok(client.includes('String(baseUrl).replace(/\\/$/, "")'));
+});

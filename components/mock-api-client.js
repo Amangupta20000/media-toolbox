@@ -32,9 +32,9 @@ export async function deleteLocalMockProject(id) {
   return requestLocalAgentJson(`/v1/mock-apis/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
-export function localMockApiUrl(projectId, pathname = "/users") {
+export function localMockApiUrl(projectId, pathname = "/users", baseUrl = agentBaseUrl()) {
   const path = pathname.startsWith("/") ? pathname : `/${pathname}`;
-  return `${agentBaseUrl()}/v1/mock/${encodeURIComponent(projectId)}${path}`;
+  return `${String(baseUrl).replace(/\/$/, "")}/v1/mock/${encodeURIComponent(projectId)}${path}`;
 }
 
 export function mockFetchExample(projectId, { method = "GET", pathname = "/users", body = "", headers = {} } = {}) {
