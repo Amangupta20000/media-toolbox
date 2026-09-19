@@ -389,11 +389,12 @@ function endpoint(mode, path) {
   return mode === "local" ? `${agentBaseUrl()}/v1${path}` : `/api${path}`;
 }
 
-export function uploadWithProgress(form, mode, onProgress) {
+export function uploadWithProgress(form, mode, onProgress, { adminToken = "" } = {}) {
   const startUpload = () => new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", endpoint(mode, "/jobs"));
     if (mode === "local") xhr.setRequestHeader("Authorization", `Bearer ${storedAgentToken()}`);
+    if (adminToken) xhr.setRequestHeader("X-Media-Toolbox-Admin-Token", adminToken);
     xhr.upload.onprogress = (event) => { if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100)); };
     xhr.onerror = () => reject(new Error(mode === "local" ? "The local agent could not be reached or is not authorized. Open the Local agent dashboard." : "The selected processing service could not be reached."));
     xhr.onload = () => {

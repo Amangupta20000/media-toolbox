@@ -13,6 +13,7 @@ import { ToolFaqContent, ToolSeoContent } from "./tool-seo-content.jsx";
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
 import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, preferredProcessingMode, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
+import { storedAdminToken } from "./license-client.js";
 import { pushAnalyticsEvent } from "../lib/analytics.js";
 
 const VIDEO_ACCEPT = "video/*,.mkv,.webm,.avi,.3gp,.mpeg,.mpg";
@@ -20,7 +21,7 @@ const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
 const MAX_PDF_BYTES = 200 * 1024 * 1024;
 const toolConfig = {
   "video-compressor": { eyebrow: "Reduce video size", title: "Private video compressor", description: "Create a smaller MP4 copy with practical quality presets. The Local agent processes the video on your computer and leaves the original untouched.", inputLabel: "Add a video to compress", dropLabel: "Drop a video here", limit: "2 GB", action: "Compress video" },
-  "audio-extractor": { eyebrow: "Video to audio locally", title: "Video to audio converter", description: "Convert the first audio track from a video file or a supported public media URL as MP3, WAV, AAC, FLAC, or M4A. Your source remains untouched.", inputLabel: "Add a video or media URL", dropLabel: "Drop a video here", limit: "2 GB file · Media URL", action: "Extract audio" },
+  "audio-extractor": { eyebrow: "Video to audio locally", title: "Video to audio converter", description: "Convert the first audio track from a video file as MP3, WAV, AAC, FLAC, or M4A. Your source remains untouched.", inputLabel: "Add a video", dropLabel: "Drop a video here", limit: "2 GB", action: "Extract audio" },
   "pdf-to-images": { eyebrow: "Render PDF pages", title: "Convert PDF to JPG or PNG images", description: "Render every PDF page as a numbered image and download the complete set in one ZIP archive. Processing stays with the Local agent.", inputLabel: "Add a PDF to render", dropLabel: "Drop a PDF here", limit: "200 MB · 300 pages", action: "Convert to images" },
 };
 
@@ -140,6 +141,7 @@ export function LocalProcessingToolPage({ tool }) {
   const [audioInputMode, setAudioInputMode] = useState("file");
   const [audioUrl, setAudioUrl] = useState("");
   const [audioUrlConsent, setAudioUrlConsent] = useState(false);
+  const [adminUrlAccess, setAdminUrlAccess] = useState(false);
   const [pdfFormat, setPdfFormat] = useState("png");
   const [pdfScale, setPdfScale] = useState("1.5");
   const [pdfQuality, setPdfQuality] = useState(90);
@@ -160,12 +162,30 @@ export function LocalProcessingToolPage({ tool }) {
     probeProcessingLocations({ tool }).then((value) => {
       if (!active) return;
       setLocations(value);
+      if (isAudio) setAdminUrlAccess(value.local?.authorization?.mode === "admin" || value.local?.health?.authorization?.mode === "admin" || Boolean(storedAdminToken()));
       const preferred = preferredProcessingMode(value);
       setProcessingMode(preferred || "local");
       setCapabilities(processingCapabilities(value, preferred || "local"));
     }).catch(() => undefined);
     return () => { active = false; };
   }, [tool]);
+
+  useEffect(() => {
+    if (!isAudio || typeof window === "undefined") return undefined;
+    const refreshAdminAccess = () => setAdminUrlAccess(locations?.local?.authorization?.mode === "admin" || locations?.local?.health?.authorization?.mode === "admin" || Boolean(storedAdminToken()));
+    refreshAdminAccess();
+    window.addEventListener("media-toolbox-admin-auth", refreshAdminAccess);
+    const timer = window.setInterval(refreshAdminAccess, 3000);
+    return () => { window.removeEventListener("media-toolbox-admin-auth", refreshAdminAccess); window.clearInterval(timer); };
+  }, [isAudio, locations]);
+
+  useEffect(() => {
+    if (isAudio && !adminUrlAccess && audioInputMode === "url") {
+      setAudioInputMode("file");
+      setAudioUrl("");
+      setAudioUrlConsent(false);
+    }
+  }, [adminUrlAccess, audioInputMode, isAudio]);
 
   useEffect(() => setCapabilities(processingCapabilities(locations, processingMode)), [locations, processingMode]);
 
@@ -217,7 +237,7 @@ export function LocalProcessingToolPage({ tool }) {
     && locations?.local?.connected
     && capabilities?.video?.compressor !== true;
   const ready = isProcessingLocationReady(locations, processingMode) && !localVideoCompressorUnavailable;
-  const usingAudioUrl = isAudio && audioInputMode === "url";
+  const usingAudioUrl = isAudio && adminUrlAccess && audioInputMode === "url";
   const hasInput = usingAudioUrl ? Boolean(audioUrl.trim()) && audioUrlConsent : Boolean(source);
   const selectFile = (file) => {
     if (!file) return;
@@ -280,7 +300,7 @@ export function LocalProcessingToolPage({ tool }) {
     pushAnalyticsEvent("processing_started", { tool, mode: processingMode });
     try {
       setUploadProgress(1);
-      const response = await uploadWithProgress(form, processingMode, setUploadProgress);
+      const response = await uploadWithProgress(form, processingMode, setUploadProgress, { adminToken: usingAudioUrl ? storedAdminToken() : "" });
       const id = response.jobId || response.jobIds?.[0];
       if (!id) throw new Error("The processing job was not created.");
       setUploadProgress(0);
@@ -306,10 +326,10 @@ export function LocalProcessingToolPage({ tool }) {
     <ProcessingOptionsPanel tool={tool} locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={(mode) => { setProcessingMode(mode); setActiveView("tool"); }} />
     {activeView === "history" ? <ToolHistory tool={tool} /> : activeView === "guide" ? <ToolSeoContent pathname={"/" + tool} /> : activeView === "processing" ? null : <>
       <ProcessingMode value={processingMode} onChange={setProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool={tool} />
-      <div className="tool-quick-start video-quick-start"><div className="tool-quick-start-heading"><span className="section-kicker"><span className="kicker-line" /> Before you start</span><strong>{isPdf ? "PDF rendering runs on the Local agent" : isVideo ? "Video compression runs on the Local agent" : "Audio extraction runs on the Local agent"}</strong></div><p className="tool-quick-start-intro">These tools use native desktop processing for larger media and predictable output. Start and authorize the Local agent before submitting.{isAudio ? " URL extraction is also available in Server mode for local testing." : ""}</p><div className="tool-quick-start-note"><Info size={16} /><span><strong>Input limit:</strong> {config.limit}. <Link href="/how-to-setup-agent">View the setup guide</Link> if the agent is not connected.</span></div></div>
-      <div className="capability-strip"><div className="capability-main"><span className={"capability-dot " + (capabilities?.status === "ready" ? "ready" : "")} /><span>{capabilities?.status === "ready" ? "Local agent worker online" : "Connecting to Local agent"}</span></div><span>{isPdf ? capabilities?.pdf?.toImages !== false ? "PDF rendering ready" : "PDF capability checking" : isVideo ? capabilities?.video?.compressor === true ? "Video compression ready" : capabilities?.video ? "Update Local agent to enable compression" : "FFmpeg capability checking" : isAudio ? capabilities?.video?.audioExtractor ? capabilities?.video?.mediaUrl ? "Audio and media URL extraction ready" : "Audio ready · install the public media downloader for URLs" : "FFmpeg capability checking" : capabilities?.video?.ffmpeg ? "FFmpeg processing ready" : "FFmpeg capability checking"}</span></div>
+      <div className="tool-quick-start video-quick-start"><div className="tool-quick-start-heading"><span className="section-kicker"><span className="kicker-line" /> Before you start</span><strong>{isPdf ? "PDF rendering runs on the Local agent" : isVideo ? "Video compression runs on the Local agent" : "Audio extraction runs on the Local agent"}</strong></div><p className="tool-quick-start-intro">These tools use native desktop processing for larger media and predictable output. Start and authorize the Local agent before submitting.</p><div className="tool-quick-start-note"><Info size={16} /><span><strong>Input limit:</strong> {config.limit}. <Link href="/how-to-setup-agent">View the setup guide</Link> if the agent is not connected.</span></div></div>
+      <div className="capability-strip"><div className="capability-main"><span className={"capability-dot " + (capabilities?.status === "ready" ? "ready" : "")} /><span>{capabilities?.status === "ready" ? "Local agent worker online" : "Connecting to Local agent"}</span></div><span>{isPdf ? capabilities?.pdf?.toImages !== false ? "PDF rendering ready" : "PDF capability checking" : isVideo ? capabilities?.video?.compressor === true ? "Video compression ready" : capabilities?.video ? "Update Local agent to enable compression" : "FFmpeg capability checking" : isAudio ? capabilities?.video?.audioExtractor ? "Audio extraction ready" : "FFmpeg capability checking" : capabilities?.video?.ffmpeg ? "FFmpeg processing ready" : "FFmpeg capability checking"}</span></div>
       {job ? <LocalToolJobCard job={job} tool={tool} mode={jobMode} keepResult={keepResult} onReset={reset} /> : <div className="workspace-grid">
-        <section className="tool-card primary-card"><div className="card-heading"><div><span className="card-index">01</span><h2>{config.inputLabel}</h2></div><span className="required-label">Required</span></div>{isAudio && <div className="input-mode-toggle" role="tablist" aria-label="Audio source type"><button type="button" role="tab" aria-selected={!usingAudioUrl} className={!usingAudioUrl ? "selected" : ""} onClick={() => { setAudioInputMode("file"); setError(""); }} disabled={Boolean(uploadProgress || busy)}>Upload a file</button><button type="button" role="tab" aria-selected={usingAudioUrl} className={usingAudioUrl ? "selected" : ""} onClick={() => { setAudioInputMode("url"); setSource(null); setError(""); }} disabled={Boolean(uploadProgress || busy)}>Use a media URL</button></div>}{usingAudioUrl ? <div className="url-input-panel"><label className="field-label" htmlFor="audio-source-url">Public media URL <span>One supported media item</span></label><input id="audio-source-url" className="url-input" type="url" inputMode="url" autoComplete="url" placeholder="https://example.com/video" value={audioUrl} onChange={(event) => { setAudioUrl(event.target.value); setError(""); }} disabled={Boolean(uploadProgress || busy)} /><label className="consent-checkbox"><input type="checkbox" checked={audioUrlConsent} onChange={(event) => setAudioUrlConsent(event.target.checked)} disabled={Boolean(uploadProgress || busy)} /><span>I own this content or have permission to download and convert it.</span></label><div className="info-note"><Info size={16} /><span>URL extraction supports public media sites through the public media downloader. It runs through Server mode or the Local agent; Browser mode remains file-only.</span></div></div> : <FileDropzone file={source} onFile={selectFile} onClear={() => setSource(null)} variant={isPdf ? "pdf" : "video"} accept={isPdf ? ".pdf,application/pdf" : VIDEO_ACCEPT} label={config.dropLabel} hint="or click to browse from your device" required disabled={Boolean(uploadProgress || busy)} />}<div className="limit-row"><span>{usingAudioUrl ? "Supported source" : "Maximum input"}</span><strong>{config.limit}</strong></div><div className="keep-result-slot visible"><label className="keep-result-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label></div></section>
+        <section className="tool-card primary-card"><div className="card-heading"><div><span className="card-index">01</span><h2>{config.inputLabel}</h2></div><span className="required-label">Required</span></div>{isAudio && <div className="input-mode-toggle" role="tablist" aria-label="Audio source type"><button type="button" role="tab" aria-selected={!usingAudioUrl} className={!usingAudioUrl ? "selected" : ""} onClick={() => { setAudioInputMode("file"); setError(""); }} disabled={Boolean(uploadProgress || busy)}>Upload a file</button>{adminUrlAccess && <button type="button" role="tab" aria-selected={usingAudioUrl} className={usingAudioUrl ? "selected" : ""} onClick={() => { setAudioInputMode("url"); setSource(null); setError(""); }}>Use a media URL</button>}</div>}{usingAudioUrl ? <div className="url-input-panel"><label className="field-label" htmlFor="audio-source-url">Admin media URL <span>Internal testing only</span></label><input id="audio-source-url" className="url-input" type="url" inputMode="url" autoComplete="url" placeholder="https://example.com/video" value={audioUrl} onChange={(event) => { setAudioUrl(event.target.value); setError(""); }} disabled={Boolean(uploadProgress || busy)} /><label className="consent-checkbox"><input type="checkbox" checked={audioUrlConsent} onChange={(event) => setAudioUrlConsent(event.target.checked)} disabled={Boolean(uploadProgress || busy)} /><span>I own this content or have permission to download and convert it.</span></label><div className="info-note"><Info size={16} /><span>This internal URL workflow is available only to an authenticated Admin session.</span></div></div> : <FileDropzone file={source} onFile={selectFile} onClear={() => setSource(null)} variant={isPdf ? "pdf" : "video"} accept={isPdf ? ".pdf,application/pdf" : VIDEO_ACCEPT} label={config.dropLabel} hint="or click to browse from your device" required disabled={Boolean(uploadProgress || busy)} />}<div className="limit-row"><span>Maximum input</span><strong>{config.limit}</strong></div><div className="keep-result-slot visible"><label className="keep-result-check"><input type="checkbox" checked={keepResult} onChange={(event) => setKeepResult(event.target.checked)} /><span>Keep final result on this device</span></label></div></section>
         {outputControls}
         <section className="tool-card action-card"><div className="action-copy"><div className="action-icon"><Sparkles size={19} /></div><div><h2>Ready when you are</h2><p>A new result will be created and your original file will stay untouched.</p></div></div><button className="primary-button" type="button" onClick={submit} disabled={!hasInput || busy || Boolean(uploadProgress) || !ready} data-analytics-cta={tool} data-analytics-surface={tool}>{uploadProgress ? <><LoaderCircle className="spin" size={18} /> Uploading {uploadProgress}%</> : <><Sparkles size={18} /> {config.action}</>}</button></section>
       </div>}

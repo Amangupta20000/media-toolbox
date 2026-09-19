@@ -1364,11 +1364,16 @@ test("audio extractor creates the selected audio format and rejects silent video
 
 test("audio extractor accepts supported media URLs and rejects unsafe sources", async () => {
   const id = crypto.randomUUID();
+  await assert.rejects(
+    () => createJobFromMultipart({ id: crypto.randomUUID(), jobDir: testRoot, fields: { tool: "audio-extractor", sourceUrl: "https://www.youtube.com/watch?v=video-example" }, files: [] }),
+    (error) => error?.code === "admin_required_for_media_url" && error?.statusCode === 403,
+  );
   const intake = await createJobFromMultipart({
     id,
     jobDir: testRoot,
     fields: { tool: "audio-extractor", sourceUrl: "https://www.youtube.com/watch?v=video-example", audioFormat: "mp3", audioBitrate: "192k" },
     files: [],
+    allowRemoteMediaUrl: true,
   });
   const job = db.getJob(intake.ids[0]);
   const options = JSON.parse(job.options_json);
@@ -1382,19 +1387,19 @@ test("audio extractor accepts supported media URLs and rejects unsafe sources", 
   );
   assert.equal(validateMediaSourceUrl("https://media.example.com/video.mp4"), "https://media.example.com/video.mp4");
   await assert.rejects(
-    () => createJobFromMultipart({ id: crypto.randomUUID(), jobDir: testRoot, fields: { tool: "audio-extractor", sourceUrl: "http://127.0.0.1:4789/media" }, files: [] }),
+    () => createJobFromMultipart({ id: crypto.randomUUID(), jobDir: testRoot, fields: { tool: "audio-extractor", sourceUrl: "http://127.0.0.1:4789/media" }, files: [], allowRemoteMediaUrl: true }),
     /Local and private-network media URLs are not supported/,
   );
   await assert.rejects(
-    () => createJobFromMultipart({ id: crypto.randomUUID(), jobDir: testRoot, fields: { tool: "audio-extractor", sourceUrl: "http://[::1]/media" }, files: [] }),
+    () => createJobFromMultipart({ id: crypto.randomUUID(), jobDir: testRoot, fields: { tool: "audio-extractor", sourceUrl: "http://[::1]/media" }, files: [], allowRemoteMediaUrl: true }),
     /Local and private-network media URLs are not supported/,
   );
   await assert.rejects(
-    () => createJobFromMultipart({ id: crypto.randomUUID(), jobDir: testRoot, fields: { tool: "audio-extractor", sourceUrl: "ftp://media.example.com/video.mp4" }, files: [] }),
+    () => createJobFromMultipart({ id: crypto.randomUUID(), jobDir: testRoot, fields: { tool: "audio-extractor", sourceUrl: "ftp://media.example.com/video.mp4" }, files: [], allowRemoteMediaUrl: true }),
     /Only public HTTP\(S\) media URLs are supported/,
   );
   await assert.rejects(
-    () => createJobFromMultipart({ id: crypto.randomUUID(), jobDir: testRoot, fields: { tool: "audio-extractor", sourceUrl: "https://www.youtube.com/playlist?list=example" }, files: [] }),
+    () => createJobFromMultipart({ id: crypto.randomUUID(), jobDir: testRoot, fields: { tool: "audio-extractor", sourceUrl: "https://www.youtube.com/playlist?list=example" }, files: [], allowRemoteMediaUrl: true }),
     /one public media item URL/,
   );
   db.deleteJob(job.id);

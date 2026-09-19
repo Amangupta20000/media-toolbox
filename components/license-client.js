@@ -43,11 +43,17 @@ export function storedAdminToken() {
 }
 
 export function storeAdminToken(token) {
-  if (typeof window !== "undefined") window.sessionStorage.setItem(ADMIN_TOKEN_KEY, String(token || ""));
+  if (typeof window !== "undefined") {
+    window.sessionStorage.setItem(ADMIN_TOKEN_KEY, String(token || ""));
+    window.dispatchEvent(new CustomEvent("media-toolbox-admin-auth", { detail: { authenticated: Boolean(token) } }));
+  }
 }
 
 export function clearAdminToken() {
-  if (typeof window !== "undefined") window.sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+  if (typeof window !== "undefined") {
+    window.sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+    window.dispatchEvent(new CustomEvent("media-toolbox-admin-auth", { detail: { authenticated: false } }));
+  }
 }
 
 export function createLicenseRequest({ origin, requesterLabel } = {}) {

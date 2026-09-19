@@ -623,6 +623,17 @@ export async function getLicenseAdminAudit(limit = 200) {
   return onlineLicenseAdminFetch(`/v1/admin/audit-log?limit=${safeLimit}`);
 }
 
+export async function isLicenseAdminTokenValid(token) {
+  const value = String(token || "").trim();
+  if (!value) return false;
+  try {
+    await onlineLicenseFetch("/v1/admin/audit-log?limit=1", { headers: { Authorization: `Bearer ${value}` } });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function approveLicenseRequest(requestId) {
   return onlineLicenseAdminFetch(`/v1/admin/license-requests/${encodeURIComponent(String(requestId || ""))}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
 }

@@ -9,13 +9,13 @@ import { randomInt, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { getJob, getJobForPublic, claimNextJob, deleteJob, listExpiredJobs, listRetainedJobs, replaceRetainedJob, updateJob, appendJobLog } from "../lib/db.js";
 import { config, paths } from "../lib/config.js";
-import { acceptMultipartJob, likelyFileForTool, parseMultipart } from "../lib/job-intake.js";
+import { createJobFromMultipart, likelyFileForTool, parseMultipart } from "../lib/job-intake.js";
 import { recognizePdfText } from "../lib/pdf-ocr.js";
 import { firstAvailable, runCommand } from "../lib/command.js";
 import { processJob, writeCapabilities } from "../worker/index.js";
 import { applyMockRequest, MOCK_API_LIMITS, MockApiError } from "../lib/mock-api.js";
 import { deleteMockProject, getMockProject, listMockProjects, saveMockProject } from "../lib/mock-api-storage.js";
-import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, activateOnline, activateTester, authorizeProcessing, ensureAgentAuth, getActivationRequestStatus as getActivationRequestStatusAgent, getAuthorizationState as getAuthorizationStateAgent, getDeviceId as getDeviceIdFromAuth, getLicenseAdminAudit as getLicenseAdminAuditAgent, getLicenseAdminRequests as getLicenseAdminRequestsAgent, getLicenseAdminState as getLicenseAdminStateAgent, getLicenseRequestConfig as getLicenseRequestConfigAgent, hasOnlineLicenseServer, loginActivation as loginActivationAgent, loginAdmin as loginAdminAgent, loginLicenseAdmin as loginLicenseAdminAgent, logoutActivation as logoutActivationAgent, logoutAdmin as logoutAdminAgent, logoutLicenseAdmin as logoutLicenseAdminAgent, requestActivationCode as requestActivationCodeAgent, approveLicenseRequest as approveLicenseRequestAgent, declineLicenseRequest as declineLicenseRequestAgent, startTrial as startTrialAgent, TESTER_ACTIVATION_CODE } from "./auth.js";
+import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, activateOnline, activateTester, authorizeProcessing, ensureAgentAuth, getActivationRequestStatus as getActivationRequestStatusAgent, getAuthorizationState as getAuthorizationStateAgent, getDeviceId as getDeviceIdFromAuth, getLicenseAdminAudit as getLicenseAdminAuditAgent, getLicenseAdminRequests as getLicenseAdminRequestsAgent, getLicenseAdminState as getLicenseAdminStateAgent, getLicenseRequestConfig as getLicenseRequestConfigAgent, hasOnlineLicenseServer, isLicenseAdminTokenValid, loginActivation as loginActivationAgent, loginAdmin as loginAdminAgent, loginLicenseAdmin as loginLicenseAdminAgent, logoutActivation as logoutActivationAgent, logoutAdmin as logoutAdminAgent, logoutLicenseAdmin as logoutLicenseAdminAgent, requestActivationCode as requestActivationCodeAgent, approveLicenseRequest as approveLicenseRequestAgent, declineLicenseRequest as declineLicenseRequestAgent, startTrial as startTrialAgent, TESTER_ACTIVATION_CODE } from "./auth.js";
 
 const AGENT_VERSION = process.env.AGENT_VERSION || "0.2.1";
 const PROTOCOL_VERSION = 1;
@@ -884,13 +884,25 @@ async function handle(request, response) {
     const jobDir = path.join(paths.jobs, id);
     await fsp.mkdir(jobDir, { recursive: true });
     try {
-      const result = await acceptMultipartJob(request, { id, jobDir });
+      const { fields, files } = await parseMultipart(request, jobDir);
+      const remoteMediaRequested = fields.tool === "audio-extractor" && String(fields.sourceUrl || "").trim();
+      const webAdminToken = String(request.headers["x-media-toolbox-admin-token"] || "").trim();
+      const allowRemoteMediaUrl = Boolean(!remoteMediaRequested
+        || authorization.mode === "admin"
+        || (webAdminToken && await isLicenseAdminTokenValid(webAdminToken)));
+      if (remoteMediaRequested && !allowRemoteMediaUrl) {
+        const error = new Error("Media URL extraction is restricted to an authorized Admin session.");
+        error.statusCode = 403;
+        error.code = "admin_required_for_media_url";
+        throw error;
+      }
+      const result = await createJobFromMultipart({ id, jobDir, fields, files, allowRemoteMediaUrl });
       processQueue().catch((error) => console.error("Local agent queue failed", error));
       const ids = result?.ids || [id];
       return json(response, 202, { ...(ids.length === 1 ? { jobId: ids[0] } : { jobIds: ids }), status: "queued" }, request, origin);
     } catch (error) {
       await fsp.rm(jobDir, { recursive: true, force: true });
-      return json(response, 400, { error: error instanceof Error ? error.message : "Upload failed." }, request, origin);
+      return json(response, Number(error?.statusCode) || 400, { error: error instanceof Error ? error.message : "Upload failed.", ...(error?.code ? { code: error.code } : {}) }, request, origin);
     }
   }
 
