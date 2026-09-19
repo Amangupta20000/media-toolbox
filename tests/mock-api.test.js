@@ -53,6 +53,23 @@ test("mock API preserves seed records without IDs and requires IDs for new recor
   assert.throws(() => applyMockRequest(value, { method: "POST", pathname: "/users", body: { name: "Alan" } }), (error) => error instanceof MockApiError && error.code === "missing_record_id" && error.status === 400);
 });
 
+test("mock API migrates only legacy generated record IDs", () => {
+  const value = normalizeMockProject({
+    version: 2,
+    id: "legacy-ids",
+    name: "Legacy IDs",
+    collections: [{ name: "users", methods: ["GET"], records: [
+      { id: "users-1", name: "Ada" },
+      { id: "external-42", name: "Grace" },
+    ] }],
+  });
+  assert.equal(value.version, 3);
+  assert.deepEqual(value.collections[0].records, [
+    { name: "Ada" },
+    { id: "external-42", name: "Grace" },
+  ]);
+});
+
 test("mock API filesystem storage persists and deletes projects in Results", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-mock-api-"));
   try {
@@ -134,7 +151,7 @@ test("mock API parses cURL locally and redacts sensitive headers", () => {
 
 test("legacy collection projects normalize without losing CRUD behavior", () => {
   const value = normalizeMockProject({ id: "legacy", name: "Legacy", collections: [{ name: "items", methods: ["GET"], records: [] }] });
-  assert.equal(value.version, 2);
+  assert.equal(value.version, 3);
   assert.equal(value.mode, "database");
   assert.deepEqual(value.endpoints, []);
   assert.equal(applyMockRequest(value, { method: "GET", pathname: "/items" }).status, 200);
