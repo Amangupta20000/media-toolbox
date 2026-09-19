@@ -94,10 +94,12 @@ test("Mock API JSON fields use one growing editor with formatting and collapsibl
   assert.match(page, /function JsonBeautifierEditor/);
   assert.match(page, /const projectWithDraft = \(baseProject = project, draftValue = draft\)/);
   assert.match(page, /function collectionForDraft\(endpoints, draft\).*draft\.collection/);
+  assert.match(page, /databaseEndpointId: endpoint\.method === "GET" \? endpoint\.id : getEndpoint\?\.id \|\| ""/);
   assert.match(page, /const databaseGetOptions = endpoints\.filter\(\(item\) => item\.method === "GET"\)/);
   assert.match(page, /aria-label="Database GET API"/);
   assert.match(page, /Use data from/);
   assert.match(page, /Its route can be different/);
+  assert.match(page, /databaseEndpointId: event\.target\.value/);
   assert.match(page, /const draftSeedIsUnchanged = draft\.method !== "GET" \|\| draft\.seedText === pretty\(localCollection\?\.records \|\| \[\]\)/);
   assert.match(page, /const latestProject = \(await listLocalMockProjects\(\)\)\.find\(\(item\) => item\.id === project\.id\)/);
   assert.match(page, /saveDraft = \{ \.\.\.draft, seedText: pretty\(latestCollection\?\.records \|\| \[\]\) \}/);
