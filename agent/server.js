@@ -13,13 +13,15 @@ import { acceptMultipartJob, likelyFileForTool, parseMultipart } from "../lib/jo
 import { recognizePdfText } from "../lib/pdf-ocr.js";
 import { firstAvailable, runCommand } from "../lib/command.js";
 import { processJob, writeCapabilities } from "../worker/index.js";
+import { applyMockRequest, MOCK_API_LIMITS, MockApiError } from "../lib/mock-api.js";
+import { deleteMockProject, getMockProject, listMockProjects, saveMockProject } from "../lib/mock-api-storage.js";
 import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, activateOnline, activateTester, authorizeProcessing, ensureAgentAuth, getActivationRequestStatus as getActivationRequestStatusAgent, getAuthorizationState as getAuthorizationStateAgent, getDeviceId as getDeviceIdFromAuth, getLicenseAdminAudit as getLicenseAdminAuditAgent, getLicenseAdminRequests as getLicenseAdminRequestsAgent, getLicenseAdminState as getLicenseAdminStateAgent, getLicenseRequestConfig as getLicenseRequestConfigAgent, hasOnlineLicenseServer, loginActivation as loginActivationAgent, loginAdmin as loginAdminAgent, loginLicenseAdmin as loginLicenseAdminAgent, logoutActivation as logoutActivationAgent, logoutAdmin as logoutAdminAgent, logoutLicenseAdmin as logoutLicenseAdminAgent, requestActivationCode as requestActivationCodeAgent, approveLicenseRequest as approveLicenseRequestAgent, declineLicenseRequest as declineLicenseRequestAgent, startTrial as startTrialAgent, TESTER_ACTIVATION_CODE } from "./auth.js";
 
 const AGENT_VERSION = process.env.AGENT_VERSION || "0.2.1";
 const PROTOCOL_VERSION = 1;
 const DEFAULT_PORT = 4789;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const HISTORY_TOOLS = new Set(["image-converter", "svg-to-png", "video-repair", "pdf-editor", "pdf-text-editor", "pdf-compressor"]);
+const HISTORY_TOOLS = new Set(["image-converter", "svg-to-png", "video-repair", "video-compressor", "audio-extractor", "pdf-to-images", "pdf-editor", "pdf-text-editor", "pdf-compressor"]);
 const state = {
   server: null,
   port: DEFAULT_PORT,
@@ -92,7 +94,7 @@ function addCors(request, response, allowAny = false) {
     response.setHeader("Access-Control-Allow-Private-Network", "true");
   }
   response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Range, X-Requested-With");
-  response.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS, HEAD");
+  response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD");
   response.setHeader("Access-Control-Expose-Headers", "Accept-Ranges, Content-Disposition, Content-Length, Content-Range");
   response.setHeader("Access-Control-Max-Age", "600");
   return origin;
@@ -229,9 +231,9 @@ function readBody(request, limit = 16384) {
   });
 }
 
-async function readJson(request) {
+async function readJson(request, limit = 16384) {
   let raw;
-  try { raw = await readBody(request); } catch (error) { throw error; }
+  try { raw = await readBody(request, limit); } catch (error) { throw error; }
   try { return JSON.parse(raw || "{}"); } catch { throw new Error("The request body is not valid JSON."); }
 }
 
@@ -241,6 +243,7 @@ function contentType(filename) {
     jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", heic: "image/heic", heif: "image/heif",
     tiff: "image/tiff", tif: "image/tiff", gif: "image/gif", bmp: "image/bmp", pdf: "application/pdf",
     mp4: "video/mp4", m4v: "video/mp4", mov: "video/quicktime", webm: "video/webm", mkv: "video/x-matroska",
+    mp3: "audio/mpeg", wav: "audio/wav", aac: "audio/aac", flac: "audio/flac", m4a: "audio/mp4", zip: "application/zip",
   }[extension] || "application/octet-stream";
 }
 
@@ -470,6 +473,11 @@ async function cleanupExpired() {
 
 async function processQueue() {
   if (state.queueRunning) return;
+  const authorization = currentAuthorization();
+  // Jobs are only accepted after legal consent and authorization. Requiring
+  // the same state during recovery prevents a stale queued job from bypassing
+  // the current authorization after an agent restart.
+  if (!authorization.legalAccepted || !authorization.authorized) return;
   state.queueRunning = true;
   try {
     while (true) {
@@ -576,6 +584,58 @@ async function renderPdfPage(request, response, job, page) {
   }
 }
 
+function isMockRuntimePath(pathname) {
+  return /^\/v1\/mock\/[^/]+(?:\/.*)?$/.test(pathname);
+}
+
+function isLocalhostOrigin(value) {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return ["http:", "https:"].includes(parsed.protocol) && ["localhost", "127.0.0.1", "[::1]", "::1"].includes(parsed.hostname);
+  } catch { return false; }
+}
+
+function mockOriginFor(request, response) {
+  const requested = String(request.headers.origin || "").trim();
+  const origin = !requested ? null : (isLocalhostOrigin(requested) ? requested : null);
+  response.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
+  response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  response.setHeader("Access-Control-Allow-Private-Network", "true");
+  response.setHeader("Access-Control-Expose-Headers", "Allow, Content-Length");
+  response.setHeader("Access-Control-Max-Age", "600");
+  if (origin) { response.setHeader("Access-Control-Allow-Origin", origin); response.setHeader("Vary", "Origin"); }
+  return origin;
+}
+
+async function handleMockRuntime(request, response, url, authorization) {
+  const match = url.pathname.match(/^\/v1\/mock\/([^/]+)(\/.*)?$/);
+  if (!match) return false;
+  const origin = mockOriginFor(request, response);
+  if (request.headers.origin && !origin) return json(response, 403, { error: "Mock APIs accept requests only from localhost origins.", code: "origin_not_allowed" }, request, null);
+  if (!authorization.legalAccepted) return legalConsentRequired(response, request, origin, authorization);
+  if (!authorization.authorized) return authorizationRequired(response, request, origin, authorization);
+  try {
+    const projectId = decodeURIComponent(match[1]);
+    const project = await getMockProject(projectId);
+    const write = ["POST", "PUT", "PATCH", "DELETE"].includes(request.method);
+    let body;
+    if (write && request.method !== "DELETE") body = await readJson(request, MOCK_API_LIMITS.maxRequestBytes);
+    const result = applyMockRequest(project, { method: request.method, pathname: `${match[2] || "/"}${url.search}`, body });
+    if (write && result.project && request.method !== "OPTIONS") await saveMockProject(result.project, { expectedId: projectId });
+    Object.entries(result.headers || {}).forEach(([key, value]) => response.setHeader(key, value));
+    response.setHeader("Cache-Control", "no-store");
+    response.statusCode = result.status;
+    if (result.body === null || result.status === 204) return response.end();
+    response.end(JSON.stringify(result.body));
+  } catch (error) {
+    const status = error instanceof MockApiError ? error.status : /request is too large/i.test(error?.message || "") ? 413 : 400;
+    if (error?.headers) Object.entries(error.headers).forEach(([key, value]) => response.setHeader(key, value));
+    return json(response, status, { error: error instanceof Error ? error.message : "The mock API request failed.", code: error?.code || "mock_api_error" }, request, origin);
+  }
+  return true;
+}
+
 async function handle(request, response) {
   pruneExpiredSessions();
   const authorization = refreshAuthorization();
@@ -585,7 +645,8 @@ async function handle(request, response) {
   // website origin for every agent API so browsers can read a useful 401/402
   // or 403 response during session discovery; each endpoint still validates
   // the origin, pairing, token, and authorization before returning data.
-  const origin = addCors(request, response, pathParts[0] === "v1");
+  const mockRuntime = isMockRuntimePath(url.pathname);
+  const origin = mockRuntime ? mockOriginFor(request, response) : addCors(request, response, pathParts[0] === "v1");
   if (request.method === "OPTIONS") {
     response.statusCode = origin || !request.headers.origin ? 204 : 403;
     response.end();
@@ -658,6 +719,11 @@ async function handle(request, response) {
     }
   }
 
+  // Runtime mock APIs deliberately do not require a browser pairing token.
+  // The agent still enforces legal consent and active authorization, while the
+  // server remains bound to loopback by default.
+  if (mockRuntime) return handleMockRuntime(request, response, url, authorization);
+
   const auth = authorize(request, url);
   const historyOnlySession = auth?.session?.scope === "history";
   const historyRequest = isHistoryRequest(request, url);
@@ -673,6 +739,35 @@ async function handle(request, response) {
   // Native clients may not send an Origin header. If one is present, authorize()
   // has already verified that it matches the origin used during pairing.
   if (origin && origin !== auth.session.origin) return json(response, 403, { error: "This website origin is not paired with the local agent." }, request, origin);
+
+  if (url.pathname === "/v1/mock-apis" && request.method === "GET") {
+    const projects = await listMockProjects();
+    return json(response, 200, { items: projects }, request, origin);
+  }
+  if (url.pathname === "/v1/mock-apis" && request.method === "POST") {
+    try {
+      const project = await saveMockProject(await readJson(request, MOCK_API_LIMITS.maxProjectBytes));
+      return json(response, 201, { project }, request, origin);
+    } catch (error) {
+      return json(response, error instanceof MockApiError ? error.status : 400, { error: error instanceof Error ? error.message : "The mock API project could not be saved.", code: error?.code || "mock_api_error" }, request, origin);
+    }
+  }
+  const mockManagementMatch = url.pathname.match(/^\/v1\/mock-apis\/([^/]+)$/);
+  if (mockManagementMatch) {
+    const projectId = decodeURIComponent(mockManagementMatch[1]);
+    if (request.method === "GET") {
+      try { return json(response, 200, { project: await getMockProject(projectId) }, request, origin); }
+      catch (error) { return json(response, error instanceof MockApiError ? error.status : 404, { error: error.message }, request, origin); }
+    }
+    if (request.method === "PUT") {
+      try { return json(response, 200, { project: await saveMockProject(await readJson(request, MOCK_API_LIMITS.maxProjectBytes), { expectedId: projectId }) }, request, origin); }
+      catch (error) { return json(response, error instanceof MockApiError ? error.status : 400, { error: error.message }, request, origin); }
+    }
+    if (request.method === "DELETE") {
+      try { await deleteMockProject(projectId); return json(response, 200, { ok: true }, request, origin); }
+      catch (error) { return json(response, error instanceof MockApiError ? error.status : 404, { error: error.message }, request, origin); }
+    }
+  }
 
   if (url.pathname === "/v1/pdf/ocr" && request.method === "POST") {
     const ocrDirectory = path.join(paths.jobs, `ocr-${randomUUID()}`);
@@ -720,9 +815,9 @@ async function handle(request, response) {
   if (url.pathname === "/v1/capabilities" && request.method === "GET") {
     try {
       const value = JSON.parse(await fsp.readFile(paths.capabilities, "utf8"));
-      return json(response, 200, { ...value, agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION }, request, origin);
+      return json(response, 200, { ...value, agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, mockApi: { hosting: "localhost", methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] } }, request, origin);
     } catch {
-      return json(response, 200, { status: "starting", agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, pdf: {}, image: {}, video: {} }, request, origin);
+      return json(response, 200, { status: "starting", agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, pdf: {}, image: {}, video: {}, mockApi: { hosting: "localhost", methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] } }, request, origin);
     }
   }
 
@@ -1001,6 +1096,10 @@ export async function startAgentServer({ port = Number(process.env.AGENT_PORT) |
   state.port = state.server.address().port;
   state.cleanupTimer = setInterval(() => cleanupExpired().catch(() => undefined), 60 * 1000);
   state.cleanupTimer.unref?.();
+  // Uploads normally start the queue immediately. Recover jobs that were
+  // accepted just before a crash or restart as soon as the authorized agent is
+  // listening again.
+  processQueue().catch((error) => console.error("Local agent queue recovery failed", error));
   return state.server;
 }
 

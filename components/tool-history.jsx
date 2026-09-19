@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Archive, Download, Eye, FileText, Film, FolderOpen, Image as ImageIcon, Pencil, RefreshCw, Trash2, X } from "lucide-react";
+import { AlertTriangle, Archive, Download, Eye, FileImage, FileMusic, FileText, FileVideo, Film, FolderOpen, Image as ImageIcon, Pencil, RefreshCw, Trash2, X } from "lucide-react";
 import { formatBytes } from "./file-dropzone.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
 import { rememberHistoryEdit } from "./history-edit.js";
@@ -12,6 +12,9 @@ const toolNames = {
   "image-converter": "Image conversion",
   "svg-to-png": "SVG to PNG conversion",
   "video-repair": "Video repair",
+  "video-compressor": "Video compression",
+  "audio-extractor": "Audio extraction",
+  "pdf-to-images": "PDF to images",
   "pdf-editor": "PDF editing",
   "pdf-text-editor": "PDF text editing",
   "pdf-compressor": "PDF compression",
@@ -21,6 +24,9 @@ const toolIcons = {
   "image-converter": ImageIcon,
   "svg-to-png": ImageIcon,
   "video-repair": Film,
+  "video-compressor": FileVideo,
+  "audio-extractor": FileMusic,
+  "pdf-to-images": FileImage,
   "pdf-editor": FileText,
   "pdf-text-editor": FileText,
   "pdf-compressor": Archive,
@@ -212,7 +218,7 @@ export function ToolHistory({ tool }) {
       return <article className="history-item" key={`${item.storage}-${item.id}`}>
         <label className="history-item-select"><input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelected(item.id)} disabled={bulkDeleting} aria-label={`Select ${result.filename || "saved result"}`} /></label><div className="history-item-icon"><Icon size={19} /></div>
         <div className="history-item-copy"><strong title={result.filename}>{result.filename || "Saved result"}</strong><span>{historyDate(item.updatedAt || item.createdAt)} · {formatBytes(result.bytes || 0)} · {item.storage === "local" ? "Local" : "Saved result"}</span><small><span className="history-status-badge">{(item.historyStatus || "completed") === "saved" ? "Saved" : "Completed"}</span> · {item.location || (item.storage === "local" ? "Local agent Results folder" : "Temporary processing storage")}</small></div>
-        <div className="history-item-actions">{tool !== "pdf-compressor" && <button className="icon-button history-edit-button" type="button" onClick={() => editItem(item)} disabled={bulkDeleting} aria-label={`Edit ${result.filename || "saved result"}`} title="Edit file"><Pencil size={17} /></button>}<button className="icon-button history-preview-button" type="button" onClick={() => setPreviewItem(item)} disabled={bulkDeleting} aria-label={`Preview ${result.filename || "saved result"}`} title="Preview"><Eye size={17} /></button><a className="secondary-button" href={result.downloadUrl} download={result.filename} aria-disabled={bulkDeleting} onClick={(event) => { if (bulkDeleting) event.preventDefault(); }}><Download size={16} /> Download</a><button className="icon-button history-delete-button" type="button" onClick={() => removeItem(item)} disabled={deletingIds.has(item.id)} aria-label={`Delete ${result.filename || "saved result"}`} title={item.storage === "local" ? "Delete from device" : "Delete result"}><Trash2 size={17} /></button></div>
+        <div className="history-item-actions">{!["pdf-compressor", "video-compressor", "audio-extractor", "pdf-to-images"].includes(tool) && <button className="icon-button history-edit-button" type="button" onClick={() => editItem(item)} disabled={bulkDeleting} aria-label={`Edit ${result.filename || "saved result"}`} title="Edit file"><Pencil size={17} /></button>}<button className="icon-button history-preview-button" type="button" onClick={() => setPreviewItem(item)} disabled={bulkDeleting} aria-label={`Preview ${result.filename || "saved result"}`} title="Preview"><Eye size={17} /></button><a className="secondary-button" href={result.downloadUrl} download={result.filename} aria-disabled={bulkDeleting} onClick={(event) => { if (bulkDeleting) event.preventDefault(); }}><Download size={16} /> Download</a><button className="icon-button history-delete-button" type="button" onClick={() => removeItem(item)} disabled={deletingIds.has(item.id)} aria-label={`Delete ${result.filename || "saved result"}`} title={item.storage === "local" ? "Delete from device" : "Delete result"}><Trash2 size={17} /></button></div>
       </article>;
     })}</div>}
     {!loading && <p className="history-note">Delete removes the selected result from its current storage. If the file is missing or the Local agent is unavailable, the history listing stays.</p>}
@@ -254,10 +260,12 @@ function HistoryPreviewModal({ item, onClose, onDelete, onEdit, deleting }) {
       <div className="history-preview-body">
         {!previewUrl && <DismissibleMessage className="preview-unavailable" resetKey="missing-preview"><AlertTriangle size={18} /><span>This saved result is no longer available for preview.</span></DismissibleMessage>}
         {previewUrl && (tool === "image-converter" || tool === "svg-to-png") && (previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${result.filename}-image-preview`}><AlertTriangle size={18} /><span>This image cannot be previewed in this browser, but it can still be downloaded.</span></DismissibleMessage> : <img className="history-preview-image" src={previewUrl} alt={`Preview of ${result.filename || "saved image"}`} onError={() => setPreviewError(true)} />)}
-        {previewUrl && tool === "video-repair" && (previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${result.filename}-video-preview`}><AlertTriangle size={18} /><span>This video cannot be previewed in this browser, but it can still be downloaded.</span></DismissibleMessage> : <video className="history-preview-video" controls autoPlay={false} preload="metadata" playsInline onError={() => setPreviewError(true)} aria-label={`Preview of ${result.filename || "saved video"}`}><source src={previewUrl} /></video>)}
+        {previewUrl && (tool === "video-repair" || tool === "video-compressor") && (previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${result.filename}-video-preview`}><AlertTriangle size={18} /><span>This video cannot be previewed in this browser, but it can still be downloaded.</span></DismissibleMessage> : <video className="history-preview-video" controls autoPlay={false} preload="metadata" playsInline onError={() => setPreviewError(true)} aria-label={`Preview of ${result.filename || "saved video"}`}><source src={previewUrl} /></video>)}
+        {previewUrl && tool === "audio-extractor" && (previewError ? <DismissibleMessage className="preview-unavailable" resetKey={`${result.filename}-audio-preview`}><AlertTriangle size={18} /><span>This audio cannot be previewed in this browser, but it can still be downloaded.</span></DismissibleMessage> : <audio className="history-preview-audio" controls preload="metadata" onError={() => setPreviewError(true)} aria-label={`Preview of ${result.filename || "saved audio"}`}><source src={previewUrl} /></audio>)}
+        {tool === "pdf-to-images" && <DismissibleMessage className="preview-unavailable" resetKey={`${result.filename}-archive-preview`}><FileImage size={18} /><span>This result is a ZIP archive containing {result.pageCount || "the"} numbered page images. Download it to view the images.</span></DismissibleMessage>}
         {(previewUrl && (tool === "pdf-editor" || tool === "pdf-text-editor" || tool === "pdf-compressor")) && <iframe className="history-preview-pdf" src={previewUrl} title={`Preview of ${result.filename || "saved PDF"}`} />}
       </div>
-      <div className="history-preview-actions"><button className="secondary-button history-modal-delete" type="button" onClick={handleDelete} disabled={deleting}><Trash2 size={16} /> {deleting ? "Deleting…" : "Delete file"}</button><a className="primary-button" href={result.downloadUrl} download={result.filename}><Download size={17} /> Download</a>{tool !== "pdf-compressor" && <button className="secondary-button" type="button" onClick={onEdit}><Pencil size={16} /> Edit file</button>}</div>
+      <div className="history-preview-actions"><button className="secondary-button history-modal-delete" type="button" onClick={handleDelete} disabled={deleting}><Trash2 size={16} /> {deleting ? "Deleting…" : "Delete file"}</button><a className="primary-button" href={result.downloadUrl} download={result.filename}><Download size={17} /> Download</a>{!["pdf-compressor", "video-compressor", "audio-extractor", "pdf-to-images"].includes(tool) && <button className="secondary-button" type="button" onClick={onEdit}><Pencil size={16} /> Edit file</button>}</div>
     </div>
   </div>;
 }

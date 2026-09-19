@@ -12,9 +12,12 @@ const PAGE_METADATA = Object.freeze({
   "/image-converter": { pageType: "tool", pageName: "image_converter" },
   "/pdf-compressor": { pageType: "tool", pageName: "pdf_compressor" },
   "/video-repair": { pageType: "tool", pageName: "video_repair" },
+  "/video-compressor": { pageType: "tool", pageName: "video_compressor" },
+  "/audio-extractor": { pageType: "tool", pageName: "audio_extractor" },
   "/svg-to-png": { pageType: "tool", pageName: "svg_to_png" },
   "/pdf-editor": { pageType: "tool", pageName: "pdf_editor" },
   "/pdf-text-editor": { pageType: "tool", pageName: "pdf_text_editor" },
+  "/pdf-to-images": { pageType: "tool", pageName: "pdf_to_images" },
   "/offers": { pageType: "offer", pageName: "offers" },
   "/contact": { pageType: "static_page", pageName: "contact_us" },
   "/coming-soon": { pageType: "static_page", pageName: "coming_soon" },
@@ -23,6 +26,7 @@ const PAGE_METADATA = Object.freeze({
   "/local-agent": { pageType: "static_page", pageName: "local_agent" },
   "/how-to-setup-agent": { pageType: "static_page", pageName: "how_to_setup_agent" },
   "/browser-vs-local-agent": { pageType: "guide", pageName: "browser_vs_local_agent" },
+  "/mock-api": { pageType: "tool", pageName: "mock_api" },
 });
 
 function publicPath(pathname) {

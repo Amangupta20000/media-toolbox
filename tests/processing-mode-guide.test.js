@@ -40,12 +40,15 @@ test("Browser vs Local agent guide has stable navigable sections and route SEO",
 
 test("guide limits and FAQs are sourced from current processing facts", () => {
   const toolNames = PROCESSING_MODE_GUIDE.tools.map((tool) => tool.name);
-  assert.deepEqual(toolNames, ["Image converter", "SVG to PNG", "PDF editor", "PDF text editor", "PDF compressor", "Video repair"]);
+  assert.deepEqual(toolNames, ["Image converter", "SVG to PNG", "PDF editor", "PDF text editor", "PDF compressor", "Video repair", "Video compressor", "Audio extractor", "PDF to images"]);
   assert.match(PROCESSING_MODE_GUIDE.tools[0].browser, /5 MB per image/);
   assert.match(PROCESSING_MODE_GUIDE.tools[2].browser, /5 PDFs and 50 MB total/);
   assert.match(PROCESSING_MODE_GUIDE.tools[3].browser, /25 MB and 100 pages/);
   assert.match(PROCESSING_MODE_GUIDE.tools[4].browser, /10 MB and 100 pages/);
   assert.equal(PROCESSING_MODE_GUIDE.tools[5].browser, "Not available; repair needs native recovery tools.");
+  assert.equal(PROCESSING_MODE_GUIDE.tools[6].browser, "Not available; compression uses native FFmpeg processing.");
+  assert.equal(PROCESSING_MODE_GUIDE.tools[7].browser, "Not available; extraction uses native FFmpeg processing.");
+  assert.equal(PROCESSING_MODE_GUIDE.tools[8].browser, "Not available; PDF page rendering requires the Local agent.");
   assert.equal(PROCESSING_MODE_GUIDE.faqs.length, 10);
   assert.equal(new Set(PROCESSING_MODE_GUIDE.faqs.map(([question]) => question)).size, 10);
 });

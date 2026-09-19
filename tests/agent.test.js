@@ -157,6 +157,24 @@ if (getAuthorizationState().trialStartedAt !== state.trialStartedAt) process.exi
   assert.equal(child.status, 0, `The explicit dashboard trial action failed: ${child.stdout}${child.stderr}`);
 });
 
+test("agent resumes queued jobs after an authorized restart", async () => {
+  const { createJob, deleteJob, getJob } = await import("../lib/db.js");
+  const id = randomUUID();
+  createJob({ id, tool: "test-unknown-tool", sourcePath: path.join(testRoot, "missing-input"), sourceName: "missing-input.bin", options: {} });
+
+  await agent.stopAgentServer();
+  server = await agent.startAgentServer({ port: 0 });
+  port = server.address().port;
+
+  let job = getJob(id);
+  for (let attempt = 0; attempt < 30 && job?.status === "queued"; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    job = getJob(id);
+  }
+  assert.equal(job?.status, "failed");
+  deleteJob(id);
+});
+
 test("dashboard exposes the trial, update, and admin actions in the bottom bar", async () => {
   const dashboardHtml = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard.html"), "utf8");
   const dashboardCss = await fs.readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "agent", "dashboard.css"), "utf8");
@@ -1645,7 +1663,7 @@ test("secure website capability preflight allows the complete browser request co
   assert.equal(response.status, 204);
   assert.equal(response.headers.get("access-control-allow-origin"), "https://native-media-agent.vercel.app");
   assert.equal(response.headers.get("access-control-allow-headers"), "Authorization, Content-Type, Accept, Range, X-Requested-With");
-  assert.equal(response.headers.get("access-control-allow-methods"), "GET, POST, DELETE, OPTIONS, HEAD");
+  assert.equal(response.headers.get("access-control-allow-methods"), "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD");
   assert.equal(response.headers.get("access-control-expose-headers"), "Accept-Ranges, Content-Disposition, Content-Length, Content-Range");
   assert.equal(response.headers.get("access-control-allow-private-network"), "true");
 });

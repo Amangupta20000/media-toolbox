@@ -11,6 +11,7 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { commandExists, firstAvailable, runCommand } from "../lib/command.js";
 import { pdfCompressionSettings, rasterizeImageHeavyPdf, rasterizeImageOnlyPdf } from "../lib/pdf-compressor.js";
+import { renderPdfToImageArchive } from "../lib/pdf-to-images.js";
 
 const projectDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), "media-toolbox-test-"));
@@ -20,7 +21,8 @@ process.env.UNTRUNC_REFERENCE_PATH = "";
 
 const db = await import("../lib/db.js");
 const worker = await import("../worker/index.js");
-const { createJobFromMultipart } = await import("../lib/job-intake.js");
+const { createJobFromMultipart, validateMediaSourceUrl } = await import("../lib/job-intake.js");
+await worker.writeCapabilities();
 
 after(async () => {
   await fs.rm(testRoot, { recursive: true, force: true });
@@ -186,6 +188,36 @@ test("command runner forwards live stderr output", async () => {
   assert.match(observed, /progress update/);
 });
 
+test("command runner cancels a tracked process when its job is canceled", async () => {
+  const startedAt = Date.now();
+  const result = await runCommand(process.execPath, ["-e", "setTimeout(() => {}, 10000)"], {
+    cancelWhen: () => Date.now() - startedAt > 250,
+  });
+  assert.equal(result.code, 125);
+  assert.match(result.stderr, /Command canceled/i);
+  assert.ok(Date.now() - startedAt < 3000);
+});
+
+test("worker startup marks interrupted jobs failed instead of blocking queued work", async () => {
+  const interrupted = await createJob({ tool: "video-compressor", sourcePath: path.join(testRoot, "interrupted.webm"), sourceName: "interrupted.webm", options: {} });
+  db.updateJob(interrupted.id, { status: "processing", progress: 20, stage: "Compressing video", message: "Working" });
+  const queued = await createJob({ tool: "video-compressor", sourcePath: path.join(testRoot, "queued.webm"), sourceName: "queued.webm", options: {} });
+  assert.equal(db.failInterruptedJobs(), 1);
+  assert.equal(db.getJob(interrupted.id).status, "failed");
+  assert.equal(db.getJob(interrupted.id).stage, "Interrupted");
+  assert.equal(db.claimNextJob().id, queued.id);
+  db.deleteJob(interrupted.id);
+  db.deleteJob(queued.id);
+});
+
+test("worker lock prevents duplicate workers from processing the same queue", () => {
+  const release = worker.acquireWorkerLock();
+  assert.throws(() => worker.acquireWorkerLock(), /already running/);
+  release();
+  const reacquired = worker.acquireWorkerLock();
+  reacquired();
+});
+
 test("image converter preserves pixels and reports JPEG transparency flattening", async () => {
   const imageTool = await firstAvailable(["magick", "convert"]);
   if (!imageTool) return;
@@ -311,6 +343,53 @@ test("image jobs API returns one queued job ID per uploaded image", async () => 
   const jobDirectories = new Set(jobs.map((job) => path.dirname(path.dirname(job.source_path))));
   for (const job of jobs) db.deleteJob(job.id);
   for (const directory of jobDirectories) await fs.rm(directory, { recursive: true, force: true });
+});
+
+test("server jobs reject uploads when the worker is unavailable", async () => {
+  const { paths } = await import("../lib/config.js");
+  const api = await import("../pages/api/jobs/index.js");
+  await fs.rm(paths.capabilities, { force: true });
+  try {
+    const request = new PassThrough();
+    request.method = "POST";
+    request.headers = { "content-type": "multipart/form-data; boundary=unused" };
+    const response = mockJsonResponse();
+    const requestPromise = api.default(request, response);
+    request.end();
+    await requestPromise;
+    assert.equal(response.statusCode, 503);
+    assert.equal(response.payload.code, "worker_unavailable");
+  } finally {
+    await worker.writeCapabilities();
+  }
+});
+
+test("server job cancellation removes queued jobs and marks active jobs canceled", async () => {
+  const api = await import("../pages/api/jobs/[id]/index.js");
+  const { paths } = await import("../lib/config.js");
+  const queuedDir = path.join(paths.jobs, "server-queued-cancel");
+  await fs.mkdir(queuedDir, { recursive: true });
+  const queuedSource = path.join(queuedDir, "queued.webm");
+  await fs.writeFile(queuedSource, "queued");
+  const queued = await createJob({ tool: "video-compressor", sourcePath: queuedSource, sourceName: "queued.webm", options: {} });
+  const queuedResponse = mockJsonResponse();
+  await api.default({ method: "DELETE", query: { id: queued.id } }, queuedResponse);
+  assert.equal(queuedResponse.statusCode, 200);
+  assert.equal(db.getJob(queued.id), undefined);
+  assert.equal(await fs.stat(queuedDir).catch(() => null), null);
+
+  const activeDir = path.join(paths.jobs, "server-active-cancel");
+  await fs.mkdir(activeDir, { recursive: true });
+  const activeSource = path.join(activeDir, "active.webm");
+  await fs.writeFile(activeSource, "active");
+  const active = await createJob({ tool: "video-compressor", sourcePath: activeSource, sourceName: "active.webm", options: {} });
+  db.updateJob(active.id, { status: "processing", progress: 20, stage: "Compressing video", message: "Working" });
+  const activeResponse = mockJsonResponse();
+  await api.default({ method: "DELETE", query: { id: active.id } }, activeResponse);
+  assert.equal(activeResponse.statusCode, 202);
+  assert.equal(db.getJob(active.id).status, "cancelled");
+  db.deleteJob(active.id);
+  await fs.rm(activeDir, { recursive: true, force: true });
 });
 
 test("PDF editor reorders pages, creates a blank page with an image, and preserves the source", async (t) => {
@@ -1223,4 +1302,117 @@ test("the macOS recovery helper uses the current laptop paths", async (t) => {
 test("the web worker has no implicit local Record Go reference", async () => {
   const { config } = await import("../lib/config.js");
   assert.equal(config.untruncReferencePath, "");
+});
+
+function storedZipNames(buffer) {
+  const names = [];
+  let offset = 0;
+  while (offset + 30 <= buffer.length && buffer.readUInt32LE(offset) === 0x04034b50) {
+    const nameLength = buffer.readUInt16LE(offset + 26);
+    const extraLength = buffer.readUInt16LE(offset + 28);
+    names.push(buffer.subarray(offset + 30, offset + 30 + nameLength).toString("utf8"));
+    const compressedSize = buffer.readUInt32LE(offset + 18);
+    offset += 30 + nameLength + extraLength + compressedSize;
+  }
+  return names;
+}
+
+test("video compressor creates a playable smaller MP4 copy", async (t) => {
+  const ffmpeg = await firstAvailable(["ffmpeg"]);
+  const ffprobe = await firstAvailable(["ffprobe"]);
+  if (!ffmpeg || !ffprobe) {
+    t.skip("FFmpeg and ffprobe are required for the video compressor test.");
+    return;
+  }
+  const sourcePath = path.join(testRoot, "compressor-source.mp4");
+  await command(ffmpeg, ["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25", "-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000", "-t", "2", "-shortest", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", sourcePath]);
+  const sourceHash = await sha256(sourcePath);
+  const intake = await createJobFromMultipart({ id: crypto.randomUUID(), jobDir: testRoot, fields: { tool: "video-compressor", compressionProfile: "small", retention: "keep", filename: "smaller-copy.mp4" }, files: [{ field: "source", name: "compressor-source.mp4", mime: "video/mp4", path: sourcePath, size: (await fs.stat(sourcePath)).size }] });
+  const job = db.getJob(intake.ids[0]);
+  await worker.processJob(job);
+  const completed = db.getJob(job.id);
+  const result = JSON.parse(completed.result_json);
+  const probe = await runCommand(ffprobe, ["-v", "error", "-show_entries", "stream=codec_type,width,height", "-of", "default=nw=1", result.path]);
+  assert.equal(completed.status, "completed", completed.error);
+  assert.equal(result.filename, "smaller-copy.mp4");
+  assert.ok(result.durationMs > 0, "video duration should be detected for progress reporting");
+  assert.match(probe.stdout, /codec_type=video/);
+  assert.match(probe.stdout, /codec_type=audio/);
+  assert.equal(await sha256(sourcePath), sourceHash);
+});
+
+test("audio extractor creates the selected audio format and rejects silent videos", async (t) => {
+  const ffmpeg = await firstAvailable(["ffmpeg"]);
+  const ffprobe = await firstAvailable(["ffprobe"]);
+  if (!ffmpeg || !ffprobe) {
+    t.skip("FFmpeg and ffprobe are required for the audio extractor test.");
+    return;
+  }
+  const sourcePath = path.join(testRoot, "audio-source.mp4");
+  await command(ffmpeg, ["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "1", "-shortest", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k", sourcePath]);
+  const intake = await createJobFromMultipart({ id: crypto.randomUUID(), jobDir: testRoot, fields: { tool: "audio-extractor", audioFormat: "flac", audioBitrate: "192k", retention: "keep" }, files: [{ field: "source", name: "audio-source.mp4", mime: "video/mp4", path: sourcePath, size: (await fs.stat(sourcePath)).size }] });
+  const job = db.getJob(intake.ids[0]);
+  await worker.processJob(job);
+  const completed = db.getJob(job.id);
+  const result = JSON.parse(completed.result_json);
+  const streams = await runCommand(ffprobe, ["-v", "error", "-show_entries", "stream=codec_type,codec_name", "-of", "default=nw=1", result.path]);
+  assert.equal(completed.status, "completed", completed.error);
+  assert.equal(result.format, "flac");
+  assert.match(streams.stdout, /codec_type=audio/);
+  assert.match(streams.stdout, /codec_name=flac/);
+});
+
+test("audio extractor accepts supported media URLs and rejects unsafe sources", async () => {
+  const id = crypto.randomUUID();
+  const intake = await createJobFromMultipart({
+    id,
+    jobDir: testRoot,
+    fields: { tool: "audio-extractor", sourceUrl: "https://www.youtube.com/watch?v=video-example", audioFormat: "mp3", audioBitrate: "192k" },
+    files: [],
+  });
+  const job = db.getJob(intake.ids[0]);
+  const options = JSON.parse(job.options_json);
+  assert.equal(options.sourceUrl, "https://www.youtube.com/watch?v=video-example");
+  assert.equal(job.source_name, "remote-media");
+  assert.equal(job.source_path, path.join(testRoot, "url-source"));
+  assert.equal(validateMediaSourceUrl("https://youtu.be/video-example"), "https://www.youtube.com/watch?v=video-example");
+  assert.equal(
+    validateMediaSourceUrl("https://www.youtube.com/watch?v=video-example&list=RDvideo-example&start_radio=1"),
+    "https://www.youtube.com/watch?v=video-example",
+  );
+  assert.equal(validateMediaSourceUrl("https://media.example.com/video.mp4"), "https://media.example.com/video.mp4");
+  await assert.rejects(
+    () => createJobFromMultipart({ id: crypto.randomUUID(), jobDir: testRoot, fields: { tool: "audio-extractor", sourceUrl: "http://127.0.0.1:4789/media" }, files: [] }),
+    /Local and private-network media URLs are not supported/,
+  );
+  await assert.rejects(
+    () => createJobFromMultipart({ id: crypto.randomUUID(), jobDir: testRoot, fields: { tool: "audio-extractor", sourceUrl: "http://[::1]/media" }, files: [] }),
+    /Local and private-network media URLs are not supported/,
+  );
+  await assert.rejects(
+    () => createJobFromMultipart({ id: crypto.randomUUID(), jobDir: testRoot, fields: { tool: "audio-extractor", sourceUrl: "ftp://media.example.com/video.mp4" }, files: [] }),
+    /Only public HTTP\(S\) media URLs are supported/,
+  );
+  await assert.rejects(
+    () => createJobFromMultipart({ id: crypto.randomUUID(), jobDir: testRoot, fields: { tool: "audio-extractor", sourceUrl: "https://www.youtube.com/playlist?list=example" }, files: [] }),
+    /one public media item URL/,
+  );
+  db.deleteJob(job.id);
+});
+
+test("PDF to images creates one numbered image per page in a ZIP archive", async () => {
+  const sourcePath = path.join(testRoot, "pages-source.pdf");
+  await createPdf(sourcePath, "render", [[300, 200], [200, 300], [240, 240]]);
+  const intake = await createJobFromMultipart({ id: crypto.randomUUID(), jobDir: testRoot, fields: { tool: "pdf-to-images", pdfFormat: "png", pdfScale: "1", pdfQuality: "90", retention: "keep" }, files: [{ field: "source", name: "pages-source.pdf", mime: "application/pdf", path: sourcePath, size: (await fs.stat(sourcePath)).size }] });
+  const job = db.getJob(intake.ids[0]);
+  await worker.processJob(job);
+  const completed = db.getJob(job.id);
+  const result = JSON.parse(completed.result_json);
+  const archive = await fs.readFile(result.path);
+  assert.equal(completed.status, "completed", completed.error);
+  assert.equal(result.pageCount, 3);
+  assert.deepEqual(storedZipNames(archive), ["page-001.png", "page-002.png", "page-003.png"]);
+  const direct = await renderPdfToImageArchive(await fs.readFile(sourcePath), { format: "jpg", scale: 1 });
+  assert.equal(direct.pageCount, 3);
+  assert.deepEqual(storedZipNames(direct.bytes), ["page-001.jpg", "page-002.jpg", "page-003.jpg"]);
 });

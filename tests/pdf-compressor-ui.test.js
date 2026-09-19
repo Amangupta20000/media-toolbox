@@ -13,7 +13,7 @@ test("PDF compressor is available and is not listed as coming soon", async () =>
   const history = await read("components/tool-history.jsx");
   const intake = await read("lib/job-intake.js");
   const worker = await read("worker/index.js");
-  assert.match(history, /tool !== "pdf-compressor" && <button className="secondary-button" type="button" onClick=\{onEdit\}/);
+  assert.match(history, /!\["pdf-compressor", "video-compressor", "audio-extractor", "pdf-to-images"\]\.includes\(tool\)/);
   assert.match(navigation, /href: "\/pdf-compressor"[^\n]+icon: Archive \}/);
   assert.doesNotMatch(navigation, /href: "\/pdf-compressor"[^\n]+beta: true/);
   assert.doesNotMatch(comingSoon, /\["PDF compressor"/);

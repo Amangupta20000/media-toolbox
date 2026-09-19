@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { Archive, ArrowRight, BookOpen, ChevronDown, Clock3, ExternalLink, Film, FileText, Gift, Home, Image as ImageIcon, Menu, Moon, ShieldCheck, Sparkles, Sun } from "lucide-react";
+import { Archive, ArrowRight, AudioLines, BookOpen, ChevronDown, Clock3, Code2, ExternalLink, FileImage, FileMusic, FileText, FileVideo, Film, Gift, Home, Image as ImageIcon, Menu, Moon, ShieldCheck, Sparkles, Sun } from "lucide-react";
 import { probeLocalAgent } from "./processing-client.js";
 import { AppFooter } from "./app-footer.jsx";
 import { FreeAccessModal } from "./free-access-modal.jsx";
@@ -15,12 +15,16 @@ const navigation = [
   { href: "/image-converter", label: "Image converter", detail: "Resize-free format conversion", icon: ImageIcon },
   { href: "/svg-to-png", label: "SVG to PNG", detail: "Rasterize SVG at any scale", icon: ImageIcon },
   { href: "/video-repair", label: "Video repair", detail: "Layered recovery workflow", icon: Film },
+  { href: "/video-compressor", label: "Video compressor", detail: "Reduce video file size", icon: FileVideo },
+  { href: "/audio-extractor", label: "Audio extractor", detail: "Extract audio from video", icon: FileMusic, beta: true },
+  { href: "/mock-api", label: "Mock API", detail: "Build JSON REST mocks", icon: Code2, beta: true },
 ];
 
 const pdfNavigation = [
   { href: "/pdf-editor", label: "PDF editor", detail: "Merge and arrange pages", icon: FileText },
   { href: "/pdf-text-editor", label: "PDF text editor", detail: "Edit existing PDF text", icon: FileText },
   { href: "/pdf-compressor", label: "PDF compressor", detail: "Reduce PDF file size", icon: Archive },
+  { href: "/pdf-to-images", label: "PDF to images", detail: "Render pages as PNG or JPG", icon: FileImage },
 ];
 
 const moreNavigation = [

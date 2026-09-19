@@ -9,6 +9,9 @@ const toolNames = {
   "image-converter": "image conversion",
   "svg-to-png": "SVG to PNG conversion",
   "video-repair": "video repair",
+  "video-compressor": "video compression",
+  "audio-extractor": "audio extraction",
+  "pdf-to-images": "PDF to images",
   "pdf-editor": "PDF editing",
   "pdf-text-editor": "PDF text editing",
   "pdf-compressor": "PDF compression",
@@ -30,6 +33,18 @@ const formatSupport = {
   "video-repair": {
     input: { local: "MP4, M4V, MOV, 3GP, MKV, WebM, AVI, MPEG, MPG", browser: "Not supported — video repair requires the Local agent" },
     output: { local: "Repaired video in the recovered format", browser: "Not supported" },
+  },
+  "video-compressor": {
+    input: { local: "MP4, M4V, MOV, 3GP, MKV, WebM, AVI, MPEG, MPG", browser: "Not supported — video compression requires the Local agent" },
+    output: { local: "Compressed MP4", browser: "Not supported" },
+  },
+  "audio-extractor": {
+    input: { local: "MP4, M4V, MOV, 3GP, MKV, WebM, AVI, MPEG, MPG with an audio track", browser: "Not supported — audio extraction requires the Local agent" },
+    output: { local: "MP3, WAV, AAC, FLAC, or M4A", browser: "Not supported" },
+  },
+  "pdf-to-images": {
+    input: { local: "PDF up to 200 MB and 300 pages", browser: "Not supported — PDF rendering requires the Local agent" },
+    output: { local: "ZIP archive containing PNG or JPG page images", browser: "Not supported" },
   },
   "pdf-editor": {
     input: { local: "PDF; added images: PNG, JPG/JPEG, HEIC/HEIF, TIFF/TIF, GIF, BMP", browser: "PDFs up to 50 MB total; added images: PNG, JPG, or JPEG up to 1 MB each" },
@@ -59,12 +74,21 @@ function comparisonRowsFor(tool, browserSupported) {
       : tool === "pdf-editor" ? "Quick PDF import, merging, and page arrangement with PNG/JPG/JPEG images up to 1 MB each"
         : tool === "pdf-text-editor" ? "Quick replacement of selectable embedded PDF text up to 25 MB and 100 pages"
         : "Quick conversions on mobile or desktop"
-    : "Not supported for this tool";
+    : tool === "video-compressor" ? "Local agent video compression with quality and size presets"
+      : tool === "audio-extractor" ? "Extracting an audio track from a supported video"
+        : tool === "pdf-to-images" ? "Rendering PDF pages into a downloadable image archive"
+          : "Not supported for this tool";
   const browserFiles = browserSupported ? "Files stay in this browser; nothing is uploaded" : "Requires the Local agent";
   const browserResults = browserSupported ? "Download-only; temporary in this tab" : "Not available";
   const browserRequirements = browserSupported ? "No installation; browser memory and format support apply" : "Requires the Local agent on a desktop computer";
   const imageSizeRows = tool === "image-converter" ? [["Maximum input size", "25 MB per image", "5 MB per image"]] : [];
-  const toolSpecificRows = tool === "svg-to-png"
+  const toolSpecificRows = tool === "video-compressor"
+    ? [["Compression profiles", "Balanced, Small file, or Higher quality", "Local agent only", true], ["Output", "New MP4 copy; original remains untouched", "Not available", true], ["Maximum input size", "2 GB", "Not available", true]]
+    : tool === "audio-extractor"
+      ? [["Audio formats", "MP3, WAV, AAC, FLAC, or M4A", "Local agent only", true], ["Audio track", "First audio track from the video", "Not available", true], ["Maximum input size", "2 GB", "Not available", true]]
+      : tool === "pdf-to-images"
+        ? [["Output scale", "1×, 1.5×, or 2×", "Local agent only", true], ["Archive", "One ZIP containing numbered page images", "Not available", true], ["PDF page limit", "300 pages", "Not available", true]]
+        : tool === "svg-to-png"
     ? [["Export sizing", "1×, 2×, 3×, 4×, or Custom", "1×, 2×, 3×, or 4× (Custom uses desktop processing)"]]
     : tool === "pdf-compressor"
       ? [["Compression profiles", "Balanced, Smallest file, Higher quality, or Custom", "Balanced only"]]

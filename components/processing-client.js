@@ -374,6 +374,12 @@ function requestOptions(mode, options = {}) {
   return { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` } };
 }
 
+export async function requestLocalAgentJson(path, options = {}) {
+  const token = await ensureLocalAgentSession();
+  const { payload } = await fetchLocalJson(path, requestOptions("local", { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` } }));
+  return payload;
+}
+
 function historyRequestOptions(options = {}) {
   const token = storedHistoryToken();
   return { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` } };
@@ -394,6 +400,7 @@ export function uploadWithProgress(form, mode, onProgress) {
       let payload = {};
       try { payload = JSON.parse(xhr.responseText); } catch { /* no-op */ }
       if (xhr.status >= 200 && xhr.status < 300 && (payload.jobId || (Array.isArray(payload.jobIds) && payload.jobIds.length))) resolve(payload);
+      else if (payload.code === "worker_unavailable") reject(new Error(payload.error || "Server processing is temporarily unavailable. Choose Local agent or try again later."));
       else reject(new Error(payload.error || (xhr.status === 401 || xhr.status === 402 ? "Admin login or activation is required in the Local agent dashboard." : "The upload failed.")));
     };
     xhr.send(form);

@@ -35,6 +35,12 @@ function contentType(filename) {
     mov: "video/quicktime",
     webm: "video/webm",
     mkv: "video/x-matroska",
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    aac: "audio/aac",
+    flac: "audio/flac",
+    m4a: "audio/mp4",
+    zip: "application/zip",
   }[extension] || "application/octet-stream";
 }
 

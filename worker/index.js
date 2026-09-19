@@ -5,16 +5,18 @@ import { pathToFileURL } from "node:url";
 import { PDFDocument, concatTransformationMatrix, degrees, popGraphicsState, pushGraphicsState, rgb } from "pdf-lib";
 import * as fontkit from "fontkit";
 import { config, paths, untruncCandidates } from "../lib/config.js";
-import { appendJobLog, claimNextJob, deleteJob, getJob, listExpiredJobs, updateJob } from "../lib/db.js";
+import { appendJobLog, claimNextJob, deleteJob, failInterruptedJobs, getJob, listExpiredJobs, updateJob } from "../lib/db.js";
 import { commandExists, firstAvailable, runCommand } from "../lib/command.js";
 import { applyPdfTextEdits } from "../lib/pdf-text-editor.js";
 import { applyPdfOcrEdits } from "../lib/pdf-ocr.js";
 import { pdfCompressionSettings, rasterizeImageHeavyPdf, recompressPdfImages } from "../lib/pdf-compressor.js";
+import { renderPdfToImageArchive } from "../lib/pdf-to-images.js";
 import { rotatedImageDrawPlacement } from "../lib/pdf-image-placement.js";
 import { layoutPdfTextRuns, textBoxColor, textBoxDrawPlacement, textBoxFontDefinition, textBoxFontName, textBoxTextRuns } from "../lib/pdf-text-box.js";
-import { safePdfOutputFilename } from "../lib/job-intake.js";
+import { safePdfOutputFilename, validateMediaSourceUrl } from "../lib/job-intake.js";
 
 let sharpPromise;
+let shutdownRequested = false;
 const bundledFontBytes = new Map();
 const bundledFontkitDocuments = new WeakSet();
 
@@ -41,6 +43,48 @@ async function loadSharp() {
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function processIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+function acquireWorkerLock() {
+  fs.mkdirSync(config.dataDir, { recursive: true });
+  const lockPath = paths.workerLock;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const descriptor = fs.openSync(lockPath, "wx");
+      fs.writeFileSync(descriptor, JSON.stringify({ pid: process.pid, startedAt: Date.now() }));
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        try { fs.closeSync(descriptor); } catch { /* already closed */ }
+        try {
+          const lock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+          if (lock.pid === process.pid) fs.unlinkSync(lockPath);
+        } catch { /* the lock was already removed or replaced */ }
+      };
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      let lock = null;
+      try { lock = JSON.parse(fs.readFileSync(lockPath, "utf8")); } catch { /* stale or partially written lock */ }
+      if (processIsAlive(Number(lock?.pid))) {
+        throw new Error(`Another NativeMedia Agent worker is already running (PID ${lock.pid}).`);
+      }
+      try { fs.unlinkSync(lockPath); } catch (unlinkError) {
+        if (unlinkError?.code !== "ENOENT") throw unlinkError;
+      }
+    }
+  }
+  throw new Error("Could not acquire the NativeMedia Agent worker lock.");
 }
 
 function stem(filename) {
@@ -151,8 +195,15 @@ function millisecondsToTime(value) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${seconds}`;
 }
 
-async function mediaDuration(ffprobe, file) {
-  const result = await runCommand(ffprobe, ["-v", "error", "-show_entries", "format=duration:stream=duration", "-of", "default=noprint_wrappers=1:nokey=1", file]);
+function cancellationRequested(jobId) {
+  return shutdownRequested || Boolean(jobId && getJob(jobId)?.status === "cancelled");
+}
+
+async function mediaDuration(ffprobe, file, jobId = "") {
+  const result = await runCommand(ffprobe, ["-v", "error", "-show_entries", "format=duration:stream=duration", "-of", "default=noprint_wrappers=1:nokey=1", file], {
+    timeoutMs: 120000,
+    cancelWhen: () => cancellationRequested(jobId),
+  });
   const values = result.stdout.split(/\s+/).map(Number).filter((value) => Number.isFinite(value) && value > 0);
   if (values.length) return Math.max(...values) * 1000;
 
@@ -174,6 +225,7 @@ async function mediaDuration(ffprobe, file) {
     timeoutMs: 120000,
     captureStdout: false,
     onStdout: readPacketTimestamps,
+    cancelWhen: () => cancellationRequested(jobId),
   });
   readPacketTimestamps("\n");
   return lastTimestamp !== null ? lastTimestamp * 1000 : null;
@@ -220,7 +272,10 @@ async function runTrackedFfmpeg(ffmpeg, args, jobId, label, durationMs = null) {
     lastLoggedAt = Date.now();
   };
 
-  const result = await runCommand(ffmpeg, ["-progress", "pipe:2", "-stats_period", "2", ...args], { onStderr: readProgress });
+  const result = await runCommand(ffmpeg, ["-progress", "pipe:2", "-stats_period", "2", ...args], {
+    onStderr: readProgress,
+    cancelWhen: () => cancellationRequested(jobId),
+  });
   if (result.code === 0) updateJob(jobId, { conversionProgress: 100 });
   return result;
 }
@@ -1125,7 +1180,7 @@ async function usableCandidate(ffmpeg, ffprobe, file, jobId, label) {
 }
 
 async function transcodeRecoveredCandidate(ffmpeg, ffprobe, source, destination, jobId, label) {
-  const durationMs = await mediaDuration(ffprobe, source);
+  const durationMs = await mediaDuration(ffprobe, source, jobId);
   const result = await runTrackedFfmpeg(ffmpeg, ["-y", "-hide_banner", "-v", "error", "-fflags", "+genpts+discardcorrupt", "-err_detect", "ignore_err", "-i", source, "-map", "0:v:0?", "-map", "0:a:0?", "-map_metadata", "0", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", destination], jobId, label, durationMs);
   logAttemptFailure(jobId, label, result);
   return result.code === 0 && (await usableCandidate(ffmpeg, ffprobe, destination, jobId, label));
@@ -1147,7 +1202,7 @@ async function processVideo(job) {
   const warnings = [];
   let method = "";
   let rejectedRecoveredVideo = false;
-  const sourceDurationMs = await mediaDuration(ffprobe, job.source_path);
+  const sourceDurationMs = await mediaDuration(ffprobe, job.source_path, job.id);
 
   update(job.id, 8, "Inspecting video", "Checking whether the container can be read.");
   const sourceProbe = await runCommand(ffprobe, ["-v", "error", job.source_path]);
@@ -1268,8 +1323,167 @@ async function processVideo(job) {
   updateJob(job.id, { status: "completed", progress: 100, stage: "Complete", message: "The repaired video is ready to download.", warnings, result });
 }
 
+const videoCompressionSettings = {
+  balanced: { crf: 23, preset: "medium", maxWidth: 1920, label: "Balanced" },
+  small: { crf: 28, preset: "fast", maxWidth: 1280, label: "Small file" },
+  quality: { crf: 20, preset: "medium", maxWidth: 3840, label: "Higher quality" },
+};
+
+async function processVideoCompressor(job) {
+  const options = JSON.parse(job.options_json || "{}");
+  const ffmpeg = await firstAvailable(["ffmpeg"]);
+  const ffprobe = await firstAvailable(["ffprobe"]);
+  if (!ffmpeg || !ffprobe) throw new Error("FFmpeg and ffprobe are required for video compression.");
+  const settings = videoCompressionSettings[options.compressionProfile] || videoCompressionSettings.balanced;
+  const jobDir = path.dirname(job.source_path);
+  const outputName = safeOutputName(options.outputFilename, `${stem(job.source_name)}_compressed.mp4`);
+  const outputPath = path.join(jobDir, outputName);
+  update(job.id, 8, "Inspecting video", "Reading video streams and duration before compression.");
+  const durationMs = await mediaDuration(ffprobe, job.source_path, job.id);
+  const args = [
+    "-y", "-hide_banner", "-nostdin", "-v", "error", "-i", job.source_path,
+    "-map", "0:v:0?", "-map", "0:a:0?", "-map_metadata", "0",
+    "-c:v", "libx264", "-preset", settings.preset, "-crf", String(settings.crf), "-pix_fmt", "yuv420p",
+    "-vf", `scale=w='min(iw,${settings.maxWidth})':h=-2`,
+    "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", outputPath,
+  ];
+  update(job.id, 20, "Compressing video", `${settings.label} compression is creating a new MP4.`);
+  const result = await runTrackedFfmpeg(ffmpeg, args, job.id, "Video compression", durationMs);
+  logAttemptFailure(job.id, "Video compression", result);
+  if (result.code !== 0 || !fs.existsSync(outputPath) || !(await usableCandidate(ffmpeg, ffprobe, outputPath, job.id, "Video compression"))) {
+    throw new Error(`Video compression could not create a playable result. ${commandFailure(result)}`);
+  }
+  const outputBytes = await bytes(outputPath);
+  const inputBytes = await bytes(job.source_path);
+  const output = { path: outputPath, filename: outputName, bytes: outputBytes, inputBytes, durationMs, compressionProfile: options.compressionProfile || "balanced", reductionPercent: Math.max(0, Math.round((1 - outputBytes / inputBytes) * 100)), method: "FFmpeg H.264/AAC compression" };
+  appendJobLog(job.id, `Created ${outputName} successfully.`, "complete");
+  updateJob(job.id, { status: "completed", progress: 100, stage: "Complete", message: "The compressed video is ready to download.", warnings: outputBytes >= inputBytes ? ["The compressed file is not smaller than the source. The original was left untouched."] : [], result: output });
+}
+
+async function downloadAudioSource(job, sourceUrl) {
+  const publicMediaDownloader = await firstAvailable(["yt-dlp"]);
+  if (!publicMediaDownloader) throw new Error("URL audio extraction requires the public media downloader to be installed for this Server or Local-agent runtime.");
+  const validatedUrl = validateMediaSourceUrl(sourceUrl);
+  const jobDir = path.dirname(job.source_path);
+  const template = path.join(jobDir, "downloaded-source.%(ext)s");
+  let lastProgress = -1;
+  let lastLoggedAt = 0;
+  update(job.id, 4, "Downloading audio source", "Fetching the selected media source with the public media downloader.");
+  updateJob(job.id, { conversionProgress: -1, conversionCurrent: "Downloading source", conversionTotal: "" });
+  const result = await runCommand(publicMediaDownloader, [
+    "--no-playlist",
+    "--newline",
+    "--progress",
+    "--no-warnings",
+    "--restrict-filenames",
+    "--max-filesize",
+    `${Math.ceil(config.videoMaxBytes / (1024 * 1024 * 1024))}G`,
+    "-f",
+    // Prefer a directly downloadable M4A stream. Some media sites expose a
+    // WebM stream first even when that stream is currently rejected with 403.
+    "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio",
+    "-o",
+    template,
+    validatedUrl,
+  ], {
+    onStderr: (chunk) => {
+      const match = chunk.match(/(\d+(?:\.\d+)?)%/);
+      if (!match) return;
+      const percent = Math.max(0, Math.min(100, Math.round(Number(match[1]))));
+      if (percent === lastProgress && Date.now() - lastLoggedAt < 2000) return;
+      lastProgress = percent;
+      const progress = Math.max(4, Math.min(22, 4 + Math.round(percent * 0.18)));
+      const message = `Downloading audio source: ${percent}%`;
+      updateJob(job.id, { progress, stage: "Downloading audio source", message });
+      if (Date.now() - lastLoggedAt >= 2000 || percent === 100) {
+        appendJobLog(job.id, message, "info");
+        lastLoggedAt = Date.now();
+      }
+    },
+    cancelWhen: () => cancellationRequested(job.id),
+  });
+  if (result.code !== 0) {
+    const detail = commandFailure(result).replaceAll(validatedUrl, "[source URL]");
+    if (result.code === 125) throw new Error("URL audio extraction was canceled.");
+    if (/HTTP Error 403|403 Forbidden/i.test(detail)) {
+      throw new Error("The media site rejected the selected stream (HTTP 403). Update the public media downloader and try again.");
+    }
+    throw new Error(`The media audio source could not be downloaded. ${detail}`);
+  }
+  const entries = await fsp.readdir(jobDir, { withFileTypes: true });
+  const downloaded = entries
+    .filter((entry) => entry.isFile() && entry.name.startsWith("downloaded-source.") && !entry.name.endsWith(".part"))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  if (!downloaded.length) throw new Error("The public media downloader completed without creating an audio source.");
+  const sourcePath = path.join(jobDir, downloaded[downloaded.length - 1].name);
+  appendJobLog(job.id, "Audio source downloaded. Starting audio extraction.", "info");
+  return sourcePath;
+}
+
+async function processAudioExtractor(job) {
+  const options = JSON.parse(job.options_json || "{}");
+  const ffmpeg = await firstAvailable(["ffmpeg"]);
+  const ffprobe = await firstAvailable(["ffprobe"]);
+  if (!ffmpeg || !ffprobe) throw new Error("FFmpeg and ffprobe are required for audio extraction.");
+  const format = ["mp3", "wav", "aac", "flac", "m4a"].includes(options.audioFormat) ? options.audioFormat : "mp3";
+  const bitrate = ["128k", "192k", "256k"].includes(options.audioBitrate) ? options.audioBitrate : "192k";
+  const sourcePath = options.sourceUrl ? await downloadAudioSource(job, options.sourceUrl) : job.source_path;
+  if (!(await hasAudio(ffprobe, sourcePath))) throw new Error("This video does not contain an audio track to extract.");
+  const jobDir = path.dirname(job.source_path);
+  const sourceName = options.sourceUrl ? "remote-media" : job.source_name;
+  const outputName = safeOutputName(options.outputFilename, `${stem(sourceName)}_audio.${format}`);
+  const outputPath = path.join(jobDir, outputName);
+  const durationMs = await mediaDuration(ffprobe, sourcePath, job.id);
+  const codecArgs = format === "mp3"
+    ? ["-c:a", "libmp3lame", "-b:a", bitrate]
+    : format === "wav"
+      ? ["-c:a", "pcm_s16le"]
+      : format === "flac"
+        ? ["-c:a", "flac"]
+        : ["-c:a", "aac", "-b:a", bitrate];
+  const containerArgs = format === "m4a" ? ["-movflags", "+faststart"] : [];
+  update(job.id, 10, "Inspecting audio", "Checking the first audio track and duration.");
+  update(job.id, 22, "Extracting audio", `Creating a ${format.toUpperCase()} audio file.`);
+  const result = await runTrackedFfmpeg(ffmpeg, ["-y", "-hide_banner", "-v", "error", "-i", sourcePath, "-map", "0:a:0", "-vn", "-sn", "-dn", "-map_metadata", "0", ...codecArgs, ...containerArgs, outputPath], job.id, "Audio extraction", durationMs);
+  logAttemptFailure(job.id, "Audio extraction", result);
+  if (result.code !== 0 || !fs.existsSync(outputPath)) throw new Error(`Audio extraction could not create the selected output. ${commandFailure(result)}`);
+  const outputBytes = await bytes(outputPath);
+  const output = { path: outputPath, filename: outputName, bytes: outputBytes, inputBytes: await bytes(sourcePath), durationMs, format, method: `FFmpeg ${format.toUpperCase()} audio extraction` };
+  appendJobLog(job.id, `Created ${outputName} successfully.`, "complete");
+  updateJob(job.id, { status: "completed", progress: 100, stage: "Complete", message: "The extracted audio is ready to download.", warnings: [], result: output });
+}
+
+function safeOutputName(value, fallback) {
+  const candidate = String(value || "").replace(/[^a-zA-Z0-9._-]/g, "_");
+  return candidate || fallback;
+}
+
+async function processPdfToImages(job) {
+  const options = JSON.parse(job.options_json || "{}");
+  const jobDir = path.dirname(job.source_path);
+  const outputName = safeOutputName(options.outputFilename, `${stem(job.source_name)}_images.zip`);
+  const outputPath = path.join(jobDir, outputName);
+  update(job.id, 5, "Reading PDF", "Opening the PDF without changing the source file.");
+  let archive;
+  try {
+    archive = await renderPdfToImageArchive(await fsp.readFile(job.source_path), {
+      format: options.pdfFormat || "png",
+      scale: options.pdfScale || 1.5,
+      quality: options.pdfQuality || 90,
+      onProgress: (progress, message) => update(job.id, Math.max(5, Math.min(99, progress)), "Rendering PDF pages", message),
+    });
+  } catch (error) {
+    if (error?.name === "PasswordException") throw new Error("Password-protected PDFs must be unlocked before using PDF to images.");
+    throw error;
+  }
+  await fsp.writeFile(outputPath, archive.bytes, { flag: "wx" });
+  const output = { path: outputPath, filename: outputName, bytes: archive.bytes.length, inputBytes: await bytes(job.source_path), pageCount: archive.pageCount, format: archive.format, scale: archive.scale, quality: archive.quality, method: "PDF.js page rendering" };
+  appendJobLog(job.id, `Created ${outputName} with ${archive.pageCount} page images.`, "complete");
+  updateJob(job.id, { status: "completed", progress: 100, stage: "Complete", message: "The PDF page images are ready in a ZIP archive.", warnings: [], result: output });
+}
+
 async function processJob(job) {
-  appendJobLog(job.id, `Worker started ${job.tool === "image-converter" ? "image conversion" : job.tool === "svg-to-png" ? "SVG to PNG conversion" : job.tool === "pdf-editor" ? "PDF editing" : job.tool === "pdf-text-editor" ? "PDF text editing" : job.tool === "pdf-compressor" ? "PDF compression" : "video repair"}.`, "info");
+  appendJobLog(job.id, `Worker started ${job.tool === "image-converter" ? "image conversion" : job.tool === "svg-to-png" ? "SVG to PNG conversion" : job.tool === "pdf-editor" ? "PDF editing" : job.tool === "pdf-text-editor" ? "PDF text editing" : job.tool === "pdf-compressor" ? "PDF compression" : job.tool === "video-compressor" ? "video compression" : job.tool === "audio-extractor" ? "audio extraction" : job.tool === "pdf-to-images" ? "PDF to images" : "video repair"}.`, "info");
   try {
     if (job.tool === "image-converter") await processImage(job);
     else if (job.tool === "svg-to-png") await processSvgToPng(job);
@@ -1277,11 +1491,25 @@ async function processJob(job) {
     else if (job.tool === "pdf-text-editor") await processPdfTextEditor(job);
     else if (job.tool === "pdf-compressor") await processPdfCompressor(job);
     else if (job.tool === "video-repair") await processVideo(job);
+    else if (job.tool === "video-compressor") await processVideoCompressor(job);
+    else if (job.tool === "audio-extractor") await processAudioExtractor(job);
+    else if (job.tool === "pdf-to-images") await processPdfToImages(job);
     else throw new Error("Unknown tool.");
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Processing failed.";
+    if (getJob(job.id)?.status === "cancelled") {
+      await fsp.rm(path.dirname(job.source_path), { recursive: true, force: true }).catch(() => undefined);
+      deleteJob(job.id);
+      return;
+    }
     appendJobLog(job.id, detail, "error");
-    updateJob(job.id, { status: "failed", progress: 100, stage: "Failed", message: "Processing failed.", error: detail });
+    updateJob(job.id, {
+      status: "failed",
+      progress: 100,
+      stage: shutdownRequested ? "Interrupted" : "Failed",
+      message: shutdownRequested ? "Processing stopped because the worker restarted. Retry the job to continue." : "Processing failed.",
+      error: shutdownRequested ? "The worker restarted before processing finished." : detail,
+    });
   }
 }
 
@@ -1304,6 +1532,8 @@ async function writeCapabilities() {
   const heic = imageMagickHeic || sips || sharpHeic;
   const libheif = imageMagickHeic || Boolean(heifTool) || sharpHeic;
   const ffmpeg = await commandExists("ffmpeg");
+  const ffprobe = await commandExists("ffprobe");
+  const publicMediaDownloader = await commandExists("yt-dlp");
   const mkvmerge = await commandExists("mkvmerge");
   const values = {
     status: "ready",
@@ -1314,9 +1544,10 @@ async function writeCapabilities() {
       ocrLanguages: ["eng"],
       compressor: Boolean(ghostscript || sharp),
       compressorEngine: ghostscript ? "Ghostscript + bundled image recompression" : sharp ? "Bundled image recompression" : "PDF structural optimization",
+      toImages: true,
     },
     image: { imagemagick: Boolean(imageTool), sharp: Boolean(sharp), sips, heic: heic || sips, libheif, formats: ["jpeg", "png", "heic", "tiff", "gif", "bmp"] },
-    video: { ffmpeg, ffprobe: await commandExists("ffprobe"), mkvmerge, mkvFallback: ffmpeg, untrunc: Boolean(await firstAvailable(untruncCandidates)), defaultReference: fs.existsSync(config.untruncReferencePath) },
+    video: { ffmpeg, ffprobe, publicMediaDownloader, mkvmerge, mkvFallback: ffmpeg, untrunc: Boolean(await firstAvailable(untruncCandidates)), defaultReference: fs.existsSync(config.untruncReferencePath), compressor: Boolean(ffmpeg && ffprobe), audioExtractor: Boolean(ffmpeg && ffprobe), mediaUrl: Boolean(ffmpeg && ffprobe && publicMediaDownloader) },
   };
   await fsp.mkdir(config.dataDir, { recursive: true });
   await fsp.writeFile(paths.capabilities, JSON.stringify(values, null, 2));
@@ -1339,10 +1570,16 @@ async function cleanupExpired() {
 }
 
 async function main() {
+  process.once("SIGTERM", () => { shutdownRequested = true; });
+  process.once("SIGINT", () => { shutdownRequested = true; });
+  const releaseWorkerLock = acquireWorkerLock();
+  try {
   await fsp.mkdir(paths.jobs, { recursive: true });
+  const interrupted = failInterruptedJobs();
+  if (interrupted) console.log(`Marked ${interrupted} interrupted job(s) for retry.`);
   await writeCapabilities();
   console.log("NativeMedia Agent worker is ready.");
-  while (true) {
+  while (!shutdownRequested) {
     const job = claimNextJob();
     if (job) {
       console.log(`Processing ${job.id} (${job.tool})`);
@@ -1352,9 +1589,13 @@ async function main() {
     await cleanupExpired();
     await sleep(1000);
   }
+  console.log("NativeMedia Agent worker stopped.");
+  } finally {
+    releaseWorkerLock();
+  }
 }
 
-export { processImage, processPdfEditor, processPdfCompressor, processPdfTextEditor, processVideo, processJob, writeCapabilities };
+export { acquireWorkerLock, processImage, processPdfEditor, processPdfCompressor, processPdfTextEditor, processVideo, processVideoCompressor, processAudioExtractor, processPdfToImages, processJob, writeCapabilities };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
