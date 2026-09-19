@@ -38,6 +38,52 @@ test("mock API engine returns 400, 405, and OPTIONS responses", () => {
   assert.match(options.headers.Allow, /GET/);
 });
 
+test("database GET APIs filter records with query parameters", () => {
+  const value = normalizeMockProject({
+    id: "query-filters",
+    name: "Query filters",
+    collections: [{ name: "users", methods: ["GET"], records: [
+      { id: "1", name: "Ada", role: "admin", active: true },
+      { id: "2", name: "Alan", role: "developer", active: true },
+      { id: "3", name: "Grace", role: "admin", active: false },
+    ] }],
+  });
+  assert.deepEqual(applyMockRequest(value, { method: "GET", pathname: "/users?role=admin" }).body, [
+    { id: "1", name: "Ada", role: "admin", active: true },
+    { id: "3", name: "Grace", role: "admin", active: false },
+  ]);
+  assert.deepEqual(applyMockRequest(value, { method: "GET", pathname: "/users?role=admin&active=true" }).body, [
+    { id: "1", name: "Ada", role: "admin", active: true },
+  ]);
+  assert.deepEqual(applyMockRequest(value, { method: "GET", pathname: "/users?id=1&id=3" }).body, [
+    { id: "1", name: "Ada", role: "admin", active: true },
+    { id: "3", name: "Grace", role: "admin", active: false },
+  ]);
+  assert.deepEqual(applyMockRequest(value, { method: "GET", pathname: "/users?role=missing" }).body, []);
+});
+
+test("database GET APIs can unwrap exactly one matching record", () => {
+  const value = normalizeMockProject({
+    id: "single-record-format",
+    name: "Single record format",
+    collections: [{ name: "users", methods: ["GET"], singleRecordResponse: "object", records: [
+      { id: "1", name: "Ada", role: "admin" },
+      { id: "2", name: "Grace", role: "manager" },
+    ] }],
+  });
+  assert.deepEqual(applyMockRequest(value, { method: "GET", pathname: "/users?role=admin" }).body, { id: "1", name: "Ada", role: "admin" });
+  assert.deepEqual(applyMockRequest(value, { method: "GET", pathname: "/users?role=admin&role=manager" }).body, [
+    { id: "1", name: "Ada", role: "admin" },
+    { id: "2", name: "Grace", role: "manager" },
+  ]);
+  const arrayOverride = normalizeMockProject({
+    id: "array-override",
+    name: "Array override",
+    collections: [{ name: "users", methods: ["GET"], responseShape: "object", singleRecordResponse: "array", records: [{ id: "1", name: "Ada" }] }],
+  });
+  assert.deepEqual(applyMockRequest(arrayOverride, { method: "GET", pathname: "/users" }).body, [{ id: "1", name: "Ada" }]);
+});
+
 test("mock API validation enforces identifiers, records, and manifest limits", () => {
   assert.throws(() => normalizeMockProject({ id: "../escape", name: "Unsafe", collections: [] }), /Project IDs/);
   assert.throws(() => normalizeMockProject({ id: "unsafe", name: "Unsafe", collections: [{ name: "__proto__", methods: ["GET"], records: [] }] }), /invalid name/);
@@ -151,6 +197,7 @@ test("mock API supports multiple database APIs in one project", () => {
     ],
   });
   assert.equal(applyMockRequest(value, { method: "GET", pathname: "/users" }).body.length, 1);
+  assert.deepEqual(applyMockRequest(value, { method: "GET", pathname: "/users?name=Ada" }).body, [{ id: "1", name: "Ada" }]);
   const created = applyMockRequest(value, { method: "POST", pathname: "/users", body: { id: "2", name: "Grace" } });
   assert.equal(created.status, 201);
   assert.equal(created.project.collections[0].records.length, 2);
