@@ -329,6 +329,10 @@ test("SEO metadata is route-specific and normalizes query strings", () => {
   assert.equal(metadataForPathname("/contact/").title, "Contact Us | NativeMedia Agent");
   assert.equal(metadataForPathname("/offers").breadcrumbLabel, "Offers");
   assert.equal(metadataForPathname("/how-to-setup-agent").breadcrumbLabel, "How to set up the agent");
+  assert.equal(metadataForPathname("/mock-api").title, "Free Mock API Generator for Frontend Testing | NativeMedia Agent");
+  assert.match(metadataForPathname("/mock-api").description, /mock REST APIs/i);
+  assert.match(metadataForPathname("/mock-api").keywords, /JSON mock server/i);
+  assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/mock-api"));
   assert.equal(metadataForPathname("/").title, "Free Private PDF & Media Tools | NativeMedia Agent");
   assert.equal(metadataForPathname("/unknown").title, "Free Private PDF & Media Tools | NativeMedia Agent");
   assert.equal(metadataForPathname("/admin").noIndex, true);
