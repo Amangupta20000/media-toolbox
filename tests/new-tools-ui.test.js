@@ -110,6 +110,8 @@ test("Mock API JSON fields use one growing editor with formatting and collapsibl
   assert.match(page, /GET response node path/);
   assert.match(page, /Return the full matching record/);
   assert.match(page, /Return a specific node/);
+  assert.match(page, /Node path <span className="mock-field-hint">Optional<\/span>/);
+  assert.match(page, /Leave the node path empty to return the full matching record/);
   assert.match(page, /consentData\.data/);
   assert.match(page, /const latestProject = \(await listLocalMockProjects\(\)\)\.find\(\(item\) => item\.id === project\.id\)/);
   assert.match(page, /saveDraft = \{ \.\.\.draft, seedText: pretty\(collectionSeedValue\(latestCollection\)\) \}/);
