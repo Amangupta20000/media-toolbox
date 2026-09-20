@@ -596,6 +596,7 @@ function headersTextFromRows(rows) {
 function HeaderRowsEditor({ label, value, onChange, helpText }) {
   const text = String(value ?? "{}");
   const lastEmittedTextRef = useRef(text);
+  const controlRefs = useRef(new Map());
   const [rows, setRows] = useState(() => headerRowsFromText(text));
   useEffect(() => {
     if (text === lastEmittedTextRef.current) return;
@@ -609,7 +610,16 @@ function HeaderRowsEditor({ label, value, onChange, helpText }) {
     onChange(nextText);
   };
   const updateRow = (rowId, changes) => updateRows(rows.map((row) => row.id === rowId ? { ...row, ...changes } : row));
-  const addRow = () => setRows((current) => [...current, { id: `header-${Date.now()}-${current.length}`, enabled: true, key: "", value: "" }]);
+  const addRow = (focusField = "") => {
+    const id = `header-${Date.now()}-${rows.length}`;
+    setRows((current) => [...current, { id, enabled: true, key: "", value: "" }]);
+    if (focusField) window.requestAnimationFrame(() => controlRefs.current.get(`${id}:${focusField}`)?.focus());
+  };
+  const handleRemoveKeyDown = (event, index) => {
+    if (event.key !== "Tab" || event.shiftKey || index !== rows.length - 1) return;
+    event.preventDefault();
+    addRow("checkbox");
+  };
   const removeRow = (rowId) => {
     const nextRows = rows.filter((row) => row.id !== rowId);
     updateRows(nextRows.length ? nextRows : [{ id: `header-${Date.now()}`, enabled: true, key: "", value: "" }]);
@@ -619,14 +629,28 @@ function HeaderRowsEditor({ label, value, onChange, helpText }) {
     <div className="mock-headers-table" role="table" aria-label={label}>
       <div className="mock-headers-column-heading" role="row"><span aria-hidden="true" /><span>Key</span><span>Value</span><span aria-hidden="true" /></div>
       {rows.map((row, index) => <div className={`mock-header-row${row.enabled ? "" : " disabled"}`} role="row" key={row.id}>
-        <input type="checkbox" checked={row.enabled} aria-label={`Enable header row ${index + 1}`} onChange={(event) => updateRow(row.id, { enabled: event.target.checked })} />
+        <input ref={(element) => { const key = `${row.id}:checkbox`; if (element) controlRefs.current.set(key, element); else controlRefs.current.delete(key); }} type="checkbox" checked={row.enabled} aria-label={`Enable header row ${index + 1}`} onChange={(event) => updateRow(row.id, { enabled: event.target.checked })} />
         <input type="text" value={row.key} aria-label={`Header key ${index + 1}`} placeholder="header" onChange={(event) => updateRow(row.id, { key: event.target.value })} />
         <input type="text" value={row.value} aria-label={`Header value ${index + 1}`} placeholder="value" onChange={(event) => updateRow(row.id, { value: event.target.value })} />
-        <button type="button" className="mock-header-remove" title={`Remove header row ${index + 1}`} aria-label={`Remove header row ${index + 1}`} onClick={() => removeRow(row.id)}><Trash2 size={16} /></button>
+        <button type="button" className="mock-header-remove" title={`Remove header row ${index + 1}`} aria-label={`Remove header row ${index + 1}`} onKeyDown={(event) => handleRemoveKeyDown(event, index)} onClick={() => removeRow(row.id)}><Trash2 size={16} /></button>
       </div>)}
     </div>
     <button type="button" className="mock-header-add secondary-button" onClick={addRow}><Plus size={15} /> Add header</button>
     {helpText && <small className="mock-field-help">{helpText}</small>}
+  </div>;
+}
+
+function RequestInputTabs({ draft, onDraftChange, bodyLabel, bodyPlaceholder }) {
+  const [tab, setTab] = useState("body");
+  const setValue = (key, value) => onDraftChange({ ...draft, [key]: value });
+  return <div className="mock-request-input-tabs">
+    <div className="mock-request-tabs" role="tablist" aria-label="Request input tabs">
+      <button type="button" role="tab" aria-selected={tab === "body"} className={tab === "body" ? "active" : ""} onClick={() => setTab("body")}>Body</button>
+      <button type="button" role="tab" aria-selected={tab === "headers"} className={tab === "headers" ? "active" : ""} onClick={() => setTab("headers")}>Headers</button>
+    </div>
+    <div className="mock-request-editor" role="tabpanel">
+      {tab === "body" ? <JsonBeautifierEditor label={bodyLabel} value={draft.requestBody} onChange={(value) => setValue("requestBody", value)} placeholder={bodyPlaceholder} /> : <HeaderRowsEditor label="Request headers" value={draft.requestHeaders} onChange={(value) => setValue("requestHeaders", value)} />}
+    </div>
   </div>;
 }
 
@@ -772,7 +796,7 @@ function SeparatedPostmanWorkbench({ project, draft, endpoints, isDatabase, resp
     <div className="mock-pane-intro"><strong>{simpleGet ? "Simple GET endpoint" : databaseGet ? "Create your JSON database" : "Configure endpoint"}</strong><p>{simpleGet ? "Enter the JSON this route should return. Advanced response settings stay out of the way until you need them." : databaseGet ? "Add one JSON object or an array of objects. Saving this GET creates the shared database used by later POST, PUT, PATCH, and DELETE APIs." : `Define the request and response contract, then save this API to the ${hostingMode === "server" ? "Server" : "Local agent"}.`}</p></div>
     <div className="mock-request-bar"><select aria-label="Request method" value={draft.method} onChange={(event) => setValue("method", event.target.value)}>{MOCK_METHODS.map((method) => <option key={method}>{method}</option>)}</select><div className="mock-request-url"><span>{baseUrl}</span><input aria-label="API path" value={draft.path} onChange={(event) => setValue("path", event.target.value)} placeholder={recordMethod ? "/users/:id" : "/users"} /></div><button type="button" className="secondary-button" onClick={() => setWorkspaceTab("simulate")}><Play size={16} /> Test</button></div>
     <div className="mock-request-meta"><label>API name<input value={draft.name} onChange={(event) => setValue("name", event.target.value)} placeholder={`${draft.method} ${draft.path}`} /></label><span className="mock-local-badge">{hostingMode === "server" ? "Server" : "Local agent"} · {isDatabase ? "dummy database" : "fixed response"}</span></div>
-    {simpleGet || databaseGet ? <JsonBeautifierEditor label={databaseGet ? "JSON config" : "JSON response"} value={databaseGet ? draft.seedText : draft.successBody} onChange={(value) => setValue(databaseGet ? "seedText" : "successBody", value)} helpText={databaseGet ? <>Use one JSON object or an array of objects. Object input is returned as an object; array input is returned as an array. The route identifies the shared data, so later CRUD APIs can use the same records.</> : "Returned on success."} /> : <div className="mock-create-fields"><JsonBeautifierEditor label="Request headers" value={draft.requestHeaders} onChange={(value) => setValue("requestHeaders", value)} /><>{isBodyMethod && <JsonBeautifierEditor label="Request body (JSON)" value={draft.requestBody} onChange={(value) => setValue("requestBody", value)} placeholder={'{\n  "name": "New item"\n}'} />}</></div>}
+    {simpleGet || databaseGet ? <JsonBeautifierEditor label={databaseGet ? "JSON config" : "JSON response"} value={databaseGet ? draft.seedText : draft.successBody} onChange={(value) => setValue(databaseGet ? "seedText" : "successBody", value)} helpText={databaseGet ? <>Use one JSON object or an array of objects. Object input is returned as an object; array input is returned as an array. The route identifies the shared data, so later CRUD APIs can use the same records.</> : "Returned on success."} /> : isBodyMethod ? <RequestInputTabs draft={draft} onDraftChange={onDraftChange} bodyLabel="Request body (JSON)" bodyPlaceholder={'{\n  "name": "New item"\n}'} /> : <HeaderRowsEditor label="Request headers" value={draft.requestHeaders} onChange={(value) => setValue("requestHeaders", value)} />}
     {databaseGet && <><div className="mock-db-use-note"><label><strong>Response data</strong><select aria-label="GET response data" value={draft.responseNodeMode || (draft.responseNodePath ? "node" : "record")} onChange={(event) => setValue("responseNodeMode", event.target.value)}><option value="record">Return the full matching record</option><option value="node">Return a specific node</option></select></label>{(draft.responseNodeMode === "node" || draft.responseNodePath) && <label><strong>Node path <span className="mock-field-hint">Optional</span></strong><input aria-label="GET response node path" value={draft.responseNodePath || ""} onChange={(event) => setValue("responseNodePath", event.target.value)} placeholder="consentData.data" /></label>}<p>After query filters select records, return the complete record or a nested value using dot notation, such as <code>consentData</code> or <code>consentData.data</code>. Leave the node path empty to return the full matching record.</p></div><div className="mock-db-use-note"><label><strong>When one record matches</strong><select aria-label="Single-record response format" value={draft.singleRecordResponse || "auto"} onChange={(event) => setValue("singleRecordResponse", event.target.value)}><option value="auto">Use JSON config shape</option><option value="array">Return an array</option><option value="object">Return an object</option></select></label><p>Choose whether a single matching record is wrapped in an array or returned as one object.</p></div></>}
     {isDatabase && !databaseGet && <div className="mock-db-use-note"><label><strong>Use data from</strong><select aria-label="Database GET API" value={selectedDatabase} onChange={(event) => { const selected = databaseGetOptions.find(({ endpoint }) => endpoint.id === event.target.value); onDraftChange({ ...draft, databaseEndpointId: event.target.value, collection: selected?.collection || collectionFromPath(selected?.endpoint.path || draft.path) }); }}>{databaseGetOptions.length ? databaseGetOptions.map(({ collection, endpoint }) => <option key={endpoint.id} value={endpoint.id}>{endpoint.name || `GET ${endpoint.path}`} · {endpoint.path}</option>) : <option value="">Create a GET API first</option>}</select></label><p>This API reads and changes the records created by the selected GET API. Its route can be different.</p></div>}
     {isDatabase && recordMethod && <div className="mock-db-use-note mock-crud-method-note"><strong>{draft.method} record operation</strong><p>{recordOperationDescription} Use a request URL such as <code>{mockPathname(draft.path).replace(/\/:id$/, "")}/:id</code>, replacing <code>:id</code> with the record ID when sending the request.</p></div>}
@@ -783,7 +807,7 @@ function SeparatedPostmanWorkbench({ project, draft, endpoints, isDatabase, resp
   </> : <>
     <div className="mock-pane-intro"><strong>Send requests without changing the API definition</strong><p>{savedEndpoint ? `Testing ${savedEndpoint.name}.` : "Configure an API in the Create API tab, then send it here."}{databaseGet && " Add filters such as ?role=admin; combine different fields with &, or repeat a field for alternatives."}</p></div>
     <div className="mock-request-bar"><select aria-label="Simulation method" value={draft.method} onChange={(event) => setValue("method", event.target.value)}>{MOCK_METHODS.map((method) => <option key={method}>{method}</option>)}</select><div className="mock-request-url"><span>{baseUrl}</span><input aria-label="Simulation path" value={draft.path} onChange={(event) => setValue("path", event.target.value)} /></div><button type="button" className="primary-button mock-send-button" onClick={() => onRun(scenario)}><Play size={16} /> Send</button></div>
-    {!simpleGet && !databaseGet && <div className="mock-simulation-inputs"><JsonBeautifierEditor label="Request headers" value={draft.requestHeaders} onChange={(value) => setValue("requestHeaders", value)} />{isBodyMethod && <JsonBeautifierEditor label="Request body" value={draft.requestBody} onChange={(value) => setValue("requestBody", value)} />}{!isDatabase && <label>Scenario<select value={scenario} onChange={(event) => setScenario(event.target.value)}><option value="success">Success response</option><option value="error">Error response</option></select></label>}</div>}
+    {!simpleGet && !databaseGet && <div className="mock-simulation-inputs">{isBodyMethod ? <RequestInputTabs draft={draft} onDraftChange={onDraftChange} bodyLabel="Request body" /> : <HeaderRowsEditor label="Request headers" value={draft.requestHeaders} onChange={(value) => setValue("requestHeaders", value)} />}{!isDatabase && <label>Scenario<select value={scenario} onChange={(event) => setScenario(event.target.value)}><option value="success">Success response</option><option value="error">Error response</option></select></label>}</div>}
     <div className="mock-response-heading"><div><span className="section-kicker"><span className="kicker-line" /> Response</span><h3>{response ? "Latest response" : "Run the request"}</h3></div>{response && <span className="mock-response-live">{hostingMode === "server" && draft.endpointId ? "Server response" : "Browser preview"}</span>}</div><ResponsePanel response={response} />
     <div className="mock-postman-actions"><button type="button" className="secondary-button" onClick={() => setWorkspaceTab("create")}><FileText size={16} /> Back to Create API</button><button type="button" className="primary-button" onClick={onSave}><FileDown size={16} /> Save API to {hostingMode === "server" ? "Server" : "Local agent"}</button><button type="button" className="secondary-button" onClick={() => onCopy(mockFetchExample(project.id, { method: draft.method, pathname: draft.path, body: draft.requestBody, headers: exampleHeaders, hostingMode, baseUrl: hostingMode === "server" ? serverBaseUrlValue : agentBaseUrlValue }))}><Copy size={15} /> Copy fetch</button><button type="button" className="secondary-button" onClick={() => onCopy(mockCurlExample(project.id, { method: draft.method, pathname: draft.path, body: draft.requestBody, headers: exampleHeaders, hostingMode, baseUrl: hostingMode === "server" ? serverBaseUrlValue : agentBaseUrlValue }))}><Copy size={15} /> Copy cURL</button></div>
   </>}{error && <div className="mock-api-alert error" role="alert">{error}</div>}{notice && <div className="mock-api-alert success" role="status">{notice}</div>}</div></section>;
