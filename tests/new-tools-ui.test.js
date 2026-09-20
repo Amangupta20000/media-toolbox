@@ -221,6 +221,22 @@ test("Mock API guided POST builder derives and stores internal update actions", 
   assert.doesNotMatch(page, /aria-label="POST action JSON editor"/);
 });
 
+test("Mock API headers use Postman-style key/value rows", async () => {
+  const page = await read("components/mock-api-page.jsx");
+  const styles = await read("styles/globals.css");
+  assert.match(page, /function HeaderRowsEditor/);
+  assert.match(page, /HeaderRowsEditor label="Success headers"/);
+  assert.match(page, /HeaderRowsEditor label="Error headers"/);
+  assert.match(page, /if \(\/headers\/i\.test\(props\.label\)\) return <HeaderRowsEditor/);
+  assert.match(page, /JsonBeautifierEditor label="Request headers"/);
+  assert.match(page, /aria-label=\{`Header key \$\{index \+ 1\}`\}/);
+  assert.match(page, /aria-label=\{`Header value \$\{index \+ 1\}`\}/);
+  assert.match(page, /> Add header</);
+  assert.match(page, /headersTextFromRows/);
+  assert.match(styles, /\.mock-headers-table/);
+  assert.match(styles, /\.mock-header-row > input\[type="text"\]/);
+});
+
 test("Mock API guides database PUT, PATCH, and DELETE record routes", async () => {
   const page = await read("components/mock-api-page.jsx");
   assert.match(page, /const recordMethods = \["PUT", "PATCH", "DELETE"\]/);

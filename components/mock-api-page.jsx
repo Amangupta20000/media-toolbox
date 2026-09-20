@@ -366,7 +366,12 @@ function collapsedJsonLine(lines, fold) {
   return `${prefix}${fold.open}...${fold.close}${suffix} // ${countLabel}`;
 }
 
-function JsonBeautifierEditor({ label, value, onChange, helpText, placeholder }) {
+function JsonBeautifierEditor(props) {
+  if (/headers/i.test(props.label)) return <HeaderRowsEditor {...props} />;
+  return <JsonCodeEditor {...props} />;
+}
+
+function JsonCodeEditor({ label, value, onChange, helpText, placeholder }) {
   const editorRef = useRef(null);
   const highlightRef = useRef(null);
   const codeScrollRef = useRef(null);
@@ -568,6 +573,63 @@ function JsonBeautifierEditor({ label, value, onChange, helpText, placeholder })
   return <div className="json-beautifier-editor"><div className="json-beautifier-heading"><strong>{label}</strong></div><div className="json-beautifier-surface"><div className="json-beautifier-toolbar" aria-label={`${label} formatting controls`}><div className="json-beautifier-actions"><button type="button" onClick={() => formatText()}>Prettify</button><button type="button" title="Collapse to level 1" onClick={() => collapseToLevel(1)}>Level 1</button><button type="button" title="Collapse to level 2" onClick={() => collapseToLevel(2)}>Level 2</button><button type="button" title="Collapse to level 3" onClick={() => collapseToLevel(3)}>Level 3</button><button type="button" onClick={() => setCollapsedFolds(new Set())}>Expand</button></div></div><div ref={codeScrollRef} className="json-beautifier-code-scroll" style={{ maxHeight: "75vh" }} onClick={handleFoldedViewClick}><div className="json-beautifier-code-layer" style={{ height: `${editorHeight}px` }}><pre ref={highlightRef} className="json-beautifier-highlight" aria-hidden="true">{visibleLines.map(({ lineText, index }) => <span className="json-beautifier-code-line" data-line-index={index} key={index} dangerouslySetInnerHTML={{ __html: highlightJsonLine(lineText) || " " }} />)}</pre><div className="json-beautifier-gutter" aria-hidden="true">{visibleLines.map(({ index }) => { const fold = foldByLine.get(index); return <span className="json-beautifier-gutter-line" key={index}><span className="json-beautifier-line-number">{index + 1}</span>{fold ? <button type="button" aria-label={`${collapsedFoldKeys.has(fold.key) ? "Expand" : "Collapse"} JSON node on line ${index + 1}`} onClick={() => toggleFold(fold)}>{collapsedFoldKeys.has(fold.key) ? "▸" : "▾"}</button> : <span className="json-beautifier-fold-placeholder" />}</span>; })}</div><textarea ref={editorRef} className={`json-beautifier-textarea json-beautifier-code-input${isFoldedView ? " json-beautifier-code-input-folded" : ""}`} aria-label={`${label} JSON editor`} tabIndex={isFoldedView ? -1 : 0} value={text} onChange={handleChange} onKeyDown={handleKeyDown} onMouseUp={handleEditorMouseUp} onBlur={() => { if (text.trim()) formatText(); }} onPaste={handlePaste} spellCheck="false" placeholder={placeholder} /></div></div></div>{helpText && <small className="mock-field-help">{helpText}</small>}{editorError && <small className="json-beautifier-error" role="alert">{editorError}</small>}</div>;
 }
 
+function headerRowsFromText(value) {
+  try {
+    const parsed = JSON.parse(String(value || "{}"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Headers must be an object.");
+    const rows = Object.entries(parsed).map(([key, headerValue], index) => ({ id: `header-${index}-${key}`, enabled: true, key, value: headerValue == null ? "" : String(headerValue) }));
+    return rows.length ? rows : [{ id: "header-empty", enabled: true, key: "", value: "" }];
+  } catch {
+    return [{ id: "header-empty", enabled: true, key: "", value: "" }];
+  }
+}
+
+function headersTextFromRows(rows) {
+  const headers = {};
+  rows.forEach((row) => {
+    const key = String(row.key || "").trim();
+    if (row.enabled && key) headers[key] = String(row.value ?? "");
+  });
+  return pretty(headers);
+}
+
+function HeaderRowsEditor({ label, value, onChange, helpText }) {
+  const text = String(value ?? "{}");
+  const lastEmittedTextRef = useRef(text);
+  const [rows, setRows] = useState(() => headerRowsFromText(text));
+  useEffect(() => {
+    if (text === lastEmittedTextRef.current) return;
+    setRows(headerRowsFromText(text));
+    lastEmittedTextRef.current = text;
+  }, [text]);
+  const updateRows = (nextRows) => {
+    setRows(nextRows);
+    const nextText = headersTextFromRows(nextRows);
+    lastEmittedTextRef.current = nextText;
+    onChange(nextText);
+  };
+  const updateRow = (rowId, changes) => updateRows(rows.map((row) => row.id === rowId ? { ...row, ...changes } : row));
+  const addRow = () => setRows((current) => [...current, { id: `header-${Date.now()}-${current.length}`, enabled: true, key: "", value: "" }]);
+  const removeRow = (rowId) => {
+    const nextRows = rows.filter((row) => row.id !== rowId);
+    updateRows(nextRows.length ? nextRows : [{ id: `header-${Date.now()}`, enabled: true, key: "", value: "" }]);
+  };
+  return <div className="mock-headers-editor">
+    <div className="mock-headers-heading"><strong>{label}</strong><small>{/response|success|error/i.test(label) ? "Choose which headers to return." : "Choose which headers to send."}</small></div>
+    <div className="mock-headers-table" role="table" aria-label={label}>
+      <div className="mock-headers-column-heading" role="row"><span aria-hidden="true" /><span>Key</span><span>Value</span><span aria-hidden="true" /></div>
+      {rows.map((row, index) => <div className={`mock-header-row${row.enabled ? "" : " disabled"}`} role="row" key={row.id}>
+        <input type="checkbox" checked={row.enabled} aria-label={`Enable header row ${index + 1}`} onChange={(event) => updateRow(row.id, { enabled: event.target.checked })} />
+        <input type="text" value={row.key} aria-label={`Header key ${index + 1}`} placeholder="header" onChange={(event) => updateRow(row.id, { key: event.target.value })} />
+        <input type="text" value={row.value} aria-label={`Header value ${index + 1}`} placeholder="value" onChange={(event) => updateRow(row.id, { value: event.target.value })} />
+        <button type="button" className="mock-header-remove" title={`Remove header row ${index + 1}`} aria-label={`Remove header row ${index + 1}`} onClick={() => removeRow(row.id)}><Trash2 size={16} /></button>
+      </div>)}
+    </div>
+    <button type="button" className="mock-header-add secondary-button" onClick={addRow}><Plus size={15} /> Add header</button>
+    {helpText && <small className="mock-field-help">{helpText}</small>}
+  </div>;
+}
+
 function PostmanWorkbench(props) { return <SeparatedPostmanWorkbench {...props} />; }
 
 function requestSourceChoices(draft, sourceType, sourcePath) {
@@ -657,7 +719,7 @@ function SimpleGetWorkbench({ project, draft, endpoints, response, savedUrl, exa
       <label className="mock-simple-response-label">JSON response <span className="mock-field-hint">Returned on success</span><textarea value={draft.successBody} onChange={(event) => setValue("successBody", event.target.value)} spellCheck="false" /></label>
       <div className="mock-response-heading"><div><span className="section-kicker"><span className="kicker-line" /> Response</span><h3>{response ? "Latest response" : "Run the request"}</h3></div>{response && <span className="mock-response-live">Local simulation</span>}</div>
       <ResponsePanel response={response} />
-      <details className="mock-request-options mock-simple-advanced"><summary>Advanced response options</summary><div className="mock-options-grid"><label>Scenario<select value={scenario} onChange={(event) => setScenario(event.target.value)}><option value="success">Success response</option><option value="error">Error response</option></select></label><label>Success status<input value={draft.successStatus} onChange={(event) => setValue("successStatus", event.target.value)} inputMode="numeric" /></label><label>Error status<input value={draft.errorStatus} onChange={(event) => setValue("errorStatus", event.target.value)} inputMode="numeric" /></label><label>Success headers<textarea value={draft.successHeaders} onChange={(event) => setValue("successHeaders", event.target.value)} spellCheck="false" /></label><label>Error headers<textarea value={draft.errorHeaders} onChange={(event) => setValue("errorHeaders", event.target.value)} spellCheck="false" /></label><label className="mock-option-wide">Error response<textarea value={draft.errorBody} onChange={(event) => setValue("errorBody", event.target.value)} spellCheck="false" /></label></div></details>
+      <details className="mock-request-options mock-simple-advanced"><summary>Advanced response options</summary><div className="mock-options-grid"><label>Scenario<select value={scenario} onChange={(event) => setScenario(event.target.value)}><option value="success">Success response</option><option value="error">Error response</option></select></label><label>Success status<input value={draft.successStatus} onChange={(event) => setValue("successStatus", event.target.value)} inputMode="numeric" /></label><label>Error status<input value={draft.errorStatus} onChange={(event) => setValue("errorStatus", event.target.value)} inputMode="numeric" /></label><HeaderRowsEditor label="Success headers" value={draft.successHeaders} onChange={(value) => setValue("successHeaders", value)} /><HeaderRowsEditor label="Error headers" value={draft.errorHeaders} onChange={(value) => setValue("errorHeaders", value)} /><label className="mock-option-wide">Error response<textarea value={draft.errorBody} onChange={(event) => setValue("errorBody", event.target.value)} spellCheck="false" /></label></div></details>
       <details className="mock-curl-import"><summary><FileText size={16} /> Import request from cURL</summary><div><textarea value={curlText} onChange={(event) => onCurlChange(event.target.value)} spellCheck="false" placeholder="Paste a GET cURL command here" /><button type="button" className="secondary-button" onClick={onImportCurl}><Upload size={16} /> Import request</button><small>Nothing is executed. Sensitive header values are redacted.</small></div></details>
       {savedEndpoint && <div className="mock-saved-inline"><div><Check size={17} /><strong>Saved to Local agent</strong><small>Callable while authorization is active</small></div><code>{savedUrl}</code><button type="button" className="secondary-button" onClick={() => onCopy(savedUrl)}><Copy size={15} /> Copy URL</button></div>}
       <div className="mock-postman-actions"><button type="button" className="primary-button" onClick={onSave}><FileDown size={16} /> Save API to Local agent</button><button type="button" className="secondary-button" onClick={() => onCopy(mockFetchExample(project.id, { method: "GET", pathname: draft.path, headers: exampleHeaders }))}><Copy size={15} /> Copy fetch</button><button type="button" className="secondary-button" onClick={() => onCopy(mockCurlExample(project.id, { method: "GET", pathname: draft.path, headers: exampleHeaders }))}><Copy size={15} /> Copy cURL</button><button type="button" className="secondary-button" onClick={onExport}><Download size={16} /> Export</button><button type="button" className="secondary-button" onClick={() => fileInput.current?.click()}><Upload size={16} /> Import</button><input ref={fileInput} type="file" accept="application/json,.json" hidden onChange={onImport} /></div>
