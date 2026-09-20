@@ -822,9 +822,9 @@ async function handle(request, response) {
   if (url.pathname === "/v1/capabilities" && request.method === "GET") {
     try {
       const value = JSON.parse(await fsp.readFile(paths.capabilities, "utf8"));
-      return json(response, 200, { ...value, agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, mockApi: { hosting: "localhost", methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] } }, request, origin);
+      return json(response, 200, { ...value, agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, mockApi: { hosting: "localhost", postActions: true, methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] } }, request, origin);
     } catch {
-      return json(response, 200, { status: "starting", agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, pdf: {}, image: {}, video: {}, mockApi: { hosting: "localhost", methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] } }, request, origin);
+      return json(response, 200, { status: "starting", agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, pdf: {}, image: {}, video: {}, mockApi: { hosting: "localhost", postActions: true, methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] } }, request, origin);
     }
   }
 

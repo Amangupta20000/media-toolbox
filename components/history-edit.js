@@ -1,5 +1,12 @@
 const HISTORY_EDIT_KEY = "media-toolbox-history-edit";
 
+export function historyReopenMode(tool, result) {
+  if (tool !== "pdf-text-editor") return "";
+  const explicitMode = String(result?.reopenMode || "").toLowerCase();
+  if (explicitMode === "ocr" || explicitMode === "embedded") return explicitMode;
+  return /ocr/i.test(String(result?.method || "")) ? "ocr" : "auto";
+}
+
 export function rememberHistoryEdit(value) {
   if (typeof window === "undefined" || !value?.tool || !value?.downloadUrl) return;
   window.sessionStorage.setItem(HISTORY_EDIT_KEY, JSON.stringify({
@@ -8,6 +15,7 @@ export function rememberHistoryEdit(value) {
     filename: value.filename || "saved-result",
     mime: value.mime || "",
     retainedJobId: value.retainedJobId || "",
+    reopenMode: value.reopenMode || "",
   }));
 }
 

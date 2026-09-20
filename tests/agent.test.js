@@ -189,6 +189,34 @@ test("localhost mock APIs support browser preflight and integration requests", a
   }
 });
 
+test("Local Agent serves guided POST consent mutations over multi-segment routes", async () => {
+  const { deleteMockProject, saveMockProject } = await import("../lib/mock-api-storage.js");
+  const project = {
+    id: "guided-http-api",
+    name: "Guided HTTP API",
+    mode: "database",
+    collections: [{ name: "consents", methods: ["GET", "POST"], records: [{ id: "one", clientid: "client-1", consentData: { data: { purposeDetails: [{ id: "email", hasUserProvidedConsent: false }] } } }] }],
+    endpoints: [
+      { id: "consents-get", mode: "database", collection: "consents", method: "GET", path: "/sso/api/v1/consent/config" },
+      { id: "consents-post", mode: "database", collection: "consents", method: "POST", path: "/sso/api/v1/consent/submit-user-consent", postAction: { type: "update", recordMatch: [{ recordPath: "clientid", source: "header.clientId", operator: "equals" }], nestedUpdates: [{ arrayPath: "consentData.data.purposeDetails", matchPath: "id", source: "body.purpose_ids", operator: "in", set: { hasUserProvidedConsent: true } }] }, responses: { success: { status: 202, headers: { "X-Consent": "updated" }, body: { success: true } } } },
+    ],
+  };
+  await saveMockProject(project);
+  try {
+    const postResponse = await fetch(url("/v1/mock/guided-http-api/sso/api/v1/consent/submit-user-consent"), { method: "POST", headers: { "Content-Type": "application/json", "clientId": "client-1" }, body: JSON.stringify({ purpose_ids: ["email"] }) });
+    assert.equal(postResponse.status, 202);
+    assert.equal(postResponse.headers.get("x-consent"), "updated");
+    assert.deepEqual(await postResponse.json(), { success: true });
+    const getResponse = await fetch(url("/v1/mock/guided-http-api/sso/api/v1/consent/config"));
+    assert.equal(getResponse.status, 200);
+    assert.equal((await getResponse.json())[0].consentData.data.purposeDetails[0].hasUserProvidedConsent, true);
+    const noMatchResponse = await fetch(url("/v1/mock/guided-http-api/sso/api/v1/consent/submit-user-consent"), { method: "POST", headers: { "Content-Type": "application/json", "clientId": "missing" }, body: JSON.stringify({ purpose_ids: ["email"] }) });
+    assert.equal(noMatchResponse.status, 404);
+  } finally {
+    await deleteMockProject(project.id);
+  }
+});
+
 test("dashboard trial action starts the trial explicitly after legal consent", () => {
   const explicitTrialRoot = path.join(testRoot, "explicit-trial");
   const childScript = `import { acceptLegalConsent, startTrial, getAuthorizationState } from "./agent/auth.js";

@@ -77,7 +77,7 @@ test("Mock API history exposes endpoint-level actions", async () => {
   assert.match(page, /onClick=\{\(\) => editHistoryEndpoint\(item, endpoint\.id\)\}/);
   assert.match(page, /onClick=\{\(\) => simulateHistoryEndpoint\(item, endpoint\.id\)\}/);
   assert.match(page, /onClick=\{\(\) => deleteHistoryEndpoint\(item, endpoint\.id\)\}/);
-  assert.match(page, /const url = localMockApiUrl\(item\.id, endpoint\.path, agentBaseUrlValue\)/);
+  assert.match(page, /const url = hostingMode === "server" \? serverMockApiUrl\(item\.id, endpoint\.path, serverBaseUrlValue\) : localMockApiUrl\(item\.id, endpoint\.path, agentBaseUrlValue\)/);
 });
 
 test("Mock API sidebar shows an unsaved draft before it is saved", async () => {
@@ -113,7 +113,8 @@ test("Mock API JSON fields use one growing editor with formatting and collapsibl
   assert.match(page, /Node path <span className="mock-field-hint">Optional<\/span>/);
   assert.match(page, /Leave the node path empty to return the full matching record/);
   assert.match(page, /consentData\.data/);
-  assert.match(page, /const latestProject = \(await listLocalMockProjects\(\)\)\.find\(\(item\) => item\.id === project\.id\)/);
+  assert.match(page, /const listProjects = hostingMode === "server" \? listServerMockProjects : listLocalMockProjects/);
+  assert.match(page, /const latestProject = \(await listProjects\(\)\)\.find\(\(item\) => item\.id === project\.id\)/);
   assert.match(page, /saveDraft = \{ \.\.\.draft, seedText: pretty\(collectionSeedValue\(latestCollection\)\) \}/);
   assert.match(page, /function removeEmptyJsonLines/);
   assert.match(page, /filter\(\(line\) => line\.trim\(\) !== ""\)/);
@@ -197,4 +198,74 @@ test("Mock API URLs use a hydration-safe initial transport", async () => {
   assert.match(page, /agentBaseUrlValue=\{agentBaseUrlValue\}/);
   assert.match(client, /baseUrl = agentBaseUrl\(\)/);
   assert.ok(client.includes('String(baseUrl).replace(/\\/$/, "")'));
+});
+
+test("Mock API guided POST builder derives and stores internal update actions", async () => {
+  const page = await read("components/mock-api-page.jsx");
+  assert.match(page, /function PostActionBuilder/);
+  assert.match(page, /aria-label="POST behavior"/);
+  assert.match(page, /Update existing records/);
+  assert.doesNotMatch(page, /aria-label="POST update collection"/);
+  assert.match(page, /aria-label="POST update operation"/);
+  assert.match(page, /Add values to an array/);
+  assert.match(page, /aria-label="POST append array"/);
+  assert.match(page, /ariaLabel="POST append request source"/);
+  assert.match(page, /aria-label="POST record match field"/);
+  assert.match(page, /aria-label="POST nested array"/);
+  assert.match(page, /ariaLabel="POST item request source"/);
+  assert.match(page, /aria-label="POST update field"/);
+  assert.match(page, /function buildPostActionFromDraft/);
+  assert.match(page, /const postAction = databaseMode && draftValue\.method === "POST"/);
+  assert.match(page, /postAction \? \{ postAction \} : \{\}/);
+  assert.match(page, /postActions !== true/);
+  assert.doesNotMatch(page, /aria-label="POST action JSON editor"/);
+});
+
+test("Mock API guides database PUT, PATCH, and DELETE record routes", async () => {
+  const page = await read("components/mock-api-page.jsx");
+  assert.match(page, /const recordMethods = \["PUT", "PATCH", "DELETE"\]/);
+  assert.match(page, /Replaces the complete record addressed by the final :id path segment/);
+  assert.match(page, /Updates only the fields included in the request body/);
+  assert.match(page, /Deletes the record addressed by the final :id path segment/);
+  assert.match(page, /placeholder=\{recordMethod \? "\/users\/:id" : "\/users"\}/);
+  assert.match(page, /mock-crud-method-note/);
+});
+
+test("Mock API feedback banners dismiss after five seconds", async () => {
+  const page = await read("components/mock-api-page.jsx");
+  assert.match(page, /const timeout = window\.setTimeout\(\(\) => setNotice\(""\), 5000\)/);
+  assert.match(page, /const timeout = window\.setTimeout\(\(\) => setError\(""\), 5000\)/);
+  assert.match(page, /return \(\) => window\.clearTimeout\(timeout\)/);
+});
+
+test("Mock API lets users choose Server or Local agent hosting", async () => {
+  const page = await read("components/mock-api-page.jsx");
+  const client = await read("components/mock-api-client.js");
+  assert.match(page, /aria-label="Mock API hosting mode"/);
+  assert.match(page, /<option value="server">Server<\/option>/);
+  assert.match(page, /<option value="local">Local agent<\/option>/);
+  assert.match(page, /onHostingModeChange=\{setHostingMode\}/);
+  assert.match(page, /saveServerMockProject/);
+  assert.match(page, /simulateServerMockRequest/);
+  assert.match(client, /export function serverMockApiUrl/);
+  assert.match(client, /export async function saveServerMockProject/);
+});
+
+test("Mock API highlights the Simulate workspace tab", async () => {
+  const page = await read("components/mock-api-page.jsx");
+  const styles = await read("styles/globals.css");
+  assert.match(page, /className=\{`simulate-tab\$\{workspaceTab === "simulate" \? " active" : ""\}`\}/);
+  assert.match(page, /<span className="simulate-tab-label">Simulate<\/span>/);
+  assert.match(styles, /\.mock-workspace-tabs \.simulate-tab-label \{[^}]*animation: mock-simulate-text-shimmer 1\.8s linear infinite;/);
+  assert.match(styles, /@keyframes mock-simulate-text-shimmer/);
+  assert.match(styles, /prefers-reduced-motion: reduce\) \{ \.mock-workspace-tabs \.simulate-tab-label \{ animation: none;/);
+});
+
+test("Mock API derives collections from GET routes instead of the users fallback", async () => {
+  const page = await read("components/mock-api-page.jsx");
+  assert.match(page, /function repairDefaultCollection/);
+  assert.match(page, /function repairDraftCollection/);
+  assert.match(page, /if \(draft\.method === "GET" && draft\.collectionAuto !== false\)/);
+  assert.match(page, /if \(key === "path" && draft\.method === "GET" && draft\.collectionAuto !== false\) nextDraft\.collection = collectionFromPath\(value\)/);
+  assert.match(page, /const usedCollections = new Set\(nextEndpoints\.map\(\(item\) => item\.collection\)\.filter\(Boolean\)\)/);
 });

@@ -1137,6 +1137,7 @@ async function processPdfTextEditor(job) {
     pageCount: outputDocument.getPageCount(),
     editCount: options.edits.length,
     method: isOcr ? "PDF OCR text editor" : "PDF text editor",
+    reopenMode: isOcr ? "ocr" : "embedded",
   };
   appendJobLog(job.id, `Created ${outputName} successfully.`, "complete");
   updateJob(job.id, { status: "completed", progress: 100, stage: "Complete", message: "The edited PDF is ready to download.", warnings: edited.warnings, result });

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Archive, Download, Eye, FileImage, FileMusic, FileText, FileVideo, Film, FolderOpen, Image as ImageIcon, Pencil, RefreshCw, Trash2, X } from "lucide-react";
 import { formatBytes } from "./file-dropzone.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
-import { rememberHistoryEdit } from "./history-edit.js";
+import { historyReopenMode, rememberHistoryEdit } from "./history-edit.js";
 import { deleteLocalHistory, getLocalHistory, openLocalResultsFolder } from "./processing-client.js";
 
 const toolNames = {
@@ -197,7 +197,7 @@ export function ToolHistory({ tool }) {
       setMessage("This saved result is no longer available for editing.");
       return;
     }
-    rememberHistoryEdit({ tool, downloadUrl: result.downloadUrl, filename: result.filename, mime: result.mime, retainedJobId: item.id });
+    rememberHistoryEdit({ tool, downloadUrl: result.downloadUrl, filename: result.filename, mime: result.mime, retainedJobId: item.id, reopenMode: historyReopenMode(tool, result) });
     window.location.assign(tool === "pdf-editor" ? "/pdf-editor" : tool === "pdf-text-editor" ? "/pdf-text-editor" : tool === "pdf-compressor" ? "/pdf-compressor" : tool === "video-repair" ? "/video-repair" : tool === "svg-to-png" ? "/svg-to-png" : "/image-converter");
   };
 

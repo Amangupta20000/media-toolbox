@@ -1456,10 +1456,24 @@ export function PdfTextEditor() {
         : requestedOcrMode === "auto"
           ? models.filter((model) => model.requiresOcr || !model.runs.some((run) => run.editable)).map((model) => model.pageIndex)
           : models.filter((model) => model.requiresOcr).map((model) => model.pageIndex);
-      if (ocrPageIndexes.length && !isProcessingLocationReady(locations, processingMode)) {
+      let activeLocations = locations;
+      let activeCapabilities = capabilities;
+      if (ocrPageIndexes.length && processingMode === "local" && !isProcessingLocationReady(activeLocations, processingMode)) {
+        setLoadingMessage("Connecting to the Local agent for OCR…");
+        try {
+          activeLocations = await probeProcessingLocations({ tool: "pdf-text-editor" });
+          activeCapabilities = processingCapabilities(activeLocations, processingMode);
+          setLocations(activeLocations);
+          setCapabilities(activeCapabilities);
+        } catch {
+          activeLocations = null;
+          activeCapabilities = null;
+        }
+      }
+      if (ocrPageIndexes.length && !isProcessingLocationReady(activeLocations, processingMode)) {
         setPages(models);
         setError("Some pages contain hidden or unsupported text. Connect the Local agent to run OCR on those pages.");
-      } else if (ocrPageIndexes.length && processingMode === "local" && capabilities && capabilities.pdf?.ocr !== true) {
+      } else if (ocrPageIndexes.length && processingMode === "local" && activeCapabilities && activeCapabilities.pdf?.ocr !== true) {
         setPages(models);
         setError("PDF OCR is not available in this Local Agent. Update the agent, restart it, and try the PDF again.");
       } else if (ocrPageIndexes.length) {
@@ -1476,10 +1490,10 @@ export function PdfTextEditor() {
       } else if (requestedOcrMode === "auto" || models.some((model) => model.runs.some((run) => run.editable))) {
         setPages(models);
         setOcrMode(requestedOcrMode === "auto" ? "auto" : "embedded");
-      } else if (!isProcessingLocationReady(locations, processingMode)) {
+      } else if (!isProcessingLocationReady(activeLocations, processingMode)) {
         setPages(models);
         setError("This PDF has no embedded text. Connect the Local agent to run OCR on scanned pages.");
-      } else if (processingMode === "local" && capabilities && capabilities.pdf?.ocr !== true) {
+      } else if (processingMode === "local" && activeCapabilities && activeCapabilities.pdf?.ocr !== true) {
         setPages(models);
         setError("PDF OCR is not available in this Local Agent. Update the agent, restart it, and try the PDF again.");
       } else {
@@ -1516,7 +1530,8 @@ export function PdfTextEditor() {
       const blob = await response.blob();
       if (active) {
         retainedJobIdRef.current = pending.retainedJobId || null;
-        await loadFile(new File([blob], pending.filename || "saved.pdf", { type: pending.mime || "application/pdf" }), "auto");
+        const reopenMode = pending.reopenMode === "ocr" || pending.reopenMode === "embedded" ? pending.reopenMode : "auto";
+        await loadFile(new File([blob], pending.filename || "saved.pdf", { type: pending.mime || "application/pdf" }), reopenMode);
       }
     }).catch((loadError) => {
       if (active) setError(loadError instanceof Error ? loadError.message : "The saved PDF could not be reopened.");

@@ -159,9 +159,14 @@ test("PDF text editor supports constrained browser replacement and identity-chec
   assert.match(shell, /form\.append\("filename"/);
   assert.match(intake, /outputFilename/);
   assert.match(worker, /safePdfOutputFilename\(options\.outputFilename/);
+  assert.match(worker, /reopenMode: isOcr \? "ocr" : "embedded"/);
   assert.match(shell, /PdfTextJobLog logs=\{job\.logs \|\| \[\]\} mode=\{mode\}/);
   assert.match(shell, /error\?\.code === "request_timeout"/);
   assert.match(shell, /takeHistoryEdit\("pdf-text-editor"\)/);
+  assert.match(shell, /pending\.reopenMode === "ocr" \|\| pending\.reopenMode === "embedded"/);
+  assert.match(shell, /await probeProcessingLocations\(\{ tool: "pdf-text-editor" \}\)/);
+  assert.match(shell, /let activeLocations = locations/);
+  assert.match(shell, /activeCapabilities = processingCapabilities\(activeLocations, processingMode\)/);
   assert.match(shell, /undoTextEdit/);
   assert.match(shell, /redoTextEdit/);
   assert.match(shell, /textFormats/);
@@ -323,7 +328,7 @@ test("PDF text editor supports constrained browser replacement and identity-chec
   assert.match(await read("components/processing-client.js"), /agent_update_required/);
   assert.match(await read("components/processing-client.js"), /120 \* 1000/);
   assert.match(await read("components/processing-client.js"), /PDF OCR requires the latest Local Agent/);
-  assert.match(shell, /capabilities\.pdf\?\.ocr !== true/);
+  assert.match(shell, /(?:activeCapabilities|capabilities)\.pdf\?\.ocr !== true/);
   assert.match(await read("pages/api/pdf/ocr.js"), /type: "progress"/);
   assert.match(await read("agent/server.js"), /application\/x-ndjson/);
   assert.match(await read("lib/pdf-ocr.js"), /tesseract/);

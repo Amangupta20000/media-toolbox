@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { applyMockRequest, MOCK_API_LIMITS, MockApiError, normalizeMockProject, parseMockCurl } from "../lib/mock-api.js";
+import { applyMockRequest, MOCK_API_LIMITS, MOCK_API_VERSION, MockApiError, normalizeMockProject, parseMockCurl } from "../lib/mock-api.js";
 import { deleteMockProject, getMockProject, listMockProjects, saveMockProject } from "../lib/mock-api-storage.js";
 
 const project = () => normalizeMockProject({ id: "test-api", name: "Test API", collections: [{ name: "users", methods: ["GET", "POST", "PUT", "PATCH", "DELETE"], records: [{ id: "1", name: "Ada", role: "admin" }] }] });
@@ -157,7 +157,7 @@ test("mock API migrates only legacy generated record IDs", () => {
       { id: "external-42", name: "Grace" },
     ] }],
   });
-  assert.equal(value.version, 3);
+  assert.equal(value.version, MOCK_API_VERSION);
   assert.deepEqual(value.collections[0].records, [
     { name: "Ada" },
     { id: "external-42", name: "Grace" },
@@ -234,6 +234,28 @@ test("database endpoints keep working when their public route is renamed", () =>
   assert.deepEqual(result.body, [{ id: "1", name: "Ada" }]);
 });
 
+test("database PUT, PATCH, and DELETE endpoints support multi-segment record routes", () => {
+  const value = normalizeMockProject({
+    id: "multi-segment-crud",
+    name: "Multi-segment CRUD",
+    mode: "database",
+    collections: [{ name: "users", methods: ["GET", "PUT", "PATCH", "DELETE"], records: [{ id: "1", name: "Ada", role: "admin" }] }],
+    endpoints: [
+      { id: "users-get", mode: "database", collection: "users", method: "GET", path: "/sso/api/v1/users" },
+      { id: "users-put", mode: "database", collection: "users", method: "PUT", path: "/sso/api/v1/users" },
+      { id: "users-patch", mode: "database", collection: "users", method: "PATCH", path: "/sso/api/v1/users" },
+      { id: "users-delete", mode: "database", collection: "users", method: "DELETE", path: "/sso/api/v1/users" },
+    ],
+  });
+  const replaced = applyMockRequest(value, { method: "PUT", pathname: "/sso/api/v1/users/1", body: { name: "Grace", active: true } });
+  assert.deepEqual(replaced.body, { id: "1", name: "Grace", active: true });
+  const patched = applyMockRequest(replaced.project, { method: "PATCH", pathname: "/sso/api/v1/users/1", body: { role: "engineer" } });
+  assert.deepEqual(patched.body, { id: "1", name: "Grace", active: true, role: "engineer" });
+  const deleted = applyMockRequest(patched.project, { method: "DELETE", pathname: "/sso/api/v1/users/1" });
+  assert.equal(deleted.status, 204);
+  assert.throws(() => applyMockRequest(deleted.project, { method: "GET", pathname: "/sso/api/v1/users/1" }), (error) => error instanceof MockApiError && error.status === 404);
+});
+
 test("renaming a database GET route keeps records created by POST", () => {
   const value = normalizeMockProject({
     id: "renamed-after-post",
@@ -254,6 +276,87 @@ test("renaming a database GET route keeps records created by POST", () => {
     { id: "1", name: "Ada" },
     { id: "2", name: "Grace" },
   ]);
+});
+
+function guidedConsentProject({ action } = {}) {
+  return normalizeMockProject({
+    id: "guided-consent",
+    name: "Guided consent",
+    mode: "database",
+    collections: [{
+      name: "consents",
+      methods: ["GET", "POST"],
+      records: [
+        { id: "one", clientid: "client-1", consentData: { data: { purposeDetails: [{ id: "email", hasUserProvidedConsent: false }, { id: "finance", hasUserProvidedConsent: false }] } } },
+        { id: "two", clientid: "client-1", consentData: { data: { purposeDetails: [{ id: "email", hasUserProvidedConsent: false }] } } },
+        { id: "three", clientid: "client-2", consentData: { data: { purposeDetails: [{ id: "email", hasUserProvidedConsent: false }] } } },
+      ],
+    }],
+    endpoints: [
+      { id: "consents-get", mode: "database", collection: "consents", method: "GET", path: "/sso/api/v1/consent/config" },
+      { id: "consents-post", mode: "database", collection: "consents", method: "POST", path: "/sso/api/v1/consent/submit-user-consent", postAction: action || { type: "update", recordMatch: [{ recordPath: "clientid", source: "header.clientId", operator: "equals" }], nestedUpdates: [{ arrayPath: "consentData.data.purposeDetails", matchPath: "id", source: "body.purpose_ids", operator: "in", set: { hasUserProvidedConsent: true } }] }, responses: { success: { status: 202, headers: { "X-Consent": "updated" }, body: { success: true } } } },
+    ],
+  });
+}
+
+test("guided POST updates matching records and nested items on a multi-segment route", () => {
+  const value = guidedConsentProject();
+  const result = applyMockRequest(value, {
+    method: "POST",
+    pathname: "/sso/api/v1/consent/submit-user-consent",
+    headers: { clientId: "client-1" },
+    body: { purpose_ids: ["email"] },
+  });
+  assert.equal(result.status, 202);
+  assert.deepEqual(result.body, { success: true });
+  assert.equal(result.headers["X-Consent"], "updated");
+  assert.equal(result.project.collections[0].records[0].consentData.data.purposeDetails[0].hasUserProvidedConsent, true);
+  assert.equal(result.project.collections[0].records[0].consentData.data.purposeDetails[1].hasUserProvidedConsent, false);
+  assert.equal(result.project.collections[0].records[1].consentData.data.purposeDetails[0].hasUserProvidedConsent, true);
+  assert.equal(result.project.collections[0].records[2].consentData.data.purposeDetails[0].hasUserProvidedConsent, false);
+});
+
+test("guided POST supports query matching, fixed updates, and copied request values", () => {
+  const queryAction = { type: "update", recordMatch: [{ recordPath: "clientid", source: "query.client", operator: "equals" }], nestedUpdates: [{ arrayPath: "consentData.data.purposeDetails", matchPath: "id", source: "query.purpose", operator: "in", set: { hasUserProvidedConsent: true }, copy: { "consentSource.value": "query.source" } }] };
+  const result = applyMockRequest(guidedConsentProject({ action: queryAction }), { method: "POST", pathname: "/sso/api/v1/consent/submit-user-consent?client=client-2&purpose=email&source=query", body: {} });
+  const item = result.project.collections[0].records[2].consentData.data.purposeDetails[0];
+  assert.equal(item.hasUserProvidedConsent, true);
+  assert.equal(item.consentSource.value, "query");
+});
+
+test("guided POST appends request arrays to a matched record array", () => {
+  const value = normalizeMockProject({
+    id: "append-skills",
+    name: "Append skills",
+    mode: "database",
+    collections: [{ name: "people", methods: ["GET", "POST"], records: [{ id: "1", name: "Ada Lovelace", skills: ["math", "logic"] }] }],
+    endpoints: [
+      { id: "people-get", mode: "database", collection: "people", method: "GET", path: "/people" },
+      { id: "people-post", mode: "database", collection: "people", method: "POST", path: "/people/add-skills", postAction: { type: "update", recordMatch: [{ recordPath: "name", source: "header.name", operator: "equals" }], arrayUpdates: [{ arrayPath: "skills", source: "body.skills", operation: "append" }] } },
+    ],
+  });
+  const result = applyMockRequest(value, { method: "POST", pathname: "/people/add-skills", headers: { name: "Ada Lovelace" }, body: { skills: ["javascript", "math"] } });
+  assert.deepEqual(result.project.collections[0].records[0].skills, ["math", "logic", "javascript"]);
+});
+
+test("guided POST returns 404 without persisting when nothing matches", () => {
+  const value = guidedConsentProject();
+  assert.throws(() => applyMockRequest(value, { method: "POST", pathname: "/sso/api/v1/consent/submit-user-consent", headers: { clientId: "missing" }, body: { purpose_ids: ["email"] } }), (error) => error instanceof MockApiError && error.status === 404);
+  assert.equal(value.collections[0].records[0].consentData.data.purposeDetails[0].hasUserProvidedConsent, false);
+});
+
+test("existing POST create behavior remains unchanged when no guided action is configured", () => {
+  const value = normalizeMockProject({ id: "create-regression", name: "Create regression", collections: [{ name: "users", methods: ["GET", "POST"], records: [{ id: "1" }] }], endpoints: [{ id: "users-post", mode: "database", collection: "users", method: "POST", path: "/custom/api/users" }] });
+  const result = applyMockRequest(value, { method: "POST", pathname: "/custom/api/users", body: { id: "2", name: "Grace" } });
+  assert.equal(result.status, 201);
+  assert.equal(result.project.collections[0].records.length, 2);
+});
+
+test("guided POST actions survive manifest normalization and export/import", () => {
+  const value = guidedConsentProject();
+  const roundTrip = normalizeMockProject(JSON.parse(JSON.stringify(value)));
+  assert.deepEqual(roundTrip.endpoints.find((item) => item.id === "consents-post").postAction, value.endpoints.find((item) => item.id === "consents-post").postAction);
+  assert.equal(roundTrip.version, MOCK_API_VERSION);
 });
 
 test("mock API parses cURL locally and redacts sensitive headers", () => {
@@ -283,7 +386,7 @@ test("mock API parses standard multiline cURL line continuations", () => {
 
 test("legacy collection projects normalize without losing CRUD behavior", () => {
   const value = normalizeMockProject({ id: "legacy", name: "Legacy", collections: [{ name: "items", methods: ["GET"], records: [] }] });
-  assert.equal(value.version, 3);
+  assert.equal(value.version, MOCK_API_VERSION);
   assert.equal(value.mode, "database");
   assert.deepEqual(value.endpoints, []);
   assert.equal(applyMockRequest(value, { method: "GET", pathname: "/items" }).status, 200);
