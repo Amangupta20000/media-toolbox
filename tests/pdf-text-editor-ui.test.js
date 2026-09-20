@@ -181,6 +181,9 @@ test("PDF text editor supports constrained browser replacement and identity-chec
   assert.match(shell, /Line spacing for selected PDF text/);
   assert.match(shell, /saved PDF could not be reopened/);
   assert.match(shell, /graphemeCount\(value\) > graphemeCount\(run\.text\)/);
+  assert.match(shell, /const ocrEdit = run\.mode === "ocr"/);
+  assert.match(shell, /ocrEdit \? <textarea[^>]+rows=\{3\}[^>]+value=\{value\}/);
+  assert.match(shell, /if \(event\.key === "Escape"\) onCancel\(\); \}\} aria-label="Replacement text" \/> : <input/);
   assert.match(await read("lib/pdf-text-preview.js"), /document.context.flateStream/);
   assert.match(await read("lib/pdf-text-preview.js"), /parseToUnicodeCMap/);
   assert.match(await read("lib/pdf-text-preview.js"), /embedded font code sequence/);

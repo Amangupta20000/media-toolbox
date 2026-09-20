@@ -1925,8 +1925,9 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .pdf-text-edit-heading > div { min-width: 0; display: grid; gap: 3px; }
 .pdf-text-edit-heading span { color: var(--teal-dark); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .pdf-text-edit-heading strong { overflow: hidden; color: var(--navy); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.pdf-text-edit-popover > input { width: 100%; padding: 10px 11px; color: var(--navy); background: #fff; border: 1px solid #c8dce3; border-radius: 8px; outline: 0; font-size: 12px; }
-.pdf-text-edit-popover > input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(30,159,163,.12); }
+.pdf-text-edit-popover > input, .pdf-text-edit-popover > textarea { width: 100%; padding: 10px 11px; color: var(--navy); background: #fff; border: 1px solid #c8dce3; border-radius: 8px; outline: 0; font-size: 12px; }
+.pdf-text-edit-popover > textarea { min-height: 70px; max-height: 180px; resize: vertical; line-height: 1.45; }
+.pdf-text-edit-popover > input:focus, .pdf-text-edit-popover > textarea:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(30,159,163,.12); }
 .pdf-text-format-panel { display: grid; gap: 7px; margin-top: 10px; padding: 10px; color: #536b79; background: rgba(255,255,255,.64); border: 1px solid #d6e8ea; border-radius: 8px; }
 .pdf-text-format-panel.is-locked { border-style: dashed; }
 .pdf-text-format-panel > strong { color: var(--navy); font-size: 10px; }
@@ -1972,7 +1973,7 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
 [data-theme="dark"] .pdf-text-page { background: rgba(23,44,60,.72); }
 [data-theme="dark"] .pdf-text-page:has(.pdf-text-run.selected) { background: rgba(28,67,76,.76); }
 [data-theme="dark"] .pdf-text-edit-popover { background: #102b38; border-color: #2c6970; }
-[data-theme="dark"] .pdf-text-edit-popover > input { color: #dcebf2; background: #102230; border-color: #2f4859; }
+[data-theme="dark"] .pdf-text-edit-popover > input, [data-theme="dark"] .pdf-text-edit-popover > textarea { color: #dcebf2; background: #102230; border-color: #2f4859; }
 [data-theme="dark"] .pdf-text-format-panel { background: rgba(16,34,48,.72); border-color: #2f5964; }
 [data-theme="dark"] .pdf-text-local-only-note { color: #b8ccd5; background: rgba(16,34,48,.72); border-color: #2c6970; }
 [data-theme="dark"] .pdf-text-format-panel > strong, [data-theme="dark"] .pdf-text-format-secondary-row label { color: #dcebf2; }

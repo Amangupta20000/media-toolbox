@@ -1036,12 +1036,13 @@ function TextEditPopover({ run, value, onChange, onSave, onCancel, onRestore, fo
     </div>;
   }
   const overflow = graphemeCount(value) > graphemeCount(run.text);
+  const ocrEdit = run.mode === "ocr";
   const appearance = textFormat(format, run);
   const localOnlyMessage = "Text formatting and placement (font, size, colour, move, resize, and rotate) are Local agent only.";
   const styleButton = (key, Icon, label) => <button className="pdf-text-format-button" type="button" aria-label={`${label} selected PDF text`} aria-pressed={Boolean(appearance[key])} title={label} disabled={browserMode} onClick={() => onFormatChange?.({ [key]: !appearance[key] })}><Icon size={14} /></button>;
   return <div className="pdf-text-edit-popover" role="dialog" aria-label={`Edit ${run.text} on page ${run.pageIndex + 1}`}>
     <div className="pdf-text-edit-heading"><div><span>Selected text · Page {run.pageIndex + 1}</span><strong title={run.text}>{run.text}</strong></div><button className="icon-button" type="button" onClick={onCancel} aria-label="Close text editor" title="Close"><X size={17} /></button></div>
-    <input autoFocus value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onSave(); if (event.key === "Escape") onCancel(); }} aria-label="Replacement text" />
+    {ocrEdit ? <textarea autoFocus rows={3} value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") onCancel(); }} aria-label="Replacement text" /> : <input autoFocus value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") onSave(); if (event.key === "Escape") onCancel(); }} aria-label="Replacement text" />}
     <div className={`pdf-text-format-panel${browserMode ? " is-locked" : ""}`} aria-label="Format existing PDF text" aria-disabled={browserMode}>
       <strong>Format selected text</strong>
       {browserMode && <div className="pdf-text-local-only-note"><LockKeyhole size={16} aria-hidden="true" /><span>{localOnlyMessage}</span></div>}

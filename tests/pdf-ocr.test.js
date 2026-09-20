@@ -191,6 +191,26 @@ test("OCR export embeds longer replacements and reports visual overflow", async 
   assert.notEqual(sha256Hex(edited.bytes), sha256Hex(source), "the exported bytes should contain the edited page image");
 });
 
+test("OCR export accepts multiline replacements", async () => {
+  const source = await rasterPdf();
+  const detected = await recognizePdfText(source);
+  const run = detected.pages[0].runs.find((item) => /OCR/i.test(item.text));
+  const edited = await applyPdfOcrEdits(source, [{
+    pageIndex: run.pageIndex,
+    runId: run.runId,
+    originalText: run.originalText,
+    originalTextHash: run.originalTextHash,
+    replacementText: "FIRST LINE\nSECOND LINE",
+    mode: "ocr",
+    bbox: run.bbox,
+    confidence: run.confidence,
+  }], { sourceHash: sha256Hex(source) });
+  assert.ok(edited.warnings.some((warning) => /taller than the original/i.test(warning)), "the export should report intentional vertical overflow for multiline OCR text");
+  const output = await PDFDocument.load(edited.bytes);
+  assert.equal(output.getPageCount(), 1);
+  assert.notEqual(sha256Hex(edited.bytes), sha256Hex(source), "the multiline replacement should be present in the exported page image");
+});
+
 test("OCR keeps the full leading word on isolated text over a dark slide", async () => {
   const source = await yellowSlidePdf();
   const detected = await recognizePdfText(source);
@@ -345,6 +365,36 @@ test("OCR raster edits apply existing-text formatting without changing the sourc
     if (pixels[offset] > 150 && pixels[offset] > pixels[offset + 1] * 1.5 && pixels[offset] > pixels[offset + 2] * 1.5) underlinePixels += 1;
   }
   assert.ok(underlinePixels > 10, "formatted OCR text should render its underline");
+});
+
+test("OCR raster replacements preserve explicit line breaks", () => {
+  const canvas = createCanvas(520, 220);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#111111";
+  context.font = "700 42px Arial";
+  const text = "Original";
+  const baseline = 76;
+  const metrics = context.measureText(text);
+  const warnings = applyRasterTextEdits(canvas, [{
+    originalText: text,
+    replacementText: "First line\nSecond line",
+    bbox: { x0: 30, y0: baseline - metrics.actualBoundingBoxAscent, x1: 30 + metrics.width, y1: baseline + metrics.actualBoundingBoxDescent },
+  }]);
+  assert.ok(warnings.some((warning) => /taller than the original/i.test(warning)), "multiline OCR replacements should report intentional vertical overflow");
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  let secondLineHasInk = false;
+  for (let y = 82; y < 150 && !secondLineHasInk; y += 1) {
+    for (let x = 20; x < 280; x += 1) {
+      const offset = (y * canvas.width + x) * 4;
+      if (pixels[offset] < 100 && pixels[offset + 1] < 100 && pixels[offset + 2] < 100) {
+        secondLineHasInk = true;
+        break;
+      }
+    }
+  }
+  assert.equal(secondLineHasInk, true, "the second replacement line should be painted into the OCR preview");
 });
 
 test("OCR move-only edits preserve the original glyph pixels without font matching", () => {
