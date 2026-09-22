@@ -210,6 +210,25 @@ test("PDF editor keeps advanced editing Local-agent-only in Browser mode", async
   assert.match(options, /processing-locked/);
 });
 
+test("PDF editor exposes unlimited PDF uploads only for Local agent Admin access", async () => {
+  const shell = await read("components/pdf-editor.jsx");
+  const intake = await read("lib/job-intake.js");
+  const agent = await read("agent/server.js");
+  const options = await read("components/processing-options.jsx");
+  assert.match(shell, /function localAgentAdmin\(locations\)/);
+  assert.match(shell, /const unlimitedPdfAccess = processingMode === "local" && localAgentAdmin\(locations\)/);
+  assert.match(shell, /const pdfCountLimit = unlimitedPdfAccess [?] Number\.POSITIVE_INFINITY : MAX_PDF_COUNT/);
+  assert.match(shell, /const pdfTotalLimit = processingMode === "browser"[\s\S]*?unlimitedPdfAccess [?] Number\.POSITIVE_INFINITY : MAX_PDF_TOTAL_BYTES/);
+  assert.match(shell, /Unlimited PDFs · No size limit/);
+  assert.match(intake, /if \(!unlimitedPdfEditor && pdfFiles\.length > MAX_PDF_COUNT\)/);
+  assert.match(intake, /if \(!unlimitedPdfEditor && file\.size > appConfig\.pdfMaxBytes\)/);
+  assert.match(intake, /if \(!unlimitedPdfEditor && totalPdfBytes > appConfig\.pdfTotalMaxBytes\)/);
+  assert.match(agent, /const unlimitedPdfEditor = authorization\.mode === "admin"/);
+  assert.match(agent, /fileSize: Number\.POSITIVE_INFINITY, maxFiles: Number\.POSITIVE_INFINITY/);
+  assert.match(agent, /unlimitedPdfEditor/);
+  assert.match(options, /Unlimited PDF count and file size for Admin/);
+});
+
 test("PDF editor saves to the device in place without opening the export result view", async () => {
   const shell = await read("components/pdf-editor.jsx");
   const styles = await read("styles/globals.css");

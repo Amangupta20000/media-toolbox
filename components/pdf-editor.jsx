@@ -32,6 +32,11 @@ const BROWSER_IMAGE_SIZE_ERROR = "Browser mode accepts images up to 1 MB each. U
 const BROWSER_PROJECT_ERROR = "This project contains a Local-agent-only feature. Switch to Local agent to export it.";
 const A4 = { width: 595.28, height: 841.89, rotation: 0 };
 
+function localAgentAdmin(locations) {
+  const authorization = locations?.local?.authorization || locations?.local?.health?.authorization;
+  return authorization?.mode === "admin";
+}
+
 function getPageImages(page) {
   if (Array.isArray(page?.images)) return page.images;
   return page?.image ? [{ ...page.image, id: page.image.id || "legacy-image" }] : [];
@@ -713,6 +718,19 @@ export function PdfEditor() {
   const pendingHistoryRef = useRef(null);
   const historyTimerRef = useRef(null);
 
+  const unlimitedPdfAccess = processingMode === "local" && localAgentAdmin(locations);
+  const pdfCountLimit = unlimitedPdfAccess ? Number.POSITIVE_INFINITY : MAX_PDF_COUNT;
+  const pdfTotalLimit = processingMode === "browser"
+    ? BROWSER_PDF_EDITOR_MAX_TOTAL_BYTES
+    : unlimitedPdfAccess ? Number.POSITIVE_INFINITY : MAX_PDF_TOTAL_BYTES;
+  const currentPdfSizeMb = Math.ceil(pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0) / (1024 * 1024)) || 0;
+  const pdfCapacityLabel = unlimitedPdfAccess
+    ? "Unlimited PDFs · No size limit"
+    : `Up to ${MAX_PDF_COUNT} PDFs · ${processingMode === "browser" ? "50 MB total" : "200 MB total"}`;
+  const pdfProgressLabel = unlimitedPdfAccess
+    ? `${pdfFiles.length} PDFs · ${currentPdfSizeMb} MB · No size limit`
+    : `${pdfFiles.length} of ${MAX_PDF_COUNT} PDFs · ${currentPdfSizeMb} MB of ${processingMode === "browser" ? 50 : 200} MB`;
+
   const useLocalAgent = () => {
     setError("");
     setProcessingMode("local");
@@ -994,13 +1012,12 @@ export function PdfEditor() {
     if (!selectedFiles.length) return;
     setError("");
     setPreviewError("");
-    if (pdfFiles.length + selectedFiles.length > MAX_PDF_COUNT) { setError(`You can add up to ${MAX_PDF_COUNT} PDFs.`); return; }
+    if (pdfFiles.length + selectedFiles.length > pdfCountLimit) { setError(`You can add up to ${MAX_PDF_COUNT} PDFs.`); return; }
     for (const file of selectedFiles) {
       if (!isPdf(file)) { setError(`${file.name} is not a PDF.`); return; }
     }
     const existingPdfBytes = pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0);
     const selectedPdfBytes = selectedFiles.reduce((total, file) => total + Number(file.size || 0), 0);
-    const pdfTotalLimit = processingMode === "browser" ? BROWSER_PDF_EDITOR_MAX_TOTAL_BYTES : MAX_PDF_TOTAL_BYTES;
     if (existingPdfBytes + selectedPdfBytes > pdfTotalLimit) {
       setError(processingMode === "browser" ? "Browser mode accepts PDFs up to 50 MB total. Use Local agent for larger projects." : "The combined PDF upload must be 200 MB or smaller. Remove a PDF before adding another.");
       return;
@@ -1902,21 +1919,21 @@ export function PdfEditor() {
   }, [activeView, job, saveJob, loadingFiles, selectedPage, previewZoom, pages, pdfFiles, processingMode, canRedo, canUndo]);
 
   return <AppShell>
-    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools <span className="pdf-capacity-note"><FileText size={14} /> Up to 5 PDFs · {processingMode === "browser" ? "50 MB total" : "200 MB total"}</span></div><h1>Free PDF editor</h1><p>{processingMode === "browser" ? "Import, merge, reorder, rotate, and remove PDF pages in this browser, or start with blank pages. Duplicating pages, styled text boxes, and password-protected PDFs require Local agent." : "Merge PDFs, reorder pages, remove pages, add images, or place styled text boxes on PDF pages and new blank pages."}</p></div></div>
+    <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools <span className="pdf-capacity-note"><FileText size={14} /> {pdfCapacityLabel}</span></div><h1>Free PDF editor</h1><p>{processingMode === "browser" ? "Import, merge, reorder, rotate, and remove PDF pages in this browser, or start with blank pages. Duplicating pages, styled text boxes, and password-protected PDFs require Local agent." : unlimitedPdfAccess ? "Merge PDFs without count or file-size limits while Admin access is active, then reorder pages, remove pages, add images, or place styled text boxes." : "Merge PDFs, reorder pages, remove pages, add images, or place styled text boxes on PDF pages and new blank pages."}</p></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
     <ProcessingOptionsPanel tool="pdf-editor" locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={selectProcessingMode} />
     {activeView === "history" ? <ToolHistory tool="pdf-editor" /> : activeView === "guide" ? <ToolSeoContent pathname="/pdf-editor" /> : activeView === "processing" ? null : <>
     {!job && <ProcessingMode value={processingMode} onChange={selectProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool="pdf-editor" />}
     {job ? <PdfJobCard job={job} mode={jobMode} keepResult={jobKeepResult} replacementJobId={jobReplacementId} onReset={reset} onContinue={continueEditing} /> : <section className={`pdf-editor-shell ${pdfDragActive ? "pdf-drop-active" : ""}`} onDragOver={handlePdfDragOver} onDragLeave={handlePdfDragLeave} onDrop={handlePdfDrop}>
       {processingMode === "local" && <div className="pdf-retention-row">
-        <div className="pdf-editor-toolbar-heading pdf-retention-heading"><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDF_COUNT} PDFs · {pages.length} pages · {Math.ceil(pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0) / (1024 * 1024)) || 0} MB of {processingMode === "browser" ? 50 : 200} MB</span></div>
+        <div className="pdf-editor-toolbar-heading pdf-retention-heading"><strong>Build your document</strong><span>{pdfProgressLabel} · {pages.length} pages</span></div>
         <div className="pdf-retention-name"><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem || filenameStem(defaultResultFilename)} label="Saved PDF name" description="This name is used for the export and, when retained, for PDF editor History in the Results folder." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(filenameStem(value)); }} /></div>
         <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles || Boolean(saveJob)} title="Save the current PDF to the Local agent Results folder without leaving the editor"><Save size={17} /> {saveJob ? "Saving…" : "Save to device"}</button>
       </div>}
       <div className={`pdf-editor-toolbar${processingMode === "local" ? " pdf-editor-toolbar-tools-only" : ""}`}>
-        {processingMode !== "local" && <div className="pdf-editor-toolbar-heading"><strong>Build your document</strong><span>{pdfFiles.length} of {MAX_PDF_COUNT} PDFs · {pages.length} pages · {Math.ceil(pdfFiles.reduce((total, record) => total + Number(record.file?.size || 0), 0) / (1024 * 1024)) || 0} MB of {processingMode === "browser" ? 50 : 200} MB</span></div>}
+        {processingMode !== "local" && <div className="pdf-editor-toolbar-heading"><strong>Build your document</strong><span>{pdfProgressLabel} · {pages.length} pages</span></div>}
         <div className="pdf-editor-actions">
-          <button className="secondary-button" type="button" onClick={openPdfPicker} disabled={loadingFiles || pdfFiles.length >= MAX_PDF_COUNT} title="Add PDF"><Plus size={17} /> Add PDF</button>
+          <button className="secondary-button" type="button" onClick={openPdfPicker} disabled={loadingFiles || pdfFiles.length >= pdfCountLimit} title="Add PDF"><Plus size={17} /> Add PDF</button>
           <button className="secondary-button" type="button" onClick={addBlankPage}><FilePlus2 size={17} /> Blank page</button>
           <div className="pdf-zoom-controls" aria-label="Preview zoom"><button className="icon-button" type="button" onClick={() => changePreviewZoom(-0.1)} aria-label="Zoom out" title="Zoom out (-)"><ZoomOut size={16} /></button><button className="pdf-zoom-value" type="button" onClick={resetPreviewZoom} title="Reset zoom (0)">{Math.round(previewZoom * 100)}%</button><button className="icon-button" type="button" onClick={() => changePreviewZoom(0.1)} aria-label="Zoom in" title="Zoom in (+)"><ZoomIn size={16} /></button></div>
           <div ref={moreToolsRef} className="pdf-more-tools">
@@ -1944,7 +1961,7 @@ export function PdfEditor() {
       </div>
       <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(event) => { addPdfFiles(event.target.files); event.target.value = ""; }} />
       <input ref={imageInputRef} type="file" accept={processingMode === "browser" ? "image/png,image/jpeg,.png,.jpg,.jpeg" : "image/png,image/jpeg,image/heic,image/heif,image/tiff,image/gif,image/bmp,.png,.jpg,.jpeg,.heic,.heif,.tif,.tiff,.gif,.bmp"} multiple hidden onChange={(event) => { const targetPageId = imageTargetPageIdRef.current; imageTargetPageIdRef.current = null; addImages(event.target.files, targetPageId || undefined); event.target.value = ""; }} />
-      {!pdfFiles.length && !pages.length ? <PdfEmptyState onBrowse={openPdfPicker} onBlank={addBlankPage} loading={loadingFiles} dragActive={pdfDragActive} browserMode={processingMode === "browser"} /> : !pages.length ? <PdfNoPagesState onBrowse={openPdfPicker} onBlank={addBlankPage} browserMode={processingMode === "browser"} /> : <div className="pdf-editor-layout">
+      {!pdfFiles.length && !pages.length ? <PdfEmptyState onBrowse={openPdfPicker} onBlank={addBlankPage} loading={loadingFiles} dragActive={pdfDragActive} browserMode={processingMode === "browser"} unlimitedPdfAccess={unlimitedPdfAccess} /> : !pages.length ? <PdfNoPagesState onBrowse={openPdfPicker} onBlank={addBlankPage} browserMode={processingMode === "browser"} /> : <div className="pdf-editor-layout">
         <aside className="pdf-page-rail"><div className="pdf-rail-heading"><span>Pages</span><small>Pages load as you scroll</small></div><div ref={pageListRef} className="pdf-page-list" onDragOver={handlePageListDragOver} onDrop={handlePageListDrop} onWheel={handlePageListWheel} onPointerDown={handlePageListPointerDown} onPointerMove={(event) => { handlePagePointerMove(event); handlePageListPointerMove(event); }} onPointerUp={(event) => { finishPagePointerDrag(event); finishPageListPointerScroll(event); }} onPointerCancel={(event) => { finishPagePointerDrag(event, true); finishPageListPointerScroll(event); }}>{renderPageList()}</div></aside>
         <section className="pdf-selected-panel"><div className="pdf-selected-heading"><div><span>Selected page {selectedPage ? pages.findIndex((page) => page.id === selectedPage.id) + 1 : "—"}</span><small>{selectedPage?.kind === "blank" ? "Blank page" : selectedPage?.sourceName || "Choose a page"}{selectedPage?.kind === "source" ? ` · Original page ${selectedPage.pageNumber}` : ""}</small></div></div><div ref={previewScrollRef} className="pdf-document-preview" onScroll={handlePreviewScroll}>{pages.map((page, index) => <Fragment key={page.id}><PdfPreviewPage page={page} index={index} selected={page.id === selectedPage?.id} previewZoom={previewZoom} pdfDocument={documentsRef.current[page.pdfIndex]} previewRootRef={previewScrollRef} elementRef={(element) => { if (element) previewElementRefs.current.set(page.id, element); else previewElementRefs.current.delete(page.id); }} selectedObject={selectedObject?.pageId === page.id ? selectedObject : null} onSelectObject={(object) => setSelectedObject(object ? { ...object, pageId: page.id } : null)} onChange={(images, history) => updatePage(page.id, { images }, history)} onRemove={(imageId) => removeImage(page.id, imageId)} onChangeTextBoxes={(textBoxes, history) => updatePage(page.id, { textBoxes }, history)} onRemoveTextBox={(textBoxId) => removeTextBox(page.id, textBoxId)} onAddImages={() => openImagePickerForPage(page.id)} onError={setPreviewError} /><PdfInsertPageButton pageNumber={index + 1} onClick={() => addBlankPageAfter(page.id)} /></Fragment>)}</div>{previewError && <DismissibleMessage className="pdf-preview-error" resetKey={previewError}><AlertTriangle size={16} /><span>{previewError}</span></DismissibleMessage>}<p className="pdf-editor-tip"><GripVertical size={15} /> Scroll the preview to select a page. Click + Add page between previews to insert a blank page. {processingMode === "browser" ? "Add images up to 1 MB each; duplicate pages and styled text boxes require Local agent." : "Use Text box to add editable text to the selected page."}</p></section>
       </div>}
@@ -1957,8 +1974,8 @@ export function PdfEditor() {
   </AppShell>;
 }
 
-function PdfEmptyState({ onBrowse, onBlank, loading, dragActive, browserMode = false }) {
-  return <div className="pdf-empty-state"><div className="pdf-empty-icon"><UploadCloud size={28} /></div><h2>{loading ? "Reading PDF pages…" : dragActive ? "Drop your PDF files" : "Start a PDF project"}</h2><p>{loading ? "Creating page previews for the editor." : dragActive ? "Release to add the PDFs to your project." : browserMode ? "Import and merge PDFs up to 50 MB total, or create a simple PDF from blank pages and PNG/JPG/JPEG images. Results are download-only in this browser." : "Upload one PDF to edit it, merge documents, or build a new PDF from blank pages."}</p><div className="pdf-empty-actions"><button className="primary-button" type="button" onClick={onBrowse} disabled={loading}><FilePlus2 size={18} /> Browse PDF files</button><button className="secondary-button" type="button" onClick={onBlank} disabled={loading}><FilePlus2 size={18} /> Start with blank page</button></div><small>{browserMode ? "Up to 5 PDFs · 50 MB total · PNG/JPG/JPEG images up to 1 MB each" : "Up to 5 PDFs · 200 MB total"}</small></div>;
+function PdfEmptyState({ onBrowse, onBlank, loading, dragActive, browserMode = false, unlimitedPdfAccess = false }) {
+  return <div className="pdf-empty-state"><div className="pdf-empty-icon"><UploadCloud size={28} /></div><h2>{loading ? "Reading PDF pages…" : dragActive ? "Drop your PDF files" : "Start a PDF project"}</h2><p>{loading ? "Creating page previews for the editor." : dragActive ? "Release to add the PDFs to your project." : browserMode ? "Import and merge PDFs up to 50 MB total, or create a simple PDF from blank pages and PNG/JPG/JPEG images. Results are download-only in this browser." : unlimitedPdfAccess ? "Upload PDFs of any size and keep adding documents while Admin access is active." : "Upload one PDF to edit it, merge documents, or build a new PDF from blank pages."}</p><div className="pdf-empty-actions"><button className="primary-button" type="button" onClick={onBrowse} disabled={loading}><FilePlus2 size={18} /> Browse PDF files</button><button className="secondary-button" type="button" onClick={onBlank} disabled={loading}><FilePlus2 size={18} /> Start with blank page</button></div><small>{browserMode ? "Up to 5 PDFs · 50 MB total · PNG/JPG/JPEG images up to 1 MB each" : unlimitedPdfAccess ? "Unlimited PDFs · No size limit" : "Up to 5 PDFs · 200 MB total"}</small></div>;
 }
 
 function PdfNoPagesState({ onBrowse, onBlank, browserMode = false }) {

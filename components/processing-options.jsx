@@ -67,7 +67,7 @@ function formatRowsFor(tool) {
   ];
 }
 
-function comparisonRowsFor(tool, browserSupported) {
+function comparisonRowsFor(tool, browserSupported, localAdmin = false) {
   const supportRows = formatRowsFor(tool);
   const browserBestFor = browserSupported
     ? tool === "pdf-compressor" ? "Quick PDF compression up to 10 MB and 100 pages"
@@ -94,6 +94,7 @@ function comparisonRowsFor(tool, browserSupported) {
       ? [["Compression profiles", "Balanced, Smallest file, Higher quality, or Custom", "Balanced only"]]
       : tool === "pdf-editor"
         ? [
+          ["Local PDF limit", localAdmin ? "Unlimited PDF count and file size for Admin" : "Up to 5 PDFs · 200 MB total", "Up to 5 PDFs · 50 MB total"],
           ["Import existing PDFs", "Available", "Available"],
           ["Merge existing PDFs", "Available", "Available"],
           ["Duplicate page", "Available", "Local agent only", true],
@@ -135,6 +136,7 @@ export function ProcessingOptionsPanel({ tool, locations, value, onSelect, hidde
   const localReady = isProcessingLocationReady(locations, "local");
   const browserSupported = browserSupportsTool(tool);
   const browserReady = browserSupported && (locations?.browser ? isProcessingLocationReady(locations, "browser") : true);
+  const localAdmin = tool === "pdf-editor" && (locations?.local?.authorization?.mode === "admin" || locations?.local?.health?.authorization?.mode === "admin");
   const toolName = toolNames[tool] || "this tool";
 
   return <section className="processing-options-panel" role="tabpanel" hidden={hidden} aria-labelledby="processing-options-title">
@@ -147,7 +149,7 @@ export function ProcessingOptionsPanel({ tool, locations, value, onSelect, hidde
       <table className="processing-format-table">
         <caption>How processing modes differ</caption>
         <thead><tr><th scope="col">Comparison</th><th scope="col"><span className="processing-format-heading"><Laptop size={13} aria-hidden="true" /><span className="processing-format-mode"><strong>Local agent</strong><em className="processing-recommended">Recommended</em></span></span></th><th scope="col"><span className="processing-format-heading"><Globe2 size={13} aria-hidden="true" /><span className="processing-format-mode"><strong>Browser mode</strong><em className={browserSupported ? "processing-available" : "processing-unavailable"}>{browserSupported ? "Available for quick tools" : "Not available for this tool"}</em></span></span></th></tr></thead>
-        <tbody>{comparisonRowsFor(tool, browserSupported).map(([label, local, browser, browserLocked = false], index) => <tr key={label} style={{ animationDelay: `${index * 55}ms` }}><th scope="row">{label}</th><td>{local}</td><td>{browserLocked ? <span className="processing-locked"><LockKeyhole size={11} aria-hidden="true" /> {browser}</span> : browser}</td></tr>)}<tr className="processing-format-actions" style={{ animationDelay: `${comparisonRowsFor(tool, browserSupported).length * 55}ms` }}><th scope="row">Choose mode</th><td><button className="secondary-button processing-format-action" type="button" disabled={!localReady} aria-pressed={value === "local"} onClick={() => { pushAnalyticsEvent("processing_mode_selected", { tool, mode: "local" }); onSelect("local"); }}>{value === "local" ? "Currently selected" : localReady ? "Use Local agent" : "Start the Local agent"}</button></td><td><button className="secondary-button processing-format-action" type="button" disabled={!browserReady} aria-pressed={value === "browser"} onClick={() => { pushAnalyticsEvent("processing_mode_selected", { tool, mode: "browser" }); onSelect("browser"); }}>{value === "browser" ? "Currently selected" : browserReady ? "Use Browser mode" : "Not supported here"}</button></td></tr></tbody>
+        <tbody>{comparisonRowsFor(tool, browserSupported, localAdmin).map(([label, local, browser, browserLocked = false], index) => <tr key={label} style={{ animationDelay: `${index * 55}ms` }}><th scope="row">{label}</th><td>{local}</td><td>{browserLocked ? <span className="processing-locked"><LockKeyhole size={11} aria-hidden="true" /> {browser}</span> : browser}</td></tr>)}<tr className="processing-format-actions" style={{ animationDelay: `${comparisonRowsFor(tool, browserSupported, localAdmin).length * 55}ms` }}><th scope="row">Choose mode</th><td><button className="secondary-button processing-format-action" type="button" disabled={!localReady} aria-pressed={value === "local"} onClick={() => { pushAnalyticsEvent("processing_mode_selected", { tool, mode: "local" }); onSelect("local"); }}>{value === "local" ? "Currently selected" : localReady ? "Use Local agent" : "Start the Local agent"}</button></td><td><button className="secondary-button processing-format-action" type="button" disabled={!browserReady} aria-pressed={value === "browser"} onClick={() => { pushAnalyticsEvent("processing_mode_selected", { tool, mode: "browser" }); onSelect("browser"); }}>{value === "browser" ? "Currently selected" : browserReady ? "Use Browser mode" : "Not supported here"}</button></td></tr></tbody>
       </table>
     </div>
     <div className="processing-options-note"><ShieldCheck size={16} /><span>{browserSupported ? "For the best reliability, use Local agent for large or advanced jobs. Browser mode is intended for quick conversions in supported tools." : "Local agent is required for this tool because the browser cannot reliably provide its advanced processing features."}</span></div>

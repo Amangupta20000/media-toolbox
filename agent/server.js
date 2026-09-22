@@ -889,7 +889,8 @@ async function handle(request, response) {
     const jobDir = path.join(paths.jobs, id);
     await fsp.mkdir(jobDir, { recursive: true });
     try {
-      const { fields, files } = await parseMultipart(request, jobDir);
+      const unlimitedPdfEditor = authorization.mode === "admin";
+      const { fields, files } = await parseMultipart(request, jobDir, unlimitedPdfEditor ? { fileSize: Number.POSITIVE_INFINITY, maxFiles: Number.POSITIVE_INFINITY } : undefined);
       const remoteMediaRequested = fields.tool === "audio-extractor" && String(fields.sourceUrl || "").trim();
       const webAdminToken = String(request.headers["x-media-toolbox-admin-token"] || "").trim();
       const allowRemoteMediaUrl = Boolean(!remoteMediaRequested
@@ -901,7 +902,7 @@ async function handle(request, response) {
         error.code = "admin_required_for_media_url";
         throw error;
       }
-      const result = await createJobFromMultipart({ id, jobDir, fields, files, allowRemoteMediaUrl });
+      const result = await createJobFromMultipart({ id, jobDir, fields, files, allowRemoteMediaUrl, unlimitedPdfEditor });
       processQueue().catch((error) => console.error("Local agent queue failed", error));
       const ids = result?.ids || [id];
       return json(response, 202, { ...(ids.length === 1 ? { jobId: ids[0] } : { jobIds: ids }), status: "queued" }, request, origin);

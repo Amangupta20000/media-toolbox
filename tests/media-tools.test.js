@@ -929,6 +929,29 @@ test("PDF editor rejects a sixth PDF and unsupported inserted images at upload v
   );
 });
 
+test("Admin PDF editor intake allows unlimited PDF count and size", async () => {
+  const id = crypto.randomUUID();
+  const files = Array.from({ length: 6 }, (_, index) => ({
+    field: "pdf",
+    name: `admin-source-${index + 1}.pdf`,
+    mime: "application/pdf",
+    path: path.join(testRoot, `admin-source-${index + 1}.pdf`),
+    size: 250 * 1024 * 1024,
+  }));
+  const result = await createJobFromMultipart({
+    id,
+    jobDir: testRoot,
+    fields: {
+      tool: "pdf-editor",
+      operations: JSON.stringify(files.map((_, pdfIndex) => ({ kind: "source", pdfIndex, pageIndex: 0 }))),
+    },
+    files,
+    unlimitedPdfEditor: true,
+  });
+  assert.deepEqual(result.ids, [id]);
+  assert.equal(JSON.parse(db.getJob(id).options_json).pdfCount, 6);
+});
+
 test("PDF browser fallback inspection returns page metadata and rejects invalid files", async () => {
   const sourcePath = path.join(testRoot, "browser-fallback.pdf");
   await createPdf(sourcePath, "Browser fallback", [[1620, 912], [420, 640]]);
