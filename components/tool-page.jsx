@@ -126,8 +126,8 @@ function pdfImageInfo(operatorList, OPS) {
   return { count, totalPixels, largestPixels };
 }
 
-function isImageHeavyPdfPage(info) {
-  return info.count > 0 && (info.largestPixels >= 500_000 || info.totalPixels >= 1_000_000);
+function isImageHeavyPdfPage(info, profile = "balanced") {
+  return info.count > 0 && (profile === "small" || info.largestPixels >= 500_000 || info.totalPixels >= 1_000_000);
 }
 
 function jpegDataUrlBytes(dataUrl) {
@@ -187,7 +187,7 @@ async function calculatePdfCompressionEstimate(source, profile, customQuality, r
     for (let index = 1; index <= pageCount; index += 1) {
       const page = await pdf.getPage(index);
       const info = pdfImageInfo(await page.getOperatorList(), library.OPS);
-      if (isImageHeavyPdfPage(info)) heavyPages.push(index);
+      if (isImageHeavyPdfPage(info, profile)) heavyPages.push(index);
       page.cleanup?.();
     }
     if (!heavyPages.length) return { ...fallback, pageCount, heavyPages: 0, sampledPages: 0, sampled: false };

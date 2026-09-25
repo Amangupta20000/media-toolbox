@@ -343,8 +343,8 @@ function browserPdfPageImageInfo(operatorList, imageOperations) {
   return { count, totalPixels, largestPixels };
 }
 
-function browserPdfPageNeedsRaster(info, hasText) {
-  return info.count > 0 && (!hasText || info.largestPixels >= 500_000 || info.totalPixels >= 1_000_000);
+export function browserPdfPageNeedsRaster(info, hasText, profile = "balanced") {
+  return info.count > 0 && (profile === "small" || !hasText || info.largestPixels >= 500_000 || info.totalPixels >= 1_000_000);
 }
 
 async function renderBrowserPdfPage(page, settings) {
@@ -480,7 +480,7 @@ export async function processBrowserPdfCompression(source, { profile = "balanced
       const content = await page.getTextContent();
       const hasText = (content?.items || []).some((item) => String(item?.str || "").trim());
       const info = browserPdfPageImageInfo(await page.getOperatorList(), imageOperations);
-      plans.push({ index, hasText, rasterize: browserPdfPageNeedsRaster(info, hasText) });
+      plans.push({ index, hasText, rasterize: browserPdfPageNeedsRaster(info, hasText, profile) });
       page.cleanup?.();
       onProgress?.(5 + Math.round((index / pdf.numPages) * 25), `Checking page ${index} of ${pdf.numPages}`);
     }

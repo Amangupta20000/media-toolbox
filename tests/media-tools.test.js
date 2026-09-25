@@ -709,6 +709,27 @@ test("image-heavy visual fallback keeps searchable text on rasterized pages", as
   assert.match(preservedContent.items.map((item) => item.str).join(" "), /Preserved vector page/);
 });
 
+test("smallest PDF compression rebuilds every page that contains an image", async () => {
+  const sharp = (await import("sharp")).default;
+  const sourceDocument = await PDFDocument.create();
+  for (let index = 0; index < 3; index += 1) {
+    const width = index === 0 ? 1200 : 320;
+    const height = index === 0 ? 800 : 240;
+    const pixels = crypto.randomBytes(width * height * 3);
+    const jpeg = await sharp(pixels, { raw: { width, height, channels: 3 } }).jpeg({ quality: 96 }).toBuffer();
+    const image = await sourceDocument.embedJpg(jpeg);
+    const page = sourceDocument.addPage([width, height]);
+    page.drawImage(image, { x: 0, y: 0, width, height });
+    page.drawText(`Smallest profile page ${index + 1}`, { x: 16, y: 16, size: 12 });
+  }
+
+  const result = await rasterizeImageHeavyPdf(await sourceDocument.save(), "small");
+  assert.equal(result.changed, true);
+  assert.equal(result.pageCount, 3);
+  assert.equal(result.rasterizedPages, 3);
+  assert.equal(result.preservedPages, 0);
+});
+
 test("PDF editor exports styled text boxes on blank pages", async () => {
   const jobDir = path.join(testRoot, "pdf-text-box-job");
   await fs.mkdir(jobDir, { recursive: true });

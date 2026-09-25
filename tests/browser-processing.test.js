@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BROWSER_IMAGE_MAX_BYTES, BROWSER_IMAGE_TARGET_TOLERANCE_BYTES, BROWSER_PDF_EDITOR_IMAGE_MAX_BYTES, BROWSER_PDF_EDITOR_MAX_TOTAL_BYTES, BROWSER_PDF_MAX_BYTES, BROWSER_PDF_TEXT_EDITOR_MAX_BYTES, BROWSER_PDF_TEXT_EDITOR_MAX_PAGES, browserOutputMime, browserSupportsFormat, browserSupportsTool, padJpegToTarget, processBrowserPdfTextEdits } from "../components/browser-processing.js";
+import { BROWSER_IMAGE_MAX_BYTES, BROWSER_IMAGE_TARGET_TOLERANCE_BYTES, BROWSER_PDF_EDITOR_IMAGE_MAX_BYTES, BROWSER_PDF_EDITOR_MAX_TOTAL_BYTES, BROWSER_PDF_MAX_BYTES, BROWSER_PDF_TEXT_EDITOR_MAX_BYTES, BROWSER_PDF_TEXT_EDITOR_MAX_PAGES, browserOutputMime, browserPdfPageNeedsRaster, browserSupportsFormat, browserSupportsTool, padJpegToTarget, processBrowserPdfTextEdits } from "../components/browser-processing.js";
 
 test("browser image conversion uses a conservative 5 MB per-image limit", () => {
   assert.equal(BROWSER_IMAGE_MAX_BYTES, 5 * 1024 * 1024);
@@ -45,6 +45,13 @@ test("browser PDF editor uses a conservative 50 MB total PDF limit", () => {
 
 test("browser PDF compression uses a conservative 10 MB input limit", () => {
   assert.equal(BROWSER_PDF_MAX_BYTES, 10 * 1024 * 1024);
+});
+
+test("smallest browser PDF compression includes every page with image content", () => {
+  const smallImagePage = { count: 1, largestPixels: 120 * 80, totalPixels: 120 * 80 };
+  assert.equal(browserPdfPageNeedsRaster(smallImagePage, true, "small"), true);
+  assert.equal(browserPdfPageNeedsRaster(smallImagePage, true, "balanced"), false);
+  assert.equal(browserPdfPageNeedsRaster({ count: 0, largestPixels: 0, totalPixels: 0 }, true, "small"), false);
 });
 
 test("browser image output exposes only browser-safe formats", () => {
