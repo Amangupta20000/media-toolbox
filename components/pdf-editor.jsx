@@ -1922,7 +1922,7 @@ export function PdfEditor() {
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools <span className="pdf-capacity-note"><FileText size={14} /> {pdfCapacityLabel}</span></div><h1>Free PDF editor</h1><p>{processingMode === "browser" ? "Import, merge, reorder, rotate, and remove PDF pages in this browser, or start with blank pages. Duplicating pages, styled text boxes, and password-protected PDFs require Local agent." : unlimitedPdfAccess ? "Merge PDFs without count or file-size limits while Admin access is active, then reorder pages, remove pages, add images, or place styled text boxes." : "Merge PDFs, reorder pages, remove pages, add images, or place styled text boxes on PDF pages and new blank pages."}</p></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
     <ProcessingOptionsPanel tool="pdf-editor" locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={selectProcessingMode} />
-    {activeView === "history" ? <ToolHistory tool="pdf-editor" /> : activeView === "guide" ? <ToolSeoContent pathname="/pdf-editor" /> : activeView === "processing" ? null : <>
+    {activeView === "history" ? <ToolHistory tool="pdf-editor" /> : activeView === "processing" ? null : <>
     {!job && <ProcessingMode value={processingMode} onChange={selectProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool="pdf-editor" />}
     {job ? <PdfJobCard job={job} mode={jobMode} keepResult={jobKeepResult} replacementJobId={jobReplacementId} onReset={reset} onContinue={continueEditing} /> : <section className={`pdf-editor-shell ${pdfDragActive ? "pdf-drop-active" : ""}`} onDragOver={handlePdfDragOver} onDragLeave={handlePdfDragLeave} onDrop={handlePdfDrop}>
       {processingMode === "local" && <div className="pdf-retention-row">
@@ -1969,7 +1969,8 @@ export function PdfEditor() {
       {saveNotice && <DismissibleMessage className={saveNotice.type === "success" ? "success-banner pdf-save-notice" : "error-banner pdf-save-notice"} resetKey={saveNotice.message}>{saveNotice.type === "success" ? <CheckCircle2 size={17} /> : <AlertTriangle size={18} />}<span>{saveNotice.message}</span></DismissibleMessage>}
       {error && <DismissibleMessage className="error-banner" resetKey={error}><AlertTriangle size={18} /><span>{error}</span>{processingMode === "browser" && error.includes("Local agent") && <button className="secondary-button error-banner-action" type="button" onClick={useLocalAgent}>Use Local agent</button>}</DismissibleMessage>}
     </section>}
-    <ToolFaqContent pathname="/pdf-editor" />
+      <ToolSeoContent pathname="/pdf-editor" />
+      <ToolFaqContent pathname="/pdf-editor" />
     </>}
   </AppShell>;
 }

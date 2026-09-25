@@ -324,7 +324,7 @@ export function LocalProcessingToolPage({ tool }) {
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> {config.eyebrow}</div><h1>{config.title}</h1><p>{config.description}</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Original files stay untouched</span></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
     <ProcessingOptionsPanel tool={tool} locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={(mode) => { setProcessingMode(mode); setActiveView("tool"); }} />
-    {activeView === "history" ? <ToolHistory tool={tool} /> : activeView === "guide" ? <ToolSeoContent pathname={"/" + tool} /> : activeView === "processing" ? null : <>
+    {activeView === "history" ? <ToolHistory tool={tool} /> : activeView === "processing" ? null : <>
       <ProcessingMode value={processingMode} onChange={setProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool={tool} />
       <div className="tool-quick-start video-quick-start"><div className="tool-quick-start-heading"><span className="section-kicker"><span className="kicker-line" /> Before you start</span><strong>{isPdf ? "PDF rendering runs on the Local agent" : isVideo ? "Video compression runs on the Local agent" : "Audio extraction runs on the Local agent"}</strong></div><p className="tool-quick-start-intro">These tools use native desktop processing for larger media and predictable output. Start and authorize the Local agent before submitting.</p><div className="tool-quick-start-note"><Info size={16} /><span><strong>Input limit:</strong> {config.limit}. <Link href="/how-to-setup-agent">View the setup guide</Link> if the agent is not connected.</span></div></div>
       <div className="capability-strip"><div className="capability-main"><span className={"capability-dot " + (capabilities?.status === "ready" ? "ready" : "")} /><span>{capabilities?.status === "ready" ? "Local agent worker online" : "Connecting to Local agent"}</span></div><span>{isPdf ? capabilities?.pdf?.toImages !== false ? "PDF rendering ready" : "PDF capability checking" : isVideo ? capabilities?.video?.compressor === true ? "Video compression ready" : capabilities?.video ? "Update Local agent to enable compression" : "FFmpeg capability checking" : isAudio ? capabilities?.video?.audioExtractor ? "Audio extraction ready" : "FFmpeg capability checking" : capabilities?.video?.ffmpeg ? "FFmpeg processing ready" : "FFmpeg capability checking"}</span></div>
@@ -335,6 +335,7 @@ export function LocalProcessingToolPage({ tool }) {
       </div>}
       {error && <DismissibleMessage className="error-banner" resetKey={error}><AlertTriangle size={18} /><span>{error}</span></DismissibleMessage>}
       {!job && <div className="trust-row"><div><CheckCircle2 size={16} /> Original stays untouched</div><div><Clock3 size={16} /> Review before download</div><div><ShieldCheck size={16} /> Native local pipeline</div></div>}
+      <ToolSeoContent pathname={"/" + tool} />
       <ToolFaqContent pathname={"/" + tool} />
     </>}
   </AppShell>;

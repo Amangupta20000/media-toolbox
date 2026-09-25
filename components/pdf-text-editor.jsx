@@ -1836,7 +1836,7 @@ export function PdfTextEditor() {
       </div>
       <ToolViewTabs value={activeView} onChange={setActiveView} disabledTabs={processingMode === "browser" ? ["history"] : []} />
       <ProcessingOptionsPanel tool="pdf-text-editor" locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={selectProcessingMode} />
-      {activeView === "history" ? <ToolHistory tool="pdf-text-editor" /> : activeView === "guide" ? <ToolSeoContent pathname="/pdf-text-editor" /> : activeView === "processing" ? null : (
+      {activeView === "history" ? <ToolHistory tool="pdf-text-editor" /> : activeView === "processing" ? null : (
         <>
           <ProcessingMode value={processingMode} onChange={selectProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool="pdf-text-editor" />
           <div className="capability-strip">
@@ -1900,6 +1900,7 @@ export function PdfTextEditor() {
           {saveNotice && <DismissibleMessage className={saveNotice.type === "success" ? "success-banner pdf-save-notice" : "error-banner pdf-save-notice"} resetKey={saveNotice.message}>{saveNotice.type === "success" ? <CheckCircle2 size={17} /> : <AlertTriangle size={18} />}<span>{saveNotice.message}</span></DismissibleMessage>}
           {error && <DismissibleMessage className="error-banner" resetKey={error}><AlertTriangle size={17} /><span>{error}</span>{processingMode === "browser" && error.includes("Local agent") && <button className="secondary-button error-banner-action" type="button" onClick={useLocalAgent}>Use Local agent</button>}</DismissibleMessage>}
           {!job && <div className="trust-row"><div><FileText size={16} /> {ocrDetected && !nativePages ? "OCR regions are visual reconstructions" : ocrDetected ? "Native text stays searchable" : "Searchable text stays searchable"}</div><div><ShieldCheck size={16} /> {ocrDetected ? "Original untouched pages stay unchanged" : "No rasterization or white masking"}</div><div><Pencil size={16} /> Longer text may overflow</div></div>}
+          <ToolSeoContent pathname="/pdf-text-editor" />
           <ToolFaqContent pathname="/pdf-text-editor" />
         </>
       )}

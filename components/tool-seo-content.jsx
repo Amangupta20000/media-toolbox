@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 import { ChevronDown } from "lucide-react";
-import { normalizeSitePath } from "../lib/site-metadata.js";
+import { AUTHOR_NAME, CONTENT_LAST_UPDATED, metadataForPathname, normalizeSitePath } from "../lib/site-metadata.js";
 import { TOOL_SEO_CONTENT } from "../lib/tool-seo-content.js";
 
 export function ToolSeoContent({ pathname }) {
@@ -12,13 +11,15 @@ export function ToolSeoContent({ pathname }) {
   const relatedLinks = [
     ...(content.relatedLinks || []),
     ["/browser-vs-local-agent", "Browser vs Local agent", "Compare privacy, limits, and feature support before choosing a mode."],
-  ];
+    ["/guides", "Read the practical guides", "Learn how to choose a workflow and check the exported result."],
+  ].filter(([href], index, links) => !metadataForPathname(href).noIndex && links.findIndex(([candidate]) => candidate === href) === index);
 
-  return <section className="tool-seo-content" aria-labelledby="tool-seo-title">
+  return <section id="tool-guide" className="tool-seo-content" aria-labelledby="tool-seo-title">
     <div className="tool-seo-intro">
       <div className="section-kicker"><span className="kicker-line" /> Helpful guide</div>
       <h2 id="tool-seo-title">{content.introHeading || `About ${content.name}`}</h2>
       <p>{content.intro}</p>
+      <p className="tool-seo-byline">Written by <strong>{AUTHOR_NAME}</strong><span aria-hidden="true"> · </span>Last updated: <time dateTime={CONTENT_LAST_UPDATED}>{CONTENT_LAST_UPDATED}</time></p>
     </div>
     <div className="tool-seo-grid">
       <article className="tool-seo-panel">
@@ -46,27 +47,26 @@ export function ToolSeoContent({ pathname }) {
   </section>;
 }
 
-function FaqSection({ content, openFaqIndex, setOpenFaqIndex }) {
+function FaqSection({ content }) {
   return <article className="tool-seo-faq" aria-labelledby="tool-seo-faq-title">
     <h2 id="tool-seo-faq-title">Frequently asked questions</h2>
     <div className="tool-seo-faq-list">
-      {content.faqs.map(([question, answer], index) => <article className="tool-seo-faq-item" key={question}>
-        <button className="tool-seo-faq-question" type="button" aria-expanded={openFaqIndex === index} aria-controls={`tool-seo-faq-answer-${index}`} onClick={() => setOpenFaqIndex((current) => current === index ? null : index)}>
+      {content.faqs.map(([question, answer], index) => <details className="tool-seo-faq-item" key={question} open={index === 0}>
+        <summary className="tool-seo-faq-question">
           <span>{question}</span>
           <ChevronDown size={17} aria-hidden="true" />
-        </button>
-        {openFaqIndex === index && <p id={`tool-seo-faq-answer-${index}`} className="tool-seo-faq-answer">{answer}</p>}
-      </article>)}
+        </summary>
+        <p id={`tool-seo-faq-answer-${index}`} className="tool-seo-faq-answer">{answer}</p>
+      </details>)}
     </div>
   </article>;
 }
 
 export function ToolFaqContent({ pathname }) {
   const content = TOOL_SEO_CONTENT[normalizeSitePath(pathname)];
-  const [openFaqIndex, setOpenFaqIndex] = useState(0);
   if (!content?.faqs?.length) return null;
 
   return <section className="tool-seo-content tool-faq-content" aria-label={`${content.name} frequently asked questions`}>
-    <FaqSection content={content} openFaqIndex={openFaqIndex} setOpenFaqIndex={setOpenFaqIndex} />
+    <FaqSection content={content} />
   </section>;
 }

@@ -3,7 +3,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { FREE_ACCESS_CODE, FREE_ACCESS_CODE_LIFETIME_MS, FREE_ACCESS_DURATION_MS, FREE_ACCESS_REDEMPTION_WINDOW_MS } from "../lib/free-access.js";
-import { AUTHOR_EMAIL, AUTHOR_ID, AUTHOR_NAME, metadataForPathname, PRODUCT_NAME, PRODUCT_TAGLINE, PUBLIC_ROUTES, SITE_URL } from "../lib/site-metadata.js";
+import { AUTHOR_EMAIL, AUTHOR_ID, AUTHOR_NAME, DEFERRED_ROUTES, metadataForPathname, PRODUCT_NAME, PRODUCT_TAGLINE, PUBLIC_ROUTES, SITE_URL } from "../lib/site-metadata.js";
+import { APPROVAL_GUIDES } from "../lib/approval-guides.js";
 
 const projectDirectory = path.resolve(new URL("..", import.meta.url).pathname);
 
@@ -59,7 +60,8 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(shell, /<Link href="\/" title="Home">Home<\/Link>/);
   assert.match(shell, /<Link href="\/" className="topbar-brand" aria-label="NativeMedia Agent home"[^>]*>/);
   assert.match(shell, /href: "\/", label: "Home", detail: "NativeMedia Agent overview", icon: Home/);
-  assert.match(shell, /href: "\/offers", label: "Offers", detail: "Local agent codes and promotions", icon: Gift/);
+  assert.match(shell, /href: "\/guides", label: "Guides", detail: "Practical file workflow guides", icon: BookOpen/);
+  assert.match(shell, /href: "\/about", label: "About", detail: "How NativeMedia Agent works", icon: ShieldCheck/);
   assert.doesNotMatch(shell, /href: "\/local-agent", label: "Local agent"/);
   assert.match(shell, /<Link href="\/local-agent" className=\{`topbar-status/);
   assert.match(shell, /agentSetupAttention/);
@@ -77,7 +79,9 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(footer, /href="\/privacy" title="Privacy Policy"/);
   assert.match(footer, /href="\/terms" title="Terms and Conditions"/);
   assert.match(footer, /href="\/contact" title="Contact Us"/);
-  assert.match(footer, /href="\/offers" title="Local agent offers">Offers<\/Link>/);
+  assert.match(footer, /href="\/guides" title="Practical guides">Guides<\/Link>/);
+  assert.match(footer, /href="\/about" title="About NativeMedia Agent">About<\/Link>/);
+  assert.doesNotMatch(footer, /href="\/offers"/);
   assert.match(footer, /href="\/local-agent" title="Check Local agent connection">Check Local agent connection<\/Link>/);
   assert.match(footer, /href="\/sitemap\.xml" title="Sitemap"/);
   assert.match(footer, /href="\/privacy"/);
@@ -111,7 +115,6 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(seo, /price: "0"/);
   assert.doesNotMatch(shell, /ToolSeoContent/);
   assert.match(history, /Helpful guide/);
-  assert.match(toolPage, /activeView === "guide"/);
   assert.match(toolPage, /ToolSeoContent pathname=\{`\/\$\{tool\}`\}/);
   assert.match(toolPage, /ToolFaqContent pathname=\{`\/\$\{tool\}`\}/);
   assert.match(toolPage, /processBrowserPdfCompression/);
@@ -121,9 +124,9 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(pdfResultPreview, /const previewUrl = result\?\.previewUrl \|\| result\?\.downloadUrl/);
   assert.match(pdfResultPreview, /if \(\/\^\(blob:\|data:\)\/i\.test\(previewUrl\)\) return previewUrl/);
   assert.match(toolPage, /<PdfResultPreview result=\{result\} title="Compressed PDF preview" subtitle=/);
-  assert.match(pdfEditor, /activeView === "guide" \? <ToolSeoContent pathname="\/pdf-editor" \/>/);
+  assert.match(pdfEditor, /<ToolSeoContent pathname="\/pdf-editor" \/>/);
   assert.match(pdfEditor, /ToolFaqContent pathname="\/pdf-editor" \/>/);
-  assert.match(pdfTextEditor, /activeView === "guide" \? <ToolSeoContent pathname="\/pdf-text-editor" \/>/);
+  assert.match(pdfTextEditor, /<ToolSeoContent pathname="\/pdf-text-editor" \/>/);
   assert.match(pdfTextEditor, /ToolFaqContent pathname="\/pdf-text-editor" \/>/);
   assert.match(pdfTextEditor, /<PdfResultPreview result=\{job\.result\} title="Edited PDF preview"/);
   assert.doesNotMatch(pdfTextEditor, /<iframe/);
@@ -156,7 +159,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(styles, /\.agent-guide-visual-column \{[^}]*overflow: hidden/);
   assert.match(setupGuide, /agent-guide-flow-dot/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(shell, /Breadcrumbs pathname=\{pathname\}/);
+  assert.match(shell, /Breadcrumbs pathname=\{currentPath\}/);
   assert.match(shell, /Temporary data follows cleanup rules; local results are kept only when you choose\./);
   assert.doesNotMatch(shell, /Files are temporary and auto-cleaned\./);
   assert.doesNotMatch(shell, /MOBILE_NOTICE_KEY|mobileNoticeVisible|mobile-support-notice|Mobile support is currently in progress/);
@@ -171,11 +174,10 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.doesNotMatch(history, /server/i);
   assert.match(toolSeo, /Frequently asked questions/);
   assert.match(toolSeo, /export function ToolFaqContent/);
-  assert.match(toolSeo, /useState\(0\)/);
-  assert.match(toolSeo, /aria-expanded=\{openFaqIndex === index\}/);
-  assert.match(toolSeo, /tool-seo-faq-question/);
-  assert.match(toolSeo, /ChevronDown/);
-  assert.match(toolSeo, /openFaqIndex === index &&/);
+  assert.match(toolSeo, /<details className="tool-seo-faq-item"/);
+  assert.match(toolSeo, /<summary className="tool-seo-faq-question"/);
+  assert.match(toolSeo, /tool-guide/);
+  assert.match(toolSeo, /Written by <strong>\{AUTHOR_NAME\}/);
   assert.match(toolSeo, /Privacy and file safety/);
   assert.match(toolSeo, /tool-seo-comparison/);
   assert.match(toolSeo, /Related tools and guides/);
@@ -195,7 +197,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(processingOptions, /<table className="processing-format-table">/);
   assert.match(processingOptions, /How processing modes differ/);
   assert.match(processingOptions, /formatRowsFor\(tool\)/);
-  assert.match(processingOptions, /comparisonRowsFor\(tool, browserSupported\)/);
+  assert.match(processingOptions, /comparisonRowsFor\(tool, browserSupported, localAdmin\)/);
   assert.match(processingOptions, /processing-format-heading/);
   assert.match(processingOptions, /File handling/);
   assert.match(processingOptions, /Choose mode/);
@@ -313,7 +315,10 @@ test("sitemap and robots routes expose only public pages", async () => {
   assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/privacy"));
   assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/terms"));
   assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/contact"));
-  assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/offers"));
+  assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/guides"));
+  assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/about"));
+  assert.ok(!PUBLIC_ROUTES.some(({ path: route }) => DEFERRED_ROUTES.includes(route)));
+  for (const route of DEFERRED_ROUTES) assert.equal(metadataForPathname(route).noIndex, true);
   assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/how-to-setup-agent"));
   assert.equal(SITE_URL, "https://native-media-agent.vercel.app");
 });
@@ -332,11 +337,14 @@ test("SEO metadata is route-specific and normalizes query strings", () => {
   assert.equal(metadataForPathname("/mock-api").title, "Free Mock API Generator for Frontend Testing | NativeMedia Agent");
   assert.match(metadataForPathname("/mock-api").description, /mock REST APIs/i);
   assert.match(metadataForPathname("/mock-api").keywords, /JSON mock server/i);
-  assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/mock-api"));
+  assert.equal(PUBLIC_ROUTES.some(({ path: route }) => route === "/mock-api"), false);
+  assert.equal(metadataForPathname("/mock-api").noIndex, true);
   assert.equal(metadataForPathname("/").title, "Free Private PDF & Media Tools | NativeMedia Agent");
   assert.equal(metadataForPathname("/unknown").title, "Free Private PDF & Media Tools | NativeMedia Agent");
   assert.equal(metadataForPathname("/admin").noIndex, true);
   assert.equal(metadataForPathname("/license-admin").noIndex, true);
+  assert.equal(metadataForPathname("/guides").noIndex, undefined);
+  assert.equal(metadataForPathname("/about").noIndex, undefined);
 });
 
 test("indexable page descriptions are useful and within the recommended range", () => {
@@ -345,4 +353,30 @@ test("indexable page descriptions are useful and within the recommended range", 
     const description = metadataForPathname(route).description;
     assert.ok(description.length >= 120 && description.length <= 320, `${route} description length was ${description.length}`);
   }
+});
+
+test("approval guides contain original visible content and structured FAQ inputs", () => {
+  const guidePaths = [
+    "/guides/convert-images-without-uploading",
+    "/guides/convert-svg-to-png",
+    "/guides/edit-and-merge-pdf",
+    "/guides/compress-pdf",
+  ];
+  assert.deepEqual(Object.keys(APPROVAL_GUIDES).sort(), guidePaths.sort());
+  for (const path of guidePaths) {
+    const guide = APPROVAL_GUIDES[path];
+    assert.ok(guide.title);
+    assert.ok(guide.summary);
+    assert.ok(guide.lastUpdated);
+    assert.ok(guide.sections.length >= 4);
+    assert.ok(guide.faqs.length >= 3);
+    assert.ok(guide.relatedLinks.some(([href]) => href.startsWith("/")));
+  }
+});
+
+test("sitemap uses accurate lastmod values without ranking hint fields", async () => {
+  const sitemap = await read("pages/sitemap.xml.js");
+  assert.match(sitemap, /lastmod/);
+  assert.doesNotMatch(sitemap, /changefreq/);
+  assert.doesNotMatch(sitemap, /priority/);
 });

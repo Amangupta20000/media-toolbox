@@ -33,11 +33,18 @@ const toolIcons = {
 };
 
 export function ToolViewTabs({ value, onChange, disabledTabs = [] }) {
+  const openGuide = () => {
+    onChange("guide");
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => document.getElementById("tool-guide")?.scrollIntoView({ behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }));
+    }
+  };
+
   return <div className="tool-view-tabs" role="tablist" aria-label="Tool views">
     <button type="button" role="tab" aria-selected={value === "tool"} className={value === "tool" ? "active" : ""} onClick={() => onChange("tool")}>Tool</button>
     <button type="button" role="tab" aria-selected={value === "processing"} className={value === "processing" ? "active" : ""} onClick={() => onChange("processing")}>Processing options</button>
     <button type="button" role="tab" aria-selected={value === "history"} className={value === "history" ? "active" : ""} onClick={() => onChange("history")} disabled={disabledTabs.includes("history")} title={disabledTabs.includes("history") ? "History is available in Local agent mode only" : undefined}>History</button>
-    <button type="button" role="tab" aria-selected={value === "guide"} className={value === "guide" ? "active" : ""} onClick={() => onChange("guide")}>Helpful guide</button>
+    <button type="button" role="tab" aria-selected={value === "guide"} className={value === "guide" ? "active" : ""} onClick={openGuide}>Helpful guide</button>
   </div>;
 }
 

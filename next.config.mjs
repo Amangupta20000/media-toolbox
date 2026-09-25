@@ -7,6 +7,7 @@ const nextConfig = {
   // explicitly in standalone/Vercel deployments so the serverless route can
   // serve the worker without relying on package metadata resolution.
   outputFileTracingIncludes: {
+    "/*": ["./node_modules/next/dist/lib/metadata/**/*"],
     "/api/pdf/worker": ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs"],
   },
   experimental: {

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Archive, ArrowRight, Check, Code2, FileImage, FileMusic, FileText, FileVideo, Film, Image as ImageIcon, ShieldCheck } from "lucide-react";
+import { Archive, ArrowRight, Check, FileImage, FileText, Film, Image as ImageIcon, ShieldCheck } from "lucide-react";
 import { AppShell } from "../components/app-shell.jsx";
 import { PRODUCT_NAME, PRODUCT_TAGLINE } from "../lib/site-metadata.js";
 
@@ -10,10 +10,7 @@ const toolDirectory = [
   { href: "/image-converter", label: "Free private image converter", description: "Convert JPG, JPEG, PNG, GIF, and BMP images without uploading them.", icon: ImageIcon, category: "Media tools" },
   { href: "/svg-to-png", label: "Free SVG to PNG converter", description: "Rasterize SVG artwork with transparent, solid, or gradient backgrounds.", icon: ImageIcon, category: "Media tools" },
   { href: "/video-repair", label: "Private video repair tool", description: "Repair damaged video files with layered local recovery methods.", icon: Film, category: "Media tools" },
-  { href: "/video-compressor", label: "Private video compressor", description: "Create a smaller MP4 copy with practical quality presets.", icon: FileVideo, category: "Media tools" },
-  { href: "/audio-extractor", label: "Audio extractor", description: "Extract MP3, WAV, AAC, FLAC, or M4A audio from video.", icon: FileMusic, category: "Media tools" },
   { href: "/pdf-to-images", label: "PDF to images", description: "Render PDF pages as PNG or JPG files in one ZIP archive.", icon: FileImage, category: "PDF tools" },
-  { href: "/mock-api", label: "Beta mock API", description: "Create JSON REST mocks for frontend development in Browser mode or on localhost.", icon: Code2, category: "Developer tools" },
 ];
 
 const principles = [
@@ -51,6 +48,11 @@ export default function HomePage() {
       <div className="home-principle-grid">
         {principles.map(([title, description]) => <article className="home-principle-card" key={title}><span className="home-principle-check"><Check size={16} /></span><div><h3>{title}</h3><p>{description}</p></div></article>)}
       </div>
+    </section>
+
+    <section className="home-section home-guides-preview" aria-labelledby="home-guides-title">
+      <div className="home-section-heading"><div><div className="section-kicker"><span className="kicker-line" /> Learn before you start</div><h2 id="home-guides-title">Practical guides for common file tasks</h2></div><Link className="text-link" href="/guides">Browse all guides <ArrowRight size={15} /></Link></div>
+      <p className="home-guides-preview-copy">Understand format choices, privacy behavior, limits, and result checks before you convert an image, export an SVG, edit a PDF, or compress a document.</p>
     </section>
 
     <section className="home-cta" aria-labelledby="home-cta-title">

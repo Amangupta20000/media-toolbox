@@ -11,22 +11,24 @@ async function read(relativePath) {
   return fs.readFile(path.join(projectDirectory, relativePath), "utf8");
 }
 
-test("new local tools are routed, indexable, and excluded from Browser mode", async () => {
+test("local tools keep their processing behavior while the approval surface is focused", async () => {
   const page = await read("components/local-processing-tool-page.jsx");
   const seo = await read("lib/tool-seo-content.js");
   const processing = await read("components/processing-options.jsx");
   const history = await read("components/tool-history.jsx");
   const navigation = await read("components/app-shell.jsx");
   const comingSoon = await read("pages/coming-soon.jsx");
-  for (const tool of ["video-compressor", "audio-extractor", "pdf-to-images"]) {
+  for (const tool of ["video-compressor", "audio-extractor"]) {
     assert.equal(browserSupportsTool(tool), false);
-    assert.equal(PUBLIC_ROUTES.some((route) => route.path === "/" + tool), true);
+    assert.equal(PUBLIC_ROUTES.some((route) => route.path === "/" + tool), false);
     assert.match(page, new RegExp(tool));
     assert.match(seo, new RegExp("\\\"/" + tool + "\\\""));
     assert.match(processing, new RegExp(tool));
     assert.match(history, new RegExp(tool));
-    assert.equal(metadataForPathname("/" + tool).noIndex, undefined);
+    assert.equal(metadataForPathname("/" + tool).noIndex, true);
   }
+  assert.equal(PUBLIC_ROUTES.some((route) => route.path === "/pdf-to-images"), true);
+  assert.equal(metadataForPathname("/pdf-to-images").noIndex, undefined);
   assert.match(page, /ToolHistory tool=\{tool\}/);
   assert.match(page, /ToolFaqContent pathname=\{\"\/\" \+ tool\}/);
   assert.match(page, /Keep final result on this device/);

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { Archive, ArrowRight, AudioLines, BookOpen, ChevronDown, Clock3, Code2, ExternalLink, FileImage, FileMusic, FileText, FileVideo, Film, Gift, Home, Image as ImageIcon, Menu, Moon, ShieldCheck, Sparkles, Sun } from "lucide-react";
+import { Archive, ArrowRight, BookOpen, ChevronDown, Clock3, ExternalLink, FileImage, FileText, Film, Home, Image as ImageIcon, Menu, Moon, ShieldCheck, Sun } from "lucide-react";
 import { probeLocalAgent } from "./processing-client.js";
 import { AppFooter } from "./app-footer.jsx";
 import { FreeAccessModal } from "./free-access-modal.jsx";
@@ -15,9 +15,6 @@ const navigation = [
   { href: "/image-converter", label: "Image converter", detail: "Resize-free format conversion", icon: ImageIcon },
   { href: "/svg-to-png", label: "SVG to PNG", detail: "Rasterize SVG at any scale", icon: ImageIcon },
   { href: "/video-repair", label: "Video repair", detail: "Layered recovery workflow", icon: Film },
-  { href: "/video-compressor", label: "Video compressor", detail: "Reduce video file size", icon: FileVideo },
-  { href: "/audio-extractor", label: "Audio extractor", detail: "Extract audio from video", icon: FileMusic, beta: true },
-  { href: "/mock-api", label: "Mock API", detail: "Build JSON REST mocks", icon: Code2, beta: true },
 ];
 
 const pdfNavigation = [
@@ -28,8 +25,8 @@ const pdfNavigation = [
 ];
 
 const moreNavigation = [
-  { href: "/offers", label: "Offers", detail: "Local agent codes and promotions", icon: Gift },
-  { href: "/coming-soon", label: "Coming soon", detail: "More tools in progress", icon: Sparkles },
+  { href: "/guides", label: "Guides", detail: "Practical file workflow guides", icon: BookOpen },
+  { href: "/about", label: "About", detail: "How NativeMedia Agent works", icon: ShieldCheck },
 ];
 
 function breadcrumbLabelFor(pathname) {
@@ -79,7 +76,8 @@ function AgentSetupPrompt() {
 }
 
 export function AppShell({ children }) {
-  const { pathname } = useRouter();
+  const { pathname, asPath } = useRouter();
+  const currentPath = normalizeSitePath(asPath || pathname);
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mobileViewport, setMobileViewport] = useState(false);
@@ -88,7 +86,7 @@ export function AppShell({ children }) {
   const [timerNow, setTimerNow] = useState(() => Date.now());
   const [pdfToolsOpen, setPdfToolsOpen] = useState(false);
 
-  const pdfToolActive = pdfNavigation.some((item) => pathname === item.href);
+  const pdfToolActive = pdfNavigation.some((item) => currentPath === item.href);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 680px)");
@@ -121,14 +119,14 @@ export function AppShell({ children }) {
       active = false;
       window.removeEventListener("media-toolbox-agent-status", handleAgentStatus);
     };
-  }, [pathname]);
+  }, [currentPath]);
 
   const authorization = localAgentStatus?.authorization || localAgentStatus?.health?.authorization;
   const accessTimer = accessTimerFor(authorization, timerNow, localAgentStatus?.health?.trialAvailable);
   const agentSetupAttention = Boolean(localAgentStatus && !localAgentStatus.connected);
   // The Local agent page already has its full setup card. Avoid stacking the
   // same call-to-action there and on the setup guide destination itself.
-  const showAgentSetupPrompt = Boolean(localAgentStatus && !localAgentStatus.available && pathname !== "/local-agent" && pathname !== "/how-to-setup-agent");
+  const showAgentSetupPrompt = Boolean(localAgentStatus && !localAgentStatus.available && currentPath !== "/local-agent" && currentPath !== "/how-to-setup-agent");
 
   useEffect(() => {
     if (!authorization?.expiresAt) return undefined;
@@ -174,7 +172,7 @@ export function AppShell({ children }) {
         <nav className="tool-nav" aria-label="Tools">
           {navigation.map((item) => {
             const Icon = item.icon;
-            const active = pathname === item.href;
+            const active = currentPath === item.href;
             return <Link key={item.href} href={item.href} className={`tool-nav-item ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}>
               <span className="nav-icon"><Icon size={19} /></span>
               <span className="nav-copy"><span className="nav-label-row"><strong>{item.label}</strong>{item.beta && <span className="nav-beta">Beta</span>}</span><small>{item.detail}</small></span>
@@ -190,7 +188,7 @@ export function AppShell({ children }) {
             {pdfToolsOpen && <div id="pdf-tools-subnav" className="pdf-tools-subnav" role="group" aria-label="PDF tools">
               {pdfNavigation.map((item) => {
                 const Icon = item.icon;
-                const active = pathname === item.href;
+                const active = currentPath === item.href;
                 return <Link key={item.href} href={item.href} className={`tool-nav-item pdf-tool-child ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}>
                   <span className="nav-icon"><Icon size={17} /></span>
                   <span className="nav-copy"><span className="nav-label-row"><strong>{item.label}</strong>{item.beta && <span className="nav-beta">Beta</span>}</span><small>{item.detail}</small></span>
@@ -202,7 +200,7 @@ export function AppShell({ children }) {
         </nav>
         <div className="sidebar-label coming-soon-nav-label">More tools</div>
         <nav className="tool-nav" aria-label="More tools">
-          {moreNavigation.map((item) => { const Icon = item.icon; const active = pathname === item.href; return <Link key={item.href} href={item.href} className={`tool-nav-item ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}><span className="nav-icon"><Icon size={19} /></span><span className="nav-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>{active && <span className="active-dot" />}</Link>; })}
+          {moreNavigation.map((item) => { const Icon = item.icon; const active = currentPath === item.href; return <Link key={item.href} href={item.href} className={`tool-nav-item ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}><span className="nav-icon"><Icon size={19} /></span><span className="nav-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>{active && <span className="active-dot" />}</Link>; })}
         </nav>
         <div className="sidebar-footer">
           <div className="privacy-card"><ShieldCheck size={17} /><div><strong>Private by design</strong><span>Temporary data follows cleanup rules; local results are kept only when you choose.</span></div></div>
@@ -211,10 +209,10 @@ export function AppShell({ children }) {
       </aside>
       <main className="main-area">
         <div className="content-wrap">{showAgentSetupPrompt && <AgentSetupPrompt />}{children}</div>
-        <Breadcrumbs pathname={pathname} />
+        <Breadcrumbs pathname={currentPath} />
         <AppFooter />
       </main>
     </div>
-    <FreeAccessModal pathname={pathname} localAgentStatus={localAgentStatus} />
+    <FreeAccessModal pathname={currentPath} localAgentStatus={localAgentStatus} />
   </div>;
 }

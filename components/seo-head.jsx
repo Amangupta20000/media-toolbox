@@ -2,18 +2,21 @@ import Head from "next/head";
 import { useRouter } from "next/router";
 import { absoluteSiteUrl, ADSENSE_CLIENT_ID, AUTHOR_EMAIL, AUTHOR_ID, AUTHOR_NAME, metadataForPathname, normalizeSitePath, PRODUCT_NAME, PRODUCT_TAGLINE, SITE_URL } from "../lib/site-metadata.js";
 import { PROCESSING_MODE_GUIDE } from "../lib/processing-mode-guide.js";
+import { APPROVAL_GUIDES } from "../lib/approval-guides.js";
 import { TOOL_SEO_CONTENT } from "../lib/tool-seo-content.js";
 
 export function SeoHead() {
-  const { pathname } = useRouter();
-  const metadata = metadataForPathname(pathname);
-  const normalizedPath = normalizeSitePath(pathname);
+  const { pathname, asPath } = useRouter();
+  const routePath = asPath || pathname;
+  const metadata = metadataForPathname(routePath);
+  const normalizedPath = normalizeSitePath(routePath);
   const canonicalUrl = absoluteSiteUrl(normalizedPath);
   const socialImageUrl = absoluteSiteUrl("/media-toolbox-logo.png");
-  const robots = metadata.noIndex ? "noindex,nofollow" : "index,follow,max-image-preview:large";
+  const robots = metadata.noIndex ? "noindex,follow,max-image-preview:large" : "index,follow,max-image-preview:large";
   const pageLabel = metadata.breadcrumbLabel || metadata.title.replace(/\s*\|\s*NativeMedia Agent$/, "");
   const toolContent = TOOL_SEO_CONTENT[normalizedPath];
   const guideContent = normalizedPath === "/browser-vs-local-agent" ? PROCESSING_MODE_GUIDE : null;
+  const approvalGuide = APPROVAL_GUIDES[normalizedPath] || null;
   const organization = {
     "@type": "Organization",
     "@id": `${SITE_URL}#organization`,
@@ -74,6 +77,16 @@ export function SeoHead() {
     author: { "@id": AUTHOR_ID },
     publisher: { "@id": `${SITE_URL}#organization` },
   };
+  const article = approvalGuide ? {
+    "@type": "Article",
+    "@id": `${canonicalUrl}#article`,
+    headline: approvalGuide.title,
+    description: metadata.description,
+    dateModified: approvalGuide.lastUpdated,
+    author: { "@id": AUTHOR_ID },
+    publisher: { "@id": `${SITE_URL}#organization` },
+    mainEntityOfPage: { "@id": `${canonicalUrl}#webpage` },
+  } : null;
   const breadcrumb = normalizedPath === "/" ? null : {
     "@type": "BreadcrumbList",
     "@id": `${canonicalUrl}#breadcrumb`,
@@ -82,7 +95,7 @@ export function SeoHead() {
       { "@type": "ListItem", position: 2, name: pageLabel, item: canonicalUrl },
     ],
   };
-  const faqItems = toolContent?.faqs?.length ? toolContent.faqs : guideContent?.faqs;
+  const faqItems = toolContent?.faqs?.length ? toolContent.faqs : approvalGuide?.faqs?.length ? approvalGuide.faqs : guideContent?.faqs;
   const faqPage = faqItems?.length ? {
     "@type": "FAQPage",
     "@id": `${canonicalUrl}#faq`,
@@ -94,7 +107,7 @@ export function SeoHead() {
   } : null;
   const structuredData = {
     "@context": "https://schema.org",
-    "@graph": [organization, author, website, application, webPage, ...(breadcrumb ? [breadcrumb] : []), ...(faqPage ? [faqPage] : [])],
+    "@graph": [organization, author, website, application, webPage, ...(article ? [article] : []), ...(breadcrumb ? [breadcrumb] : []), ...(faqPage ? [faqPage] : [])],
   };
 
   return <>

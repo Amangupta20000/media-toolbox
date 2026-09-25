@@ -298,7 +298,7 @@ export function SvgToPngTool() {
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> Rasterize & export</div><h1>Free SVG to PNG converter with transparent backgrounds</h1><p>Convert SVG files or pasted SVG code into crisp PNG images at 1×, 2×, 3×, 4×, or an exact size without uploading in Browser mode.</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Local or browser processing</span></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
     <ProcessingOptionsPanel tool="svg-to-png" locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={selectProcessingMode} />
-    {activeView === "history" ? <ToolHistory tool="svg-to-png" /> : activeView === "guide" ? <ToolSeoContent pathname="/svg-to-png" /> : activeView === "processing" ? null : <>
+    {activeView === "history" ? <ToolHistory tool="svg-to-png" /> : activeView === "processing" ? null : <>
       <ProcessingMode value={processingMode} onChange={selectProcessingMode} onChangeView={() => setActiveView("processing")} locations={locations} tool="svg-to-png" />
       <section className="tool-quick-start svg-quick-start" aria-labelledby="svg-quick-start-title"><div className="tool-quick-start-heading"><span className="section-kicker"><span className="kicker-line" /> Quick start</span><strong id="svg-quick-start-title">Turn vector artwork into a PNG copy</strong></div><ol className="tool-quick-start-steps"><li><b>1</b><span><strong>Add artwork</strong><small>Upload an SVG or paste its markup.</small></span></li><li><b>2</b><span><strong>Choose size</strong><small>Pick a scale or exact dimensions.</small></span></li><li><b>3</b><span><strong>Style the canvas</strong><small>Keep transparency or add a colour.</small></span></li><li><b>4</b><span><strong>Preview and download</strong><small>Review the PNG before saving it.</small></span></li></ol><div className="tool-quick-start-note"><Info size={16} /><span><strong>Limits:</strong> SVG input up to {formatBytes(MAX_SVG_MARKUP_BYTES)}. Browser mode supports 1×–4×; Local agent supports custom output up to {MAX_CUSTOM_DIMENSION} × {MAX_CUSTOM_DIMENSION} px.</span></div></section>
       <div className="capability-strip"><div className="capability-main"><span className={`capability-dot ${processingReady ? "ready" : ""}`} /><span>{processingReady ? `${processingMode === "browser" ? "Browser" : processingMode === "server" ? "Server worker" : "Local agent"} ready for SVG conversion` : processingMode === "browser" ? "Browser conversion unavailable" : processingMode === "server" ? "Server worker unavailable" : "Connect the Local agent to convert"}</span></div><span>SVG input · PNG output</span></div>
@@ -317,7 +317,8 @@ export function SvgToPngTool() {
       </div>}
       {error && <div className="error-banner"><Info size={17} /><span>{error}</span></div>}
       {!job && <div className="trust-row"><div><CheckCircle2 size={16} /> Source stays untouched</div><div><ShieldCheck size={16} /> Local agent pipeline</div><div><Sparkles size={16} /> Transparent PNG support</div></div>}
-          <ToolFaqContent pathname="/svg-to-png" />
+      <ToolSeoContent pathname="/svg-to-png" />
+      <ToolFaqContent pathname="/svg-to-png" />
     </>}
   </AppShell>;
 }
