@@ -70,6 +70,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(shell, /<img className="brand-logo" src="\/media-toolbox-logo-64\.png" srcSet="\/media-toolbox-logo-64\.png 64w, \/media-toolbox-logo-128\.png 128w" sizes="\(max-width: 680px\) 34px, 58px" width="58" height="58" decoding="async" alt="NativeMedia Agent logo" title="NativeMedia Agent" \/>/);
   assert.match(home, /<Link className="home-tool-card" href=\{href\} prefetch=\{false\} key=\{href\}>/);
   assert.match(home, /href="\/pdf-editor" prefetch=\{false\}/);
+  assert.doesNotMatch(home, /href="\/coming-soon"/);
   assert.match(shell, /<header className="topbar">[\s\S]*<button className="topbar-menu-button"/);
   assert.match(shell, /<header className="topbar">[\s\S]*<\/header>\n    <div className="app-body">/);
   assert.match(shell, /<div className="brand-copy"><span>NativeMedia<\/span><strong>Agent<\/strong><\/div>/);
