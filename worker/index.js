@@ -1006,11 +1006,13 @@ async function processPdfCompressor(job) {
         const visualMethod = `Bundled visual page recompression (${rasterResult.pageCount} pages)`;
         visualCandidate = { bytes: rasterResult.bytes, method: visualMethod, quality: Number(compressionOptions.customQuality) || 72 };
         await chooseCandidate(rasterResult.bytes, visualMethod);
-        const pageLabel = rasterResult.imageOnly ? "image-only" : "image-heavy";
+        const pageLabel = rasterResult.imageOnly ? "image-only" : profile === "small" ? "complete-document" : "image-heavy";
         appendJobLog(job.id, `Rebuilt ${rasterResult.rasterizedPages || rasterResult.pageCount} ${pageLabel} page${(rasterResult.rasterizedPages || rasterResult.pageCount) === 1 ? "" : "s"} at the selected quality${rasterResult.overlaidText ? "; retained a searchable text overlay" : ""}.`, "info");
         warnings.push(rasterResult.imageOnly
           ? "This PDF had no searchable text, so the aggressive image-only pass rebuilt its pages as optimized images. The visual layout is preserved, but text is not selectable in this result."
-          : `The aggressive image-heavy pass rebuilt ${rasterResult.rasterizedPages} page${rasterResult.rasterizedPages === 1 ? "" : "s"} as optimized images. Searchable text was retained as an invisible text layer; vector styling on those pages is visually approximated.`);
+          : profile === "small"
+            ? `The Smallest-file pass rebuilt all ${rasterResult.rasterizedPages} page${rasterResult.rasterizedPages === 1 ? "" : "s"} as optimized images. Searchable text was retained as an invisible text layer; vector styling is visually approximated.`
+            : `The aggressive image-heavy pass rebuilt ${rasterResult.rasterizedPages} page${rasterResult.rasterizedPages === 1 ? "" : "s"} as optimized images. Searchable text was retained as an invisible text layer; vector styling on those pages is visually approximated.`);
       } else if (rasterResult.pageCount) {
         appendJobLog(job.id, rasterResult.imageOnly === false && rasterResult.reason === "no image-heavy pages"
           ? "Visual page compression was skipped because no image-heavy pages were detected; text and vector content were preserved."

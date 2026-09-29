@@ -1,4 +1,5 @@
 import Head from "next/head";
+import Script from "next/script";
 import { useRouter } from "next/router";
 import { absoluteSiteUrl, ADSENSE_CLIENT_ID, AUTHOR_EMAIL, AUTHOR_ID, AUTHOR_NAME, metadataForPathname, normalizeSitePath, PRODUCT_NAME, PRODUCT_TAGLINE, SITE_URL } from "../lib/site-metadata.js";
 import { PROCESSING_MODE_GUIDE } from "../lib/processing-mode-guide.js";
@@ -111,6 +112,7 @@ export function SeoHead() {
   };
 
   return <>
+    {!metadata.noIndex && <Script async strategy="afterInteractive" src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT_ID}`} crossOrigin="anonymous" />}
     <Head>
       <title>{metadata.title}</title>
       <meta name="description" content={metadata.description} />
@@ -140,7 +142,6 @@ export function SeoHead() {
       <meta name="twitter:description" content={metadata.description} />
       <meta name="twitter:image" content={socialImageUrl} />
       <meta name="twitter:image:alt" content="NativeMedia Agent app logo" />
-      {!metadata.noIndex && <script async src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT_ID}`} crossOrigin="anonymous" />}
       {!metadata.noIndex && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }} />}
     </Head>
   </>;

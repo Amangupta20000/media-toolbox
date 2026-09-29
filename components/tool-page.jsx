@@ -187,7 +187,7 @@ async function calculatePdfCompressionEstimate(source, profile, customQuality, r
     for (let index = 1; index <= pageCount; index += 1) {
       const page = await pdf.getPage(index);
       const info = pdfImageInfo(await page.getOperatorList(), library.OPS);
-      if (isImageHeavyPdfPage(info, profile)) heavyPages.push(index);
+      if (profile === "small" || isImageHeavyPdfPage(info, profile)) heavyPages.push(index);
       page.cleanup?.();
     }
     if (!heavyPages.length) return { ...fallback, pageCount, heavyPages: 0, sampledPages: 0, sampled: false };
@@ -643,7 +643,7 @@ function PdfCompressionSettingsCard({ source, profile, customQuality, removeColo
   const compressionEngine = capabilities?.pdf?.compressorEngine || "the bundled PDF optimizer";
   return <section className="tool-card settings-card pdf-compression-settings-card">
     <div className="card-heading"><div><span className="card-index">02</span><h2>Choose compression</h2></div><span className="optional-label">PDF quality</span></div>
-    <p className="card-description">Choose the balance between file size and image detail. The original stays unchanged; image-heavy pages may be rebuilt as optimized images to match the selected compression quality.</p>
+    <p className="card-description">Choose the balance between file size and image detail. The original stays unchanged; {profile === "small" ? "Smallest file rebuilds every page as an optimized image." : "image-heavy pages may be rebuilt as optimized images to match the selected compression quality."}</p>
     <div className="format-grid" aria-label="PDF compression profiles">{pdfCompressionProfiles.map(([value, label, detail]) => { const unavailable = processingMode === "browser" && value !== "balanced"; return <button type="button" key={value} className={`format-option ${profile === value ? "selected" : ""} ${unavailable ? "unavailable" : ""}`} disabled={unavailable} title={unavailable ? "This profile is available with desktop processing only." : undefined} onClick={() => onChange(value)}><span className="format-radio" /><strong>{label}</strong><small className={unavailable ? "locked-format-note" : undefined}>{unavailable ? <><LockKeyhole size={10} aria-hidden="true" /> Local agent only</> : detail}</small></button>; })}</div>
     {profile === "custom" && <div className="pdf-custom-controls">
       <label className="field-label" htmlFor="pdf-custom-target"><span>Target file size</span><strong>Optional</strong></label>
@@ -653,7 +653,7 @@ function PdfCompressionSettingsCard({ source, profile, customQuality, removeColo
       <label className="pdf-custom-toggle"><span><strong>Remove color from images</strong><small>Convert rasterized images to grayscale for a smaller result.</small></span><input type="checkbox" checked={removeColor} onChange={(event) => onRemoveColorChange(event.target.checked)} /></label>
     </div>}
     <PdfCompressionEstimate source={source} profile={profile} customQuality={customQuality} removeColor={removeColor} customTargetMb={customTargetMb} estimate={estimate} />
-    <div className="info-note"><Info size={16} /><span>{processingMode === "browser" ? "Browser mode accepts PDFs up to 10 MB and rebuilds image-heavy pages in this tab. Searchable text may not remain selectable on rebuilt pages; use Local agent for larger or searchable PDFs." : compressionReady ? `The worker will use ${String(compressionEngine).toLowerCase()}, preserve searchable text where possible, and keep the original if the selected pass would make the file larger.` : "The worker can still create a safe structural PDF rewrite, but stronger embedded-image compression is unavailable."}</span></div>
+    <div className="info-note"><Info size={16} /><span>{processingMode === "browser" ? "Browser mode accepts PDFs up to 10 MB and rebuilds image-heavy pages in this tab. Searchable text may not remain selectable on rebuilt pages; use Local agent for larger or searchable PDFs." : compressionReady ? `The worker will use ${String(compressionEngine).toLowerCase()}${profile === "small" ? " and rebuild every page for the Smallest-file pass" : ""}, preserve searchable text where possible, and keep the original if the selected pass would make the file larger.` : "The worker can still create a safe structural PDF rewrite, but stronger embedded-image compression is unavailable."}</span></div>
   </section>;
 }
 

@@ -364,6 +364,51 @@ test("server jobs reject uploads when the worker is unavailable", async () => {
   }
 });
 
+test("server-mode PDF compression rebuilds every page for the Smallest-file profile", async () => {
+  const sharp = (await import("sharp")).default;
+  const sourceDocument = await PDFDocument.create();
+  const pixels = crypto.randomBytes(1200 * 800 * 3);
+  const jpeg = await sharp(pixels, { raw: { width: 1200, height: 800, channels: 3 } }).jpeg({ quality: 96 }).toBuffer();
+  const image = await sourceDocument.embedJpg(jpeg);
+  const imagePage = sourceDocument.addPage([1200, 800]);
+  imagePage.drawImage(image, { x: 0, y: 0, width: 1200, height: 800 });
+  imagePage.drawText("Server Smallest page 1", { x: 16, y: 16, size: 12 });
+  const textPage = sourceDocument.addPage([420, 300]);
+  textPage.drawText("Server Smallest page 2", { x: 16, y: 220, size: 12 });
+  const vectorPage = sourceDocument.addPage([420, 300]);
+  vectorPage.drawRectangle({ x: 16, y: 16, width: 388, height: 268, borderWidth: 2, color: rgb(0.2, 0.6, 0.8) });
+  vectorPage.drawText("Server Smallest page 3", { x: 24, y: 220, size: 12 });
+  const sourceBytes = await sourceDocument.save();
+  const upload = multipartBody([
+    { name: "tool", data: "pdf-compressor" },
+    { name: "compressionProfile", data: "small" },
+    { name: "source", filename: "server-smallest.pdf", type: "application/pdf", data: Buffer.from(sourceBytes) },
+  ]);
+  const request = new PassThrough();
+  request.method = "POST";
+  request.headers = { "content-type": `multipart/form-data; boundary=${upload.boundary}` };
+  const response = mockJsonResponse();
+  const api = await import("../pages/api/jobs/index.js");
+  const requestPromise = api.default(request, response);
+  request.end(upload.body);
+  await requestPromise;
+
+  assert.equal(response.statusCode, 202);
+  const job = db.getJob(response.payload.jobId);
+  assert.equal(job?.tool, "pdf-compressor");
+  assert.equal(JSON.parse(job.options_json).compressionProfile, "small");
+  await worker.processJob(job);
+  const completed = db.getJob(job.id);
+  assert.equal(completed.status, "completed", completed.error || "server-mode PDF compression failed");
+  const result = JSON.parse(completed.result_json);
+  const output = await PDFDocument.load(await fs.readFile(result.path));
+  assert.equal(output.getPageCount(), 3);
+  assert.ok(result.bytes < result.inputBytes, `expected a smaller server-mode result, got ${result.bytes} from ${result.inputBytes} bytes`);
+  assert.equal(db.getJobForPublic(job.id).logs.some((entry) => entry.message.includes("Rebuilt 3 complete-document pages")), true);
+  await fs.rm(path.dirname(job.source_path), { recursive: true, force: true });
+  db.deleteJob(job.id);
+});
+
 test("server job cancellation removes queued jobs and marks active jobs canceled", async () => {
   const api = await import("../pages/api/jobs/[id]/index.js");
   const { paths } = await import("../lib/config.js");
@@ -692,7 +737,7 @@ test("image-heavy visual fallback keeps searchable text on rasterized pages", as
   const textPage = sourceDocument.addPage([420, 300]);
   textPage.drawText("Preserved vector page", { x: 24, y: 220, size: 18 });
 
-  const result = await rasterizeImageHeavyPdf(await sourceDocument.save(), "small");
+  const result = await rasterizeImageHeavyPdf(await sourceDocument.save(), "balanced");
   const output = await PDFDocument.load(result.bytes);
   const pdf = await getDocument({ data: new Uint8Array(result.bytes), disableWorker: true }).promise;
   const content = await (await pdf.getPage(1)).getTextContent();
@@ -722,6 +767,28 @@ test("smallest PDF compression rebuilds every page that contains an image", asyn
     page.drawImage(image, { x: 0, y: 0, width, height });
     page.drawText(`Smallest profile page ${index + 1}`, { x: 16, y: 16, size: 12 });
   }
+
+  const result = await rasterizeImageHeavyPdf(await sourceDocument.save(), "small");
+  assert.equal(result.changed, true);
+  assert.equal(result.pageCount, 3);
+  assert.equal(result.rasterizedPages, 3);
+  assert.equal(result.preservedPages, 0);
+});
+
+test("smallest PDF compression rebuilds the complete document, including text pages", async () => {
+  const sharp = (await import("sharp")).default;
+  const sourceDocument = await PDFDocument.create();
+  const pixels = crypto.randomBytes(1200 * 800 * 3);
+  const jpeg = await sharp(pixels, { raw: { width: 1200, height: 800, channels: 3 } }).jpeg({ quality: 96 }).toBuffer();
+  const image = await sourceDocument.embedJpg(jpeg);
+  const imagePage = sourceDocument.addPage([1200, 800]);
+  imagePage.drawImage(image, { x: 0, y: 0, width: 1200, height: 800 });
+  imagePage.drawText("Smallest complete document page 1", { x: 16, y: 16, size: 12 });
+  const textPage = sourceDocument.addPage([420, 300]);
+  textPage.drawText("Smallest complete document page 2", { x: 16, y: 220, size: 12 });
+  const vectorPage = sourceDocument.addPage([420, 300]);
+  vectorPage.drawRectangle({ x: 16, y: 16, width: 388, height: 268, borderWidth: 2, color: rgb(0.2, 0.6, 0.8) });
+  vectorPage.drawText("Smallest complete document page 3", { x: 24, y: 220, size: 12 });
 
   const result = await rasterizeImageHeavyPdf(await sourceDocument.save(), "small");
   assert.equal(result.changed, true);
