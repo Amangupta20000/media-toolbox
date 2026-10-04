@@ -128,6 +128,11 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /disabled=\{!pages\.length \|\| !resultFilenameStem\.trim\(\)/);
   assert.match(shell, /saveToDevice && !resultFilenameStem\.trim\(\)/);
   assert.match(shell, /Save to device/);
+  assert.match(shell, /const startNewSession = \(\) =>/);
+  assert.match(shell, /Start a new PDF session\? Any unsaved changes in this session will be discarded\./);
+  assert.match(shell, /pdf-new-session-button/);
+  assert.match(shell, /Discard this PDF session and start a new one/);
+  assert.match(shell, /setPreviewZoom\(1\); setMoreToolsOpen\(false\)/);
   assert.ok(shell.indexOf('className="pdf-retention-row"') < shell.indexOf('className={`pdf-editor-toolbar'), "the saved-file row should precede the PDF tools row");
   assert.match(styles, /\.pdf-more-tools-menu \{[^}]*z-index: 1000/);
   assert.match(styles, /\.pdf-more-tools \{[^}]*z-index: 2/);

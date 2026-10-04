@@ -1101,6 +1101,12 @@ export function PdfEditor() {
     pdfInputRef.current?.click();
   };
 
+  const startNewSession = () => {
+    if (!pdfFilesRef.current.length && !pagesRef.current.length) return;
+    if (typeof window !== "undefined" && !window.confirm("Start a new PDF session? Any unsaved changes in this session will be discarded.")) return;
+    reset();
+  };
+
   useEffect(() => {
     if (!continuingFile || loadingFiles || pdfFiles.length || pages.length || job) return;
     const file = continuingFile;
@@ -1741,18 +1747,30 @@ export function PdfEditor() {
   const reset = () => {
     if (job && jobMode !== "browser" && (job.status === "queued" || job.status === "processing")) deleteProcessingJob(jobMode, job.id).catch(() => undefined);
     if (saveJob && (saveJob.status === "queued" || saveJob.status === "processing")) deleteProcessingJob("local", saveJob.id).catch(() => undefined);
+    if (dropAnimationTimerRef.current) window.clearTimeout(dropAnimationTimerRef.current);
+    if (dragScrollFrameRef.current) window.cancelAnimationFrame(dragScrollFrameRef.current);
+    if (suppressPageClickTimerRef.current) window.clearTimeout(suppressPageClickTimerRef.current);
+    if (historyTimerRef.current) window.clearTimeout(historyTimerRef.current);
     for (const page of pages) for (const image of getPageImages(page)) if (image.url) { URL.revokeObjectURL(image.url); imageUrlsRef.current.delete(image.url); }
     documentsRef.current = [];
     if (browserResultUrlRef.current) URL.revokeObjectURL(browserResultUrlRef.current);
     browserResultUrlRef.current = "";
     clearDocumentHistory();
+    keyboardThumbnailTargetRef.current = null;
+    pageElementRefs.current.clear();
+    previewElementRefs.current.clear();
+    pointerPageDragRef.current = null;
+    pointerPageScrollRef.current = null;
+    draggedIdRef.current = null;
+    dropIntentRef.current = { targetId: null, position: null };
+    imageTargetPageIdRef.current = null;
     pdfFilesRef.current = [];
     pagesRef.current = [];
     retainedJobIdRef.current = null;
     saveReplacementJobIdRef.current = "";
     setJobReplacementId("");
     resultFilenameTouchedRef.current = false;
-    setPdfFiles([]); setPages([]); setSelectedId(null); setSelectedObject(null); setJob(null); setSaveJob(null); setSaveNotice(null); setJobKeepResult(false); setContinuingFile(null); setError(""); setPreviewError(""); setUploadProgress(0); setResultFilenameStem("");
+    setPdfFiles([]); setPages([]); setSelectedId(null); setSelectedObject(null); setJob(null); setSaveJob(null); setSaveNotice(null); setJobKeepResult(false); setContinuingFile(null); setError(""); setPreviewError(""); setUploadProgress(0); setResultFilenameStem(""); setPreviewZoom(1); setMoreToolsOpen(false); setPdfDragActive(false); setDraggedId(null); setDropTargetId(null); setDropPosition(null); setRecentlyDroppedId(null);
   };
 
   const continueEditing = async (result, completedJobId = "") => {
@@ -1951,6 +1969,7 @@ export function PdfEditor() {
         {processingMode !== "local" && <div className="pdf-editor-toolbar-heading"><strong>Build your document</strong><span>{pdfProgressLabel} · {pages.length} pages</span></div>}
         <div className="pdf-editor-actions">
           <button className="secondary-button" type="button" onClick={openPdfPicker} disabled={loadingFiles || pdfFiles.length >= pdfCountLimit} title="Add PDF"><Plus size={17} /> Add PDF</button>
+          {(pdfFiles.length > 0 || pages.length > 0) && <button className="secondary-button pdf-new-session-button" type="button" onClick={startNewSession} disabled={loadingFiles || Boolean(uploadProgress)} title="Discard this PDF session and start a new one"><RotateCcw size={17} /> New session</button>}
           <button className="secondary-button" type="button" onClick={addBlankPage}><FilePlus2 size={17} /> Blank page</button>
           <div className="pdf-zoom-controls" aria-label="Preview zoom"><button className="icon-button" type="button" onClick={() => changePreviewZoom(-0.1)} aria-label="Zoom out" title="Zoom out (-)"><ZoomOut size={16} /></button><button className="pdf-zoom-value" type="button" onClick={resetPreviewZoom} title="Reset zoom (0)">{Math.round(previewZoom * 100)}%</button><button className="icon-button" type="button" onClick={() => changePreviewZoom(0.1)} aria-label="Zoom in" title="Zoom in (+)"><ZoomIn size={16} /></button></div>
           <div ref={moreToolsRef} className="pdf-more-tools">
