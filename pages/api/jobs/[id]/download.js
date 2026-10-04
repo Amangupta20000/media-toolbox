@@ -4,7 +4,10 @@ import { getJob } from "../../../../lib/db.js";
 export const config = { api: { responseLimit: false } };
 
 function safeFilename(name) {
-  return String(name || "download").replace(/[^a-zA-Z0-9._-]/g, "_");
+  return String(name || "download")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim() || "download";
 }
 
 function requestedDownloadFilename(requested, original) {

@@ -1867,18 +1867,18 @@ test("agent saves a custom PDF-editor name in Results history", async () => {
   }
   assert.equal(completed.status, "completed", completed.error || completed.message);
   assert.equal(completed.historyStatus, "saved");
-  assert.equal(completed.result.filename, "Client_presentation.pdf");
+  assert.equal(completed.result.filename, "Client presentation.pdf");
 
   const resultsDirectory = path.join(process.env.DATA_DIR, "Results");
   const resultFiles = await fs.readdir(resultsDirectory);
-  assert.ok(resultFiles.some((filename) => filename.endsWith("-Client_presentation.pdf")));
+  assert.ok(resultFiles.some((filename) => filename.endsWith("-Client presentation.pdf")));
 
   const historyResponse = await fetch(url("/v1/history?tool=pdf-editor"), { headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" } });
   assert.equal(historyResponse.status, 200);
   const history = await historyResponse.json();
   const retained = history.items.find((item) => item.id === createdJob.jobId);
   assert.ok(retained);
-  assert.equal(retained.result.filename, "Client_presentation.pdf");
+  assert.equal(retained.result.filename, "Client presentation.pdf");
   assert.equal(retained.historyStatus, "saved");
   assert.match(retained.location, /Results folder/);
 

@@ -1183,7 +1183,20 @@ export function PdfEditor() {
     if (index === -1) return;
     const next = current.filter((page) => page.id !== pageId);
     commitDocument(next);
-    if (pageId === selectedId) setSelectedId(next[Math.min(index, next.length - 1)]?.id || null);
+    if (pageId === selectedId) {
+      const nextSelectedPage = next[Math.min(index, next.length - 1)];
+      setSelectedId(nextSelectedPage?.id || null);
+      keyboardThumbnailTargetRef.current = null;
+      // Deleting the focused thumbnail removes its DOM node. Restore focus to
+      // the next page so the arrow-key page navigator remains active.
+      if (nextSelectedPage) {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+          const target = pageElementRefs.current.get(nextSelectedPage.id);
+          target?.focus({ preventScroll: true });
+          target?.scrollIntoView({ block: "nearest", inline: "nearest" });
+        }));
+      }
+    }
   };
 
   const reorderPages = (sourceId, targetId, position = "before") => {
@@ -1538,7 +1551,7 @@ export function PdfEditor() {
   };
 
   const renderPageList = () => {
-    return pages.map((page, index) => <PdfPageThumbnail key={page.id} page={page} index={index} elementRef={(element) => { if (element) pageElementRefs.current.set(page.id, element); else pageElementRefs.current.delete(page.id); }} thumbnailRootRef={pageListRef} pdfDocument={page.kind === "source" ? documentsRef.current[page.pdfIndex] : null} nativeDraggable={!mobileLayout} onThumbnailError={() => setPreviewError("Some thumbnails could not be rendered, but the pages remain available in the full preview.")} selected={page.id === selectedPage?.id} draggedId={draggedId} dropTargetId={dropTargetId} dropPosition={dropPosition} recentlyDroppedId={recentlyDroppedId} onSelect={() => { if (suppressPageClickRef.current) { suppressPageClickRef.current = false; return; } selectPage(page.id); }} onKeyDown={(event) => handleThumbnailKeyDown(event, page.id)} onDelete={() => deletePage(page.id)} onDragStart={(event) => startDraggingPage(page.id, event)} onDrag={handlePageDrag} onDragEnd={resetDragState} onDragOver={(event) => handlePageDragOver(event, page.id)} onDrop={(event) => handlePageDrop(event, page.id)} onPointerDown={(event) => handlePagePointerDown(event, page.id)} onPointerMove={handlePagePointerMove} onPointerUp={finishPagePointerDrag} onPointerCancel={(event) => finishPagePointerDrag(event, true)} />);
+    return pages.map((page, index) => <PdfPageThumbnail key={page.id} page={page} index={index} elementRef={(element) => { if (element) pageElementRefs.current.set(page.id, element); else pageElementRefs.current.delete(page.id); }} thumbnailRootRef={pageListRef} pdfDocument={page.kind === "source" || page.kind === "raster" ? documentsRef.current[page.pdfIndex] : null} nativeDraggable={!mobileLayout} onThumbnailError={() => setPreviewError("Some thumbnails could not be rendered, but the pages remain available in the full preview.")} selected={page.id === selectedPage?.id} draggedId={draggedId} dropTargetId={dropTargetId} dropPosition={dropPosition} recentlyDroppedId={recentlyDroppedId} onSelect={() => { if (suppressPageClickRef.current) { suppressPageClickRef.current = false; return; } selectPage(page.id); }} onKeyDown={(event) => handleThumbnailKeyDown(event, page.id)} onDelete={() => deletePage(page.id)} onDragStart={(event) => startDraggingPage(page.id, event)} onDrag={handlePageDrag} onDragEnd={resetDragState} onDragOver={(event) => handlePageDragOver(event, page.id)} onDrop={(event) => handlePageDrop(event, page.id)} onPointerDown={(event) => handlePagePointerDown(event, page.id)} onPointerMove={handlePagePointerMove} onPointerUp={finishPagePointerDrag} onPointerCancel={(event) => finishPagePointerDrag(event, true)} />);
   };
 
   const scrollThumbnailIntoView = (pageId) => {
@@ -1830,6 +1843,10 @@ export function PdfEditor() {
     form.append("operations", JSON.stringify(operations));
     const replacementJobId = processingMode === "local" ? retainedJobIdRef.current : "";
     const effectiveKeepResult = processingMode === "local" && (saveToDevice || Boolean(replacementJobId));
+    if (saveToDevice && !resultFilenameStem.trim()) {
+      setError("Enter a saved PDF name before saving to the device.");
+      return;
+    }
     form.append("filename", downloadFilename(resultFilenameStem || filenameStem(defaultResultFilename), defaultResultFilename));
     if (replacementJobId) form.append("replaceJobId", replacementJobId);
     if (processingMode === "local") {
@@ -1927,8 +1944,8 @@ export function PdfEditor() {
     {job ? <PdfJobCard job={job} mode={jobMode} keepResult={jobKeepResult} replacementJobId={jobReplacementId} onReset={reset} onContinue={continueEditing} /> : <section className={`pdf-editor-shell ${pdfDragActive ? "pdf-drop-active" : ""}`} onDragOver={handlePdfDragOver} onDragLeave={handlePdfDragLeave} onDrop={handlePdfDrop}>
       {processingMode === "local" && <div className="pdf-retention-row">
         <div className="pdf-editor-toolbar-heading pdf-retention-heading"><strong>Build your document</strong><span>{pdfProgressLabel} · {pages.length} pages</span></div>
-        <div className="pdf-retention-name"><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem || filenameStem(defaultResultFilename)} label="Saved PDF name" description="This name is used for the export and, when retained, for PDF editor History in the Results folder." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(filenameStem(value)); }} /></div>
-        <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!pages.length || Boolean(uploadProgress) || loadingFiles || Boolean(saveJob)} title="Save the current PDF to the Local agent Results folder without leaving the editor"><Save size={17} /> {saveJob ? "Saving…" : "Save to device"}</button>
+        <div className="pdf-retention-name"><ResultFilenameField originalFilename={defaultResultFilename} value={resultFilenameStem} label="Saved PDF name" description="This name is used for the export and, when retained, for PDF editor History in the Results folder." onChange={(value) => { resultFilenameTouchedRef.current = true; setResultFilenameStem(value ? filenameStem(value) : ""); }} /></div>
+        <button className="secondary-button pdf-save-button" type="button" onClick={() => submit({ saveToDevice: true })} disabled={!pages.length || !resultFilenameStem.trim() || Boolean(uploadProgress) || loadingFiles || Boolean(saveJob)} title="Save the current PDF to the Local agent Results folder without leaving the editor"><Save size={17} /> {saveJob ? "Saving…" : "Save to device"}</button>
       </div>}
       <div className={`pdf-editor-toolbar${processingMode === "local" ? " pdf-editor-toolbar-tools-only" : ""}`}>
         {processingMode !== "local" && <div className="pdf-editor-toolbar-heading"><strong>Build your document</strong><span>{pdfProgressLabel} · {pages.length} pages</span></div>}

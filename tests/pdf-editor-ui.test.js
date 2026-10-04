@@ -72,6 +72,7 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /className="thumbnail-image-overlay"[\s\S]*?draggable="false"/);
   assert.match(shell, /function PdfPageThumbnail\([\s\S]*?onDrag, onDragEnd/);
   assert.match(shell, /const handleThumbnailKeyDown = \(event, pageId\) =>/);
+  assert.match(shell, /pdfDocument=\{page\.kind === "source" \|\| page\.kind === "raster" \? documentsRef\.current\[page\.pdfIndex\] : null\}/);
   assert.match(shell, /onKeyDown=\{\(event\) => handleThumbnailKeyDown\(event, page\.id\)\}/);
   assert.match(shell, /tabIndex=\{0\} aria-label=\{`Select page \$\{index \+ 1\}`\}/);
   assert.match(shell, /event\.key !== "ArrowUp" && event\.key !== "ArrowDown"/);
@@ -79,6 +80,8 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /selectPage\(nextPage\.id, \{ scrollThumbnail: false \}\)/);
   assert.match(shell, /target\?\.scrollIntoView\(\{ block: "nearest", inline: "nearest" \}\)/);
   assert.match(shell, /const keyboardThumbnailTargetRef = useRef\(null\)/);
+  assert.match(shell, /Deleting the focused thumbnail removes its DOM node/);
+  assert.match(shell, /target\?\.focus\(\{ preventScroll: true \}\)/);
   assert.match(shell, /const keyboardTargetId = keyboardThumbnailTargetRef\.current/);
   assert.match(shell, /if \(keyboardTargetId\) \{/);
   assert.match(shell, /emits drag events, so keep the auto-scroll pointer position fresh here/);
@@ -120,11 +123,17 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /resultFilenameStem/);
   assert.match(shell, /form\.append\("filename"/);
   assert.match(shell, /Saved PDF name/);
+  assert.match(shell, /value=\{resultFilenameStem\}/);
+  assert.match(shell, /setResultFilenameStem\(value \? filenameStem\(value\) : ""\)/);
+  assert.match(shell, /disabled=\{!pages\.length \|\| !resultFilenameStem\.trim\(\)/);
+  assert.match(shell, /saveToDevice && !resultFilenameStem\.trim\(\)/);
   assert.match(shell, /Save to device/);
   assert.ok(shell.indexOf('className="pdf-retention-row"') < shell.indexOf('className={`pdf-editor-toolbar'), "the saved-file row should precede the PDF tools row");
   assert.match(styles, /\.pdf-more-tools-menu \{[^}]*z-index: 1000/);
   assert.match(styles, /\.pdf-more-tools \{[^}]*z-index: 2/);
   assert.match(await read("lib/job-intake.js"), /safePdfOutputFilename/);
+  assert.match(await read("lib/job-intake.js"), /function safePdfFilenamePart/);
+  assert.match(await read("lib/job-intake.js"), /replace\(\/\\s\+\/g, " "\)/);
   assert.match(await read("worker/index.js"), /manifest\.outputFilename/);
   assert.match(styles, /\.pdf-editor-shell \{[^}]*overflow: hidden/);
   assert.match(styles, /\.pdf-retention-row \{/);

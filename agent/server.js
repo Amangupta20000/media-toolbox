@@ -248,7 +248,10 @@ function contentType(filename) {
 }
 
 function safeDownloadName(name) {
-  return String(name || "download").replace(/[^a-zA-Z0-9._-]/g, "_");
+  return String(name || "download")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim() || "download";
 }
 
 function requestedDownloadName(requested, original) {

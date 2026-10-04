@@ -523,9 +523,9 @@ test("PDF editor uses the requested PDF name for a retained result", async () =>
   const completed = db.getJob(job.id);
   const result = JSON.parse(completed.result_json);
   assert.equal(completed.status, "completed");
-  assert.equal(result.filename, "Quarterly_design_review.pdf");
+  assert.equal(result.filename, "Quarterly design review.pdf");
   assert.equal(await fs.stat(result.path).then((stat) => stat.isFile()), true);
-  assert.equal(JSON.parse(completed.options_json).outputFilename, "Quarterly_design_review.pdf");
+  assert.equal(JSON.parse(completed.options_json).outputFilename, "Quarterly design review.pdf");
 });
 
 test("PDF compressor creates a validated smaller-or-original copy without changing the source", async () => {
@@ -1106,10 +1106,10 @@ test("PDF editor fails clearly for an invalid source page and serves a PDF with 
   const chunks = [];
   response.on("data", (chunk) => chunks.push(chunk));
   const ended = once(response, "end");
-  route.default({ method: "GET", query: { id: validJob.id, filename: "my-export.exe" }, headers: {} }, response);
+  route.default({ method: "GET", query: { id: validJob.id, filename: "my export.exe" }, headers: {} }, response);
   await ended;
   assert.equal(headers["content-type"], "application/pdf");
-  assert.match(headers["content-disposition"], /^attachment; filename="my-export\.pdf"$/);
+  assert.match(headers["content-disposition"], /^attachment; filename="my export\.pdf"$/);
   assert.equal(Buffer.concat(chunks).subarray(0, 5).toString(), "%PDF-");
 
   const previewRoute = await import("../pages/api/jobs/[id]/preview.js");
@@ -1155,7 +1155,7 @@ test("PDF text editor intake and worker preserve searchable output and live job 
   assert.equal(completed.progress, 100);
   assert.equal(publicJob.logs.some((entry) => entry.message.includes("PDF text editing")), true);
   assert.equal(output.editCount, 1);
-  assert.equal(output.filename, "Client_edited_text.pdf");
+  assert.equal(output.filename, "Client edited text.pdf");
   const edited = await extractPdfTextRuns(await fs.readFile(output.path));
   assert.equal(edited.pages[0].runs[0].text, "Local and server");
 });
