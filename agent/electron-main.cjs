@@ -25,6 +25,8 @@ if (!app.requestSingleInstanceLock()) {
   let appReplacementRestarting = false;
   const latestReleaseUrl = "https://github.com/Amangupta20000/media-toolbox/releases/latest";
   const websiteHomeUrl = "https://native-media-agent.vercel.app/";
+  const installerPlatform = { darwin: "macos", win32: "windows", linux: "linux" }[process.platform];
+  const installerDownloadUrl = installerPlatform ? `${websiteHomeUrl}downloads/${installerPlatform}` : latestReleaseUrl;
   const updateState = {
     kind: "electron",
     platform: process.platform,
@@ -297,6 +299,10 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle("agent:open-release-page", async () => {
       await shell.openExternal(latestReleaseUrl);
       return { ok: true, url: latestReleaseUrl };
+    });
+    ipcMain.handle("agent:download-full-installer", async () => {
+      await shell.openExternal(installerDownloadUrl);
+      return { ok: true, url: installerDownloadUrl };
     });
     ipcMain.handle("agent:open-website-home", async () => {
       await shell.openExternal(websiteHomeUrl);

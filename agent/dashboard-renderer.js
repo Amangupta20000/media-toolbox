@@ -97,7 +97,7 @@
       title.textContent = `Full agent update required${value.version ? ` · v${value.version}` : ""}`;
       message.textContent = value.error || "This release changes the desktop application and cannot be installed by the in-app runtime updater. Download and install the latest release from GitHub Releases.";
       action.textContent = "Download full installer";
-      action.dataset.action = "open-release";
+      action.dataset.action = "download-installer";
       action.disabled = false;
     } else {
       title.textContent = "Agent update check failed";
@@ -883,6 +883,10 @@
     try {
       if (updateAction === "open-release") {
         await api.openReleasePage();
+        return;
+      }
+      if (updateAction === "download-installer") {
+        await api.downloadFullInstaller();
         return;
       }
       const nextState = updateAction === "download" ? await api.downloadUpdate() : updateAction === "install" ? await api.installUpdate() : await api.checkForUpdates();

@@ -329,6 +329,7 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardPreload, /agent:download-update/);
   assert.match(dashboardPreload, /agent:install-update/);
   assert.match(dashboardPreload, /agent:open-release-page/);
+  assert.match(dashboardPreload, /agent:download-full-installer/);
   assert.match(dashboardPreload, /agent:open-website-home/);
   assert.match(dashboardRenderer, /api\.openWebsiteHome/);
   assert.match(electronMain, /const websiteHomeUrl = "https:\/\/native-media-agent\.vercel\.app\/"/);
@@ -352,6 +353,8 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(dashboardRenderer, /update-full-required/);
   assert.match(dashboardRenderer, /downloadUpdate/);
   assert.match(dashboardRenderer, /open-release/);
+  assert.match(dashboardRenderer, /download-installer/);
+  assert.match(dashboardRenderer, /api\.downloadFullInstaller/);
   assert.match(dashboardRenderer, /Update manually from GitHub Releases/);
   assert.match(electronMain, /hasDeveloperIdSignature/);
   assert.match(electronMain, /net\.fetch/);
@@ -363,6 +366,9 @@ test("dashboard exposes the trial, update, and admin actions in the bottom bar",
   assert.match(electronMain, /setLicenseServerFetchImplementation/);
   assert.match(electronMain, /checkForRuntimeUpdates/);
   assert.match(electronMain, /fullInstallerMessage/);
+  assert.match(electronMain, /const installerPlatform = \{ darwin: "macos", win32: "windows", linux: "linux" \}\[process\.platform\]/);
+  assert.match(electronMain, /const installerDownloadUrl = installerPlatform \? `\$\{websiteHomeUrl\}downloads\/\$\{installerPlatform\}` : latestReleaseUrl/);
+  assert.match(electronMain, /agent:download-full-installer/);
   assert.match(electronMain, /updateType: "full"/);
   assert.match(electronMain, /readInstalledRuntime/);
   assert.match(electronMain, /compareVersions\(app\.getVersion\(\), installedRuntime\.manifest\.version\)/);
