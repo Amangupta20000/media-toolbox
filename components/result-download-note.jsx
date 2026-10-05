@@ -1,11 +1,14 @@
 import { Download } from "lucide-react";
 import { downloadUrlWithFilename } from "./result-filename.jsx";
 
-export function ResultDownloadNote({ result, mode = "local", keepResult = false, filename }) {
+export function ResultDownloadNote({ result, mode = "local", keepResult = false, filename, onDownload, downloading = false }) {
   if (!result?.downloadUrl) return null;
 
   const downloadName = filename || result.filename;
   const downloadUrl = downloadUrlWithFilename(result.downloadUrl, downloadName);
+  const downloadControl = onDownload
+    ? <button className="result-download-note-link" type="button" onClick={onDownload} disabled={downloading}>{downloading ? "Preparing download…" : "Download again"}</button>
+    : <a className="result-download-note-link" href={downloadUrl} download={downloadName}>Download again</a>;
 
   const retainedLocalResult = mode === "local" && (keepResult || result.retained);
   if (mode === "browser") {
@@ -14,7 +17,7 @@ export function ResultDownloadNote({ result, mode = "local", keepResult = false,
         <Download size={16} aria-hidden="true" />
         <span>This result is kept temporarily in this browser tab. Download it before closing or refreshing the tab.</span>
       </div>
-      <a className="result-download-note-link" href={downloadUrl} download={downloadName}>Download again</a>
+      {downloadControl}
     </div>;
   }
   const location = result.location || (
@@ -36,8 +39,6 @@ export function ResultDownloadNote({ result, mode = "local", keepResult = false,
       <Download size={16} aria-hidden="true" />
       <span>{message}</span>
     </div>
-    <a className="result-download-note-link" href={downloadUrl} download={downloadName}>
-      Download again
-    </a>
+    {downloadControl}
   </div>;
 }

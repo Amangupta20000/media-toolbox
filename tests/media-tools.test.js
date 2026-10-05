@@ -1142,7 +1142,7 @@ test("PDF text editor intake and worker preserve searchable output and live job 
       tool: "pdf-text-editor",
       filename: "Client edited text.pdf",
       retention: "keep",
-      edits: JSON.stringify([{ pageIndex: 0, runId: run.runId, originalTextHash: run.originalTextHash, replacementText: "Local and server" }]),
+      edits: JSON.stringify([{ pageIndex: 0, operatorOrdinal: 99, runId: "browser-pdfjs-ordinal", originalText: run.text, originalTextHash: run.originalTextHash, replacementText: "Local and server" }]),
     },
     files: [{ field: "source", name: "text-edit-source.pdf", mime: "application/pdf", path: sourcePath, size: (await fs.stat(sourcePath)).size }],
   });

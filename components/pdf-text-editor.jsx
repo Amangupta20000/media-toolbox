@@ -159,6 +159,8 @@ function serializedOperatorGroups(run) {
   return run.operatorGroups.map((group) => ({
     operatorOrdinal: group.operatorOrdinal,
     operatorOrdinals: group.operatorOrdinals,
+    originalText: group.originalText,
+    originalTextHash: group.originalTextHash,
   }));
 }
 
@@ -1083,6 +1085,7 @@ function validatePdfResult(result) {
 function PdfTextJobCard({ initialJob, mode, replacementJobId = "", onReset, onContinue, keepResult }) {
   const [job, setJob] = useState(initialJob);
   const [printing, setPrinting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [printError, setPrintError] = useState("");
   const [filenameStemValue, setFilenameStemValue] = useState("");
   const trackedJobStatesRef = useRef(new Set());
@@ -1135,6 +1138,44 @@ function PdfTextJobCard({ initialJob, mode, replacementJobId = "", onReset, onCo
   const failed = job.status === "failed";
   const progress = Math.max(0, Math.min(100, Number(job.progress) || 0));
   const downloadName = done && job.result ? downloadFilename(filenameStemValue || filenameStem(job.result.filename), job.result.filename) : "";
+  const downloadPdf = async () => {
+    if (!job.result?.downloadUrl || downloading) return;
+    setDownloading(true); setPrintError("");
+    let objectUrl = "";
+    try {
+      const response = await fetch(job.result.downloadUrl, { cache: "no-store" });
+      if (!response.ok) throw new Error("The edited PDF could not be downloaded.");
+      const blob = await response.blob();
+      if (!blob.size) throw new Error("The edited PDF download was empty.");
+      objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = downloadName;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (error) {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setPrintError(error instanceof Error ? error.message : "The edited PDF could not be downloaded.");
+    } finally {
+      setDownloading(false);
+    }
+  };
+  useEffect(() => {
+    const handleDownloadClick = (event) => {
+      const target = event.target instanceof Element ? event.target.closest("a[download]") : null;
+      if (!target || !job.result?.downloadUrl) return;
+      const resultUrl = new URL(job.result.downloadUrl, window.location.href);
+      const clickedUrl = new URL(target.href, window.location.href);
+      if (resultUrl.origin !== clickedUrl.origin || resultUrl.pathname !== clickedUrl.pathname) return;
+      event.preventDefault();
+      void downloadPdf();
+    };
+    document.addEventListener("click", handleDownloadClick);
+    return () => document.removeEventListener("click", handleDownloadClick);
+  }, [downloadPdf, job.result?.downloadUrl]);
   const printPdf = async () => {
     if (!job.result?.downloadUrl || printing) return;
     setPrinting(true); setPrintError("");

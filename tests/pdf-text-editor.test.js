@@ -87,6 +87,19 @@ function decodedPageContent(document, page) {
   return Buffer.from(decodePDFRawStream(firstStream(document, page)).decode()).toString("latin1");
 }
 
+function decodedFormContent(document, page, name = "") {
+  const resources = page.node.Resources();
+  const xObjects = resources?.lookupMaybe(PDFName.XObject, PDFDict);
+  const reference = name
+    ? xObjects?.get(PDFName.of(name))
+    : [...(xObjects?.entries() || [])].map(([, value]) => value).find((value) => {
+      const candidate = document.context.lookup(value);
+      return candidate?.dict?.get(PDFName.of("Subtype"))?.asString?.() === "/Form";
+    });
+  const form = reference ? document.context.lookup(reference) : null;
+  return form ? Buffer.from(decodePDFRawStream(form).decode()).toString("latin1") : "";
+}
+
 function xObjectCount(page) {
   const resources = page.node.Resources();
   const xObjects = resources?.lookupMaybe(PDFName.XObject, PDFDict);
@@ -188,6 +201,21 @@ test("PDF text export accepts a source-verified browser run identity fallback", 
     originalTextHash: run.originalTextHash,
     replacementText: "changed",
   }], { sourceHash: "0".repeat(64) }), /uploaded PDF changed/);
+});
+
+test("PDF text export resolves a browser ordinal that differs from the raw PDF order", async () => {
+  const source = await createFixture();
+  const extracted = await extractPdfTextRuns(source);
+  const run = extracted.pages[0].runs[0];
+  const output = await applyPdfTextEdits(source, [{
+    pageIndex: run.pageIndex,
+    operatorOrdinal: 99,
+    runId: "browser-pdfjs-ordinal",
+    originalText: run.text,
+    originalTextHash: run.originalTextHash,
+    replacementText: "Ordinal-safe replacement",
+  }]);
+  assert.match((await searchableText(output.bytes))[0], /Ordinal-safe replacement/);
 });
 
 test("PDF.js glyph fragments merge into one logical word without merging real spaces", () => {
@@ -358,6 +386,106 @@ test("existing native PDF text supports format-only and replacement formatting i
 
   const formatOnly = await applyPdfTextEdits(source, [{ ...edit, replacementText: undefined }]);
   assert.match((await searchableText(formatOnly.bytes))[0], /First\s+occurrence/);
+});
+
+test("right-aligned embedded text uses valid BT/ET operators in preview and export", async () => {
+  const source = await createFormTextFixture();
+  const extracted = await extractPdfTextRuns(source);
+  const run = extracted.pages[1].runs.find((item) => item.text === "Text inside a form");
+  const edit = {
+    pageIndex: 1,
+    operatorOrdinal: run.ordinal,
+    runId: run.runId,
+    originalText: run.text,
+    originalTextHash: run.originalTextHash,
+    replacementText: "Right aligned form text",
+    format: {
+      fontFamily: "Helvetica",
+      fontSize: 18,
+      bold: false,
+      italic: false,
+      underline: false,
+      color: "#000000",
+      alignment: "right",
+      characterSpacing: 0,
+      lineSpacing: 1.2,
+    },
+    boxWidth: 240,
+  };
+  const output = await applyPdfTextEdits(source, [edit], { sourceHash: extracted.sourceHash });
+  const outputDocument = await PDFDocument.load(output.bytes);
+  const outputContent = decodedFormContent(outputDocument, outputDocument.getPages()[1]);
+  const pageFonts = outputDocument.getPages()[1].node.Resources()?.lookupMaybe(PDFName.Font, PDFDict);
+  assert.ok(pageFonts?.has(PDFName.of("MTFallback1")), "formatted form text must expose its fallback font at page scope");
+  assert.match(outputContent, /Td\s+<[^>]+>\s+Tj/);
+  assert.ok([...outputContent.matchAll(/BT([\s\S]*?)ET/g)].every((match) => !/\bq\b|\bQ\b/.test(match[1])));
+  assert.match((await searchableText(output.bytes))[1], /Right aligned form text/);
+
+  const preview = await createPdfTextPreview(source, [{ ...edit, mode: "native" }]);
+  const previewDocument = await PDFDocument.load(preview);
+  const previewContent = decodedFormContent(previewDocument, previewDocument.getPages()[1]);
+  assert.ok([...previewContent.matchAll(/BT([\s\S]*?)ET/g)].every((match) => !/\bq\b|\bQ\b/.test(match[1])));
+  assert.match((await searchableText(preview))[1], /Right aligned form text/);
+});
+
+test("right-aligned embedded text remains visible when moved before export", async () => {
+  const source = await createFormTextFixture();
+  const extracted = await extractPdfTextRuns(source);
+  const run = extracted.pages[1].runs.find((item) => item.text === "Text inside a form");
+  const edit = {
+    pageIndex: 1,
+    operatorOrdinal: run.ordinal,
+    runId: run.runId,
+    originalText: run.text,
+    originalTextHash: run.originalTextHash,
+    replacementText: "Moved right aligned form text",
+    format: {
+      fontFamily: "Helvetica",
+      fontSize: 18,
+      bold: false,
+      italic: false,
+      underline: false,
+      color: "#000000",
+      alignment: "right",
+      characterSpacing: 0,
+      lineSpacing: 1.2,
+    },
+    boxWidth: 240,
+    offsetX: 12,
+    offsetY: -8,
+  };
+  const output = await applyPdfTextEdits(source, [edit], { sourceHash: extracted.sourceHash });
+  const outputDocument = await PDFDocument.load(output.bytes);
+  const outputContent = decodedFormContent(outputDocument, outputDocument.getPages()[1]);
+  assert.match(outputContent, /12 8 Td/);
+  assert.ok([...outputContent.matchAll(/BT([\s\S]*?)ET/g)].every((match) => !/\bq\b|\bQ\b|\bcm\b/.test(match[1])));
+  assert.match((await searchableText(output.bytes))[1], /Moved right aligned form text/);
+
+  const preview = await createPdfTextPreview(source, [{ ...edit, mode: "native" }]);
+  const previewDocument = await PDFDocument.load(preview);
+  const previewContent = decodedFormContent(previewDocument, previewDocument.getPages()[1]);
+  assert.match(previewContent, /12 8 Td/);
+  assert.ok([...previewContent.matchAll(/BT([\s\S]*?)ET/g)].every((match) => !/\bq\b|\bQ\b|\bcm\b/.test(match[1])));
+  assert.match((await searchableText(preview))[1], /Moved right aligned form text/);
+});
+
+test("WinAnsi replacements inside a Form XObject use literal PDF strings", async () => {
+  const source = await createFormTextFixture();
+  const extracted = await extractPdfTextRuns(source);
+  const run = extracted.pages[1].runs.find((item) => item.text === "Text inside a form");
+  const output = await applyPdfTextEdits(source, [{
+    pageIndex: 1,
+    operatorOrdinal: run.ordinal,
+    runId: run.runId,
+    originalText: run.text,
+    originalTextHash: run.originalTextHash,
+    replacementText: "Updated (safe) text",
+  }], { sourceHash: extracted.sourceHash });
+  const outputDocument = await PDFDocument.load(output.bytes);
+  const outputContent = decodedFormContent(outputDocument, outputDocument.getPages()[1]);
+  assert.ok(outputContent.includes("(Updated \\(safe\\) text) Tj"));
+  assert.doesNotMatch(outputContent, /<5570646174656420/);
+  assert.match((await searchableText(output.bytes))[1], /Updated \(safe\) text/);
 });
 
 test("fallback text keeps bold styling when the original bold font cannot encode it", async () => {
