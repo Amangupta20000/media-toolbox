@@ -55,6 +55,17 @@ async function createFixture() {
   return document.save({ useObjectStreams: false });
 }
 
+async function createFormTextFixture() {
+  const document = await PDFDocument.create();
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  const sourcePage = document.addPage([500, 320]);
+  sourcePage.drawText("Text inside a form", { x: 35, y: 260, font, size: 18 });
+  const embeddedPage = await document.embedPage(sourcePage);
+  const visiblePage = document.addPage([500, 320]);
+  visiblePage.drawPage(embeddedPage, { x: 0, y: 0, width: 500, height: 320 });
+  return document.save({ useObjectStreams: false });
+}
+
 async function searchableText(bytes) {
   const pdf = await getDocument({ data: new Uint8Array(bytes), disableWorker: true }).promise;
   const pages = [];
@@ -130,6 +141,41 @@ test("PDF text extraction creates stable, distinct run IDs for duplicate text", 
   assert.equal(duplicates[0].originalTextHash, duplicates[1].originalTextHash);
   assert.ok(first.pages[0].runs.every((run) => run.runId.startsWith("p0-o")));
   assert.equal(first.pages[1].runs[0].pageIndex, 1);
+});
+
+test("PDF text editing discovers and patches text inside Form XObjects", async () => {
+  const source = await createFormTextFixture();
+  const extracted = await extractPdfTextRuns(source);
+  const run = extracted.pages[1].runs.find((item) => item.text === "Text inside a form");
+  assert.ok(run);
+  assert.match(run.streamKey, /^form:/);
+  const edit = { pageIndex: 1, operatorOrdinal: run.ordinal, runId: run.runId, originalText: run.text, originalTextHash: run.originalTextHash, replacementText: "Updated form text" };
+  const preview = await createPdfTextPreview(source, [edit]);
+  const output = await applyPdfTextEdits(source, [edit], { sourceHash: extracted.sourceHash });
+  assert.match((await searchableText(preview))[1], /Updated form text/);
+  assert.match((await searchableText(output.bytes))[1], /Updated form text/);
+});
+
+test("PDF text export accepts a source-verified browser run identity fallback", async () => {
+  const source = await createFixture();
+  const extracted = await extractPdfTextRuns(source);
+  const run = extracted.pages[0].runs[0];
+  const output = await applyPdfTextEdits(source, [{
+    pageIndex: run.pageIndex,
+    operatorOrdinal: run.ordinal,
+    runId: `${run.runId}-browser-pdfjs-identity`,
+    originalText: run.text,
+    originalTextHash: run.originalTextHash,
+    replacementText: "Browser identity replacement",
+  }], { sourceHash: extracted.sourceHash });
+  assert.match((await searchableText(output.bytes))[0], /Browser identity replacement/);
+  await assert.rejects(() => applyPdfTextEdits(source, [{
+    pageIndex: run.pageIndex,
+    operatorOrdinal: run.ordinal,
+    runId: run.runId,
+    originalTextHash: run.originalTextHash,
+    replacementText: "changed",
+  }], { sourceHash: "0".repeat(64) }), /uploaded PDF changed/);
 });
 
 test("PDF.js glyph fragments merge into one logical word without merging real spaces", () => {
