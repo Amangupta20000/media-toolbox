@@ -156,6 +156,18 @@ test("PDF text editing discovers and patches text inside Form XObjects", async (
   assert.match((await searchableText(output.bytes))[1], /Updated form text/);
 });
 
+test("live PDF preview resolves a browser operator ordinal that differs in a Form XObject", async () => {
+  const source = await createFormTextFixture();
+  const preview = await createPdfTextPreview(source, [{
+    pageIndex: 1,
+    operatorOrdinal: 99,
+    originalText: "Text inside a form",
+    replacementText: "Preview identity replacement",
+    mode: "native",
+  }]);
+  assert.match((await searchableText(preview))[1], /Preview identity replacement/);
+});
+
 test("PDF text export accepts a source-verified browser run identity fallback", async () => {
   const source = await createFixture();
   const extracted = await extractPdfTextRuns(source);
