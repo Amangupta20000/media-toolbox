@@ -152,10 +152,9 @@ function ChoiceCard({ local = false, title, items }) {
 }
 
 function GuideFaqs() {
-  const [openIndex, setOpenIndex] = useState(0);
   return <div className="mode-guide-faq-list">{PROCESSING_MODE_GUIDE.faqs.map(([question, answer], index) => <article className="mode-guide-faq-item" key={question}>
-    <h3><button type="button" aria-expanded={openIndex === index} aria-controls={`mode-guide-faq-${index}`} onClick={() => setOpenIndex((current) => current === index ? -1 : index)}><span>{question}</span><ArrowRight size={16} aria-hidden="true" /></button></h3>
-    {openIndex === index && <p id={`mode-guide-faq-${index}`}>{answer}</p>}
+    <h3><span>{question}</span><ArrowRight size={16} aria-hidden="true" /></h3>
+    <p id={`mode-guide-faq-${index}`}>{answer}</p>
   </article>)}</div>;
 }
 

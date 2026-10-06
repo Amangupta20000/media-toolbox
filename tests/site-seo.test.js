@@ -3,7 +3,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { FREE_ACCESS_CODE, FREE_ACCESS_CODE_LIFETIME_MS, FREE_ACCESS_DURATION_MS, FREE_ACCESS_REDEMPTION_WINDOW_MS } from "../lib/free-access.js";
-import { AUTHOR_EMAIL, AUTHOR_ID, AUTHOR_NAME, DEFERRED_ROUTES, metadataForPathname, PRODUCT_NAME, PRODUCT_TAGLINE, PUBLIC_ROUTES, SITE_URL } from "../lib/site-metadata.js";
+import { APPROVAL_ROUTE_PATHS, AUTHOR_EMAIL, AUTHOR_ID, AUTHOR_NAME, DEFERRED_ROUTES, INSTALLER_ROUTES, metadataForPathname, PRODUCT_NAME, PRODUCT_TAGLINE, PUBLIC_ROUTES, ROUTE_POLICY, SITE_URL } from "../lib/site-metadata.js";
+import { TOOL_SEO_CONTENT } from "../lib/tool-seo-content.js";
 import { APPROVAL_GUIDES } from "../lib/approval-guides.js";
 
 const projectDirectory = path.resolve(new URL("..", import.meta.url).pathname);
@@ -46,7 +47,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(document, /document\.documentElement\.dataset\.theme/);
   assert.doesNotMatch(seo, /next\/script/);
   assert.doesNotMatch(seo, /data-nscript/);
-  assert.match(seo, /\{!metadata\.noIndex && <script async src=\{`https:\/\/pagead2\.googlesyndication\.com\/pagead\/js\/adsbygoogle\.js\?client=\$\{ADSENSE_CLIENT_ID\}`\} crossOrigin="anonymous" \/>\}/);
+  assert.match(seo, /\{!noIndex && <script async src=\{`https:\/\/pagead2\.googlesyndication\.com\/pagead\/js\/adsbygoogle\.js\?client=\$\{ADSENSE_CLIENT_ID\}`\} crossOrigin="anonymous" \/>\}/);
   assert.match(seo, /crossOrigin="anonymous"/);
   assert.equal(adsTxt.trim(), "google.com, pub-8789714270333969, DIRECT, f08c47fec0942fa0");
   assert.match(styles, /\[data-theme="dark"\] \.section-kicker \{ color: #8fe0d8; \}/);
@@ -114,6 +115,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(seo, /"@type": \["WebApplication", "SoftwareApplication"\]/);
   assert.match(seo, /"@type": "BreadcrumbList"/);
   assert.match(seo, /"@type": "FAQPage"/);
+  assert.match(seo, /const articleContent = approvalGuide \|\| guideContent/);
   assert.match(seo, /price: "0"/);
   assert.doesNotMatch(shell, /ToolSeoContent/);
   assert.match(history, /Helpful guide/);
@@ -182,6 +184,9 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(toolSeo, /Written by <strong>\{AUTHOR_NAME\}/);
   assert.match(toolSeo, /Privacy and file safety/);
   assert.match(toolSeo, /tool-seo-comparison/);
+  assert.match(toolSeo, /First-party example/);
+  assert.match(toolSeo, /Export verification checklist/);
+  assert.match(toolSeo, /content.faqs.map\(\(\[question, answer\], index\) =>/);
   assert.match(toolSeo, /Related tools and guides/);
   assert.match(toolSeoData, /"Which image formats are supported\?"/);
   assert.match(toolSeoData, /"Can every damaged video be repaired\?"/);
@@ -321,8 +326,17 @@ test("sitemap and robots routes expose only public pages", async () => {
   assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/about"));
   assert.ok(!PUBLIC_ROUTES.some(({ path: route }) => DEFERRED_ROUTES.includes(route)));
   for (const route of DEFERRED_ROUTES) assert.equal(metadataForPathname(route).noIndex, true);
-  assert.ok(PUBLIC_ROUTES.some(({ path: route }) => route === "/how-to-setup-agent"));
+  assert.equal(PUBLIC_ROUTES.some(({ path: route }) => route === "/how-to-setup-agent"), false);
   assert.equal(SITE_URL, "https://native-media-agent.vercel.app");
+});
+
+test("approval route policy is the source of truth", () => {
+  assert.deepEqual(PUBLIC_ROUTES.map(({ path }) => path), APPROVAL_ROUTE_PATHS);
+  assert.deepEqual(ROUTE_POLICY.filter(({ indexable }) => indexable).map(({ path }) => path), APPROVAL_ROUTE_PATHS);
+  assert.deepEqual(ROUTE_POLICY.filter(({ indexable }) => !indexable).map(({ path }) => path), [...DEFERRED_ROUTES, ...INSTALLER_ROUTES]);
+  for (const route of APPROVAL_ROUTE_PATHS) assert.equal(metadataForPathname(route).noIndex, undefined, route);
+  for (const route of DEFERRED_ROUTES) assert.equal(metadataForPathname(route).noIndex, true, route);
+  for (const route of INSTALLER_ROUTES) assert.equal(metadataForPathname(route).noIndex, true, route);
 });
 
 test("SEO metadata is route-specific and normalizes query strings", () => {
@@ -373,6 +387,28 @@ test("approval guides contain original visible content and structured FAQ inputs
     assert.ok(guide.sections.length >= 4);
     assert.ok(guide.faqs.length >= 3);
     assert.ok(guide.relatedLinks.some(([href]) => href.startsWith("/")));
+  }
+});
+
+test("flagship tool pages contain distinct practical guidance", () => {
+  const flagshipPaths = ["/image-converter", "/svg-to-png", "/pdf-editor", "/pdf-text-editor", "/pdf-compressor", "/pdf-to-images", "/video-repair"];
+  const longParagraphs = [];
+  for (const path of flagshipPaths) {
+    const content = TOOL_SEO_CONTENT[path];
+    assert.ok(content.whenUseful, `${path} is missing when-useful guidance`);
+    assert.ok(content.whenNotToUse, `${path} is missing limitations context`);
+    assert.ok(content.workedExample?.expected, `${path} is missing a worked example`);
+    assert.ok(content.limitations?.length >= 2, `${path} is missing limitations`);
+    assert.ok(content.troubleshooting?.length >= 2, `${path} is missing troubleshooting guidance`);
+    assert.ok(content.verification?.length >= 2, `${path} is missing export checks`);
+    for (const paragraph of [content.intro, content.whenUseful, content.whenNotToUse, content.workedExample.scenario, content.workedExample.expected]) {
+      if (paragraph.length >= 120) longParagraphs.push([path, paragraph]);
+    }
+  }
+  const seen = new Map();
+  for (const [path, paragraph] of longParagraphs) {
+    assert.equal(seen.has(paragraph), false, `Repeated long paragraph between ${seen.get(paragraph)} and ${path}`);
+    seen.set(paragraph, path);
   }
 });
 

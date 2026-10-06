@@ -21,7 +21,7 @@ function GuideFaqs({ faqs }) {
   return <section className="approval-guide-section approval-guide-faq" aria-labelledby="approval-guide-faq-title">
     <h2 id="approval-guide-faq-title">Frequently asked questions</h2>
     <div className="approval-guide-faq-list">
-      {faqs.map(([question, answer], index) => <details key={question} open={index === 0}>
+      {faqs.map(([question, answer]) => <details key={question} open>
         <summary>{question}</summary>
         <p>{answer}</p>
       </details>)}

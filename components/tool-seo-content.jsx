@@ -1,5 +1,3 @@
-"use client";
-
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { AUTHOR_NAME, CONTENT_LAST_UPDATED, metadataForPathname, normalizeSitePath } from "../lib/site-metadata.js";
@@ -31,6 +29,32 @@ export function ToolSeoContent({ pathname }) {
         <ul>{content.trust.map((item) => <li key={item}>{item}</li>)}</ul>
       </article>
     </div>
+    {(content.whenUseful || content.whenNotToUse) && <section className="tool-seo-context" aria-labelledby="tool-seo-context-title">
+      <div className="tool-seo-context-card">
+        <h2 id="tool-seo-context-title">When this tool is useful</h2>
+        <p>{content.whenUseful}</p>
+      </div>
+      <div className="tool-seo-context-card">
+        <h2>When another tool is better</h2>
+        <p>{content.whenNotToUse}</p>
+      </div>
+    </section>}
+    {content.workedExample && <section className="tool-seo-worked-example" aria-labelledby="tool-seo-example-title">
+      <div>
+        <div className="section-kicker"><span className="kicker-line" /> First-party example</div>
+        <h2 id="tool-seo-example-title">{content.workedExample.heading}</h2>
+        <p>{content.workedExample.scenario}</p>
+      </div>
+      <div className="tool-seo-example-details">
+        <div><strong>Settings</strong><ul>{content.workedExample.settings.map((setting) => <li key={setting}>{setting}</li>)}</ul></div>
+        <div><strong>Expected result</strong><p>{content.workedExample.expected}</p></div>
+      </div>
+    </section>}
+    {(content.limitations?.length > 0 || content.troubleshooting?.length > 0 || content.verification?.length > 0) && <section className="tool-seo-grid tool-seo-practical-checks">
+      {content.limitations?.length > 0 && <article className="tool-seo-panel"><h2>Limits and unsupported cases</h2><ul>{content.limitations.map((item) => <li key={item}>{item}</li>)}</ul></article>}
+      {content.troubleshooting?.length > 0 && <article className="tool-seo-panel"><h2>Common mistakes and troubleshooting</h2><ul>{content.troubleshooting.map((item) => <li key={item}>{item}</li>)}</ul></article>}
+      {content.verification?.length > 0 && <article className="tool-seo-panel"><h2>Export verification checklist</h2><ol>{content.verification.map((item) => <li key={item}>{item}</li>)}</ol></article>}
+    </section>}
     {content.comparison?.length > 0 && <section className="tool-seo-comparison" aria-labelledby="tool-seo-comparison-title">
       <h2 id="tool-seo-comparison-title">At a glance</h2>
       <div className="tool-seo-comparison-scroll">
@@ -51,7 +75,7 @@ function FaqSection({ content }) {
   return <article className="tool-seo-faq" aria-labelledby="tool-seo-faq-title">
     <h2 id="tool-seo-faq-title">Frequently asked questions</h2>
     <div className="tool-seo-faq-list">
-      {content.faqs.map(([question, answer], index) => <details className="tool-seo-faq-item" key={question} open={index === 0}>
+      {content.faqs.map(([question, answer], index) => <details className="tool-seo-faq-item" key={question} open>
         <summary className="tool-seo-faq-question">
           <span>{question}</span>
           <ChevronDown size={17} aria-hidden="true" />

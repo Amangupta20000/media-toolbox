@@ -1,6 +1,6 @@
 import Head from "next/head";
 import { useRouter } from "next/router";
-import { absoluteSiteUrl, ADSENSE_CLIENT_ID, AUTHOR_EMAIL, AUTHOR_ID, AUTHOR_NAME, metadataForPathname, normalizeSitePath, PRODUCT_NAME, PRODUCT_TAGLINE, SITE_URL } from "../lib/site-metadata.js";
+import { absoluteSiteUrl, ADSENSE_CLIENT_ID, AUTHOR_EMAIL, AUTHOR_ID, AUTHOR_NAME, lastModifiedForPathname, metadataForPathname, normalizeSitePath, PRODUCT_NAME, PRODUCT_TAGLINE, routePolicyForPathname, SITE_URL } from "../lib/site-metadata.js";
 import { PROCESSING_MODE_GUIDE } from "../lib/processing-mode-guide.js";
 import { APPROVAL_GUIDES } from "../lib/approval-guides.js";
 import { TOOL_SEO_CONTENT } from "../lib/tool-seo-content.js";
@@ -10,9 +10,11 @@ export function SeoHead() {
   const routePath = asPath || pathname;
   const metadata = metadataForPathname(routePath);
   const normalizedPath = normalizeSitePath(routePath);
+  const routePolicy = routePolicyForPathname(normalizedPath);
+  const noIndex = metadata.noIndex || !routePolicy?.indexable;
   const canonicalUrl = absoluteSiteUrl(normalizedPath);
   const socialImageUrl = absoluteSiteUrl("/media-toolbox-logo.png");
-  const robots = metadata.noIndex ? "noindex,follow,max-image-preview:large" : "index,follow,max-image-preview:large";
+  const robots = noIndex ? "noindex,follow,max-image-preview:large" : "index,follow,max-image-preview:large";
   const pageLabel = metadata.breadcrumbLabel || metadata.title.replace(/\s*\|\s*NativeMedia Agent$/, "");
   const toolContent = TOOL_SEO_CONTENT[normalizedPath];
   const guideContent = normalizedPath === "/browser-vs-local-agent" ? PROCESSING_MODE_GUIDE : null;
@@ -72,17 +74,22 @@ export function SeoHead() {
     url: canonicalUrl,
     name: metadata.title,
     description: metadata.description,
+    dateModified: lastModifiedForPathname(normalizedPath),
     isPartOf: { "@id": `${SITE_URL}#website` },
     about: { "@id": `${SITE_URL}#application` },
     author: { "@id": AUTHOR_ID },
     publisher: { "@id": `${SITE_URL}#organization` },
   };
-  const article = approvalGuide ? {
+  const articleContent = approvalGuide || guideContent ? {
+    title: approvalGuide?.title || "Browser Mode vs Local Agent",
+    lastUpdated: approvalGuide?.lastUpdated || guideContent.lastUpdated,
+  } : null;
+  const article = articleContent ? {
     "@type": "Article",
     "@id": `${canonicalUrl}#article`,
-    headline: approvalGuide.title,
+    headline: articleContent.title,
     description: metadata.description,
-    dateModified: approvalGuide.lastUpdated,
+    dateModified: articleContent.lastUpdated,
     author: { "@id": AUTHOR_ID },
     publisher: { "@id": `${SITE_URL}#organization` },
     mainEntityOfPage: { "@id": `${canonicalUrl}#webpage` },
@@ -111,7 +118,7 @@ export function SeoHead() {
   };
 
   return <>
-    {!metadata.noIndex && <script async src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT_ID}`} crossOrigin="anonymous" />}
+    {!noIndex && <script async src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT_ID}`} crossOrigin="anonymous" />}
     <Head>
       <title>{metadata.title}</title>
       <meta name="description" content={metadata.description} />
@@ -141,7 +148,7 @@ export function SeoHead() {
       <meta name="twitter:description" content={metadata.description} />
       <meta name="twitter:image" content={socialImageUrl} />
       <meta name="twitter:image:alt" content="NativeMedia Agent app logo" />
-      {!metadata.noIndex && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }} />}
+      {!noIndex && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }} />}
     </Head>
   </>;
 }

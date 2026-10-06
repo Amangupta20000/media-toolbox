@@ -18,6 +18,8 @@
     "dev:web": "next dev",
     "prebuild": "node scripts/copy-pdf-worker.mjs",
     "build": "next build",
+    "postbuild": "node scripts/prepare-standalone.mjs",
+    "test:seo:production": "node scripts/verify-seo-production.mjs",
     "test": "node --test --test-reporter=spec",
     "start": "node .next/standalone/server.js",
     "worker": "node worker/index.js",
