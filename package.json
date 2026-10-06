@@ -33,11 +33,13 @@
     "license-server:funnel": "node scripts/license-server-funnel.mjs",
     "license-server:keygen": "node scripts/license-server-keygen.mjs",
     "setup:untrunc": "bash scripts/setup-untrunc-macos.sh",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "devDependencies": {
     "electron": "^37.2.6",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^15.5.25"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
