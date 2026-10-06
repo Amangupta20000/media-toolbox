@@ -53,6 +53,30 @@ test("tool pages use a shared widget stack with consistent outer spacing", async
   assert.match(styles, /\.mock-api-page \{ display: grid; gap: 22px; \}/);
 });
 
+test("hamburger navigation exposes all public user-facing route groups", async () => {
+  const navigation = await read("components/app-shell.jsx");
+  for (const href of [
+    "/video-compressor",
+    "/audio-extractor",
+    "/mock-api",
+    "/coming-soon",
+    "/guides",
+    "/browser-vs-local-agent",
+    "/local-agent",
+    "/how-to-setup-agent",
+    "/offers",
+    "/about",
+    "/contact",
+    "/privacy",
+    "/terms",
+  ]) {
+    assert.match(navigation, new RegExp(`href: "${href}"`), `${href} should be reachable from the hamburger navigation`);
+  }
+  assert.match(navigation, /aria-label="Resources and support"/);
+  assert.doesNotMatch(navigation, /href: "\/api\//);
+  assert.doesNotMatch(navigation, /href: "\/downloads\//);
+});
+
 test("consent banner keeps a fixed, hidden hydration placeholder", async () => {
   const runtime = await read("components/analytics.jsx");
   const styles = await read("styles/globals.css");

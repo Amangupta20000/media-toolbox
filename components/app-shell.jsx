@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { Archive, ArrowRight, BookOpen, ChevronDown, Clock3, ExternalLink, FileImage, FileText, Film, Home, Image as ImageIcon, Menu, Moon, ShieldCheck, Sun } from "lucide-react";
+import { Archive, ArrowRight, AudioLines, BookOpen, ChevronDown, Clock3, Code2, ExternalLink, FileImage, FileText, Film, Gift, Home, Image as ImageIcon, LockKeyhole, Mail, Menu, Moon, Scale, ShieldCheck, Sun, WandSparkles } from "lucide-react";
 import { probeLocalAgent } from "./processing-client.js";
 import { AppFooter } from "./app-footer.jsx";
 import { FreeAccessModal } from "./free-access-modal.jsx";
@@ -25,9 +25,27 @@ const pdfNavigation = [
 ];
 
 const moreNavigation = [
-  { href: "/guides", label: "Guides", detail: "Practical file workflow guides", icon: BookOpen },
-  { href: "/about", label: "About", detail: "How NativeMedia Agent works", icon: ShieldCheck },
+  { href: "/video-compressor", label: "Video compressor", detail: "Reduce video file size", icon: Film },
+  { href: "/audio-extractor", label: "Audio extractor", detail: "Create an audio file from video", icon: AudioLines },
+  { href: "/mock-api", label: "Mock API", detail: "Build JSON APIs for testing", icon: Code2 },
+  { href: "/coming-soon", label: "Coming soon", detail: "Planned tools and roadmap", icon: WandSparkles },
 ];
+
+const resourceNavigation = [
+  { href: "/guides", label: "Guides", detail: "Practical file workflow guides", icon: BookOpen },
+  { href: "/browser-vs-local-agent", label: "Browser vs Local agent", detail: "Compare processing modes", icon: FileText },
+  { href: "/local-agent", label: "Local agent", detail: "Check desktop connection", icon: ShieldCheck },
+  { href: "/how-to-setup-agent", label: "Setup guide", detail: "Install and connect the agent", icon: ExternalLink },
+  { href: "/offers", label: "Offers", detail: "Activation codes and access", icon: Gift },
+  { href: "/about", label: "About", detail: "How NativeMedia Agent works", icon: ShieldCheck },
+  { href: "/contact", label: "Contact", detail: "Support and privacy requests", icon: Mail },
+  { href: "/privacy", label: "Privacy policy", detail: "How files and data are handled", icon: LockKeyhole },
+  { href: "/terms", label: "Terms", detail: "Service terms and limitations", icon: Scale },
+];
+
+function navigationItemIsActive(currentPath, href) {
+  return currentPath === href || (href !== "/" && currentPath.startsWith(`${href}/`));
+}
 
 function breadcrumbLabelFor(pathname) {
   const normalizedPath = normalizeSitePath(pathname);
@@ -172,7 +190,7 @@ export function AppShell({ children }) {
         <nav className="tool-nav" aria-label="Tools">
           {navigation.map((item) => {
             const Icon = item.icon;
-            const active = currentPath === item.href;
+            const active = navigationItemIsActive(currentPath, item.href);
             return <Link key={item.href} href={item.href} className={`tool-nav-item ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}>
               <span className="nav-icon"><Icon size={19} /></span>
               <span className="nav-copy"><span className="nav-label-row"><strong>{item.label}</strong>{item.beta && <span className="nav-beta">Beta</span>}</span><small>{item.detail}</small></span>
@@ -188,7 +206,7 @@ export function AppShell({ children }) {
             {pdfToolsOpen && <div id="pdf-tools-subnav" className="pdf-tools-subnav" role="group" aria-label="PDF tools">
               {pdfNavigation.map((item) => {
                 const Icon = item.icon;
-                const active = currentPath === item.href;
+                const active = navigationItemIsActive(currentPath, item.href);
                 return <Link key={item.href} href={item.href} className={`tool-nav-item pdf-tool-child ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}>
                   <span className="nav-icon"><Icon size={17} /></span>
                   <span className="nav-copy"><span className="nav-label-row"><strong>{item.label}</strong>{item.beta && <span className="nav-beta">Beta</span>}</span><small>{item.detail}</small></span>
@@ -200,7 +218,11 @@ export function AppShell({ children }) {
         </nav>
         <div className="sidebar-label coming-soon-nav-label">More tools</div>
         <nav className="tool-nav" aria-label="More tools">
-          {moreNavigation.map((item) => { const Icon = item.icon; const active = currentPath === item.href; return <Link key={item.href} href={item.href} className={`tool-nav-item ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}><span className="nav-icon"><Icon size={19} /></span><span className="nav-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>{active && <span className="active-dot" />}</Link>; })}
+          {moreNavigation.map((item) => { const Icon = item.icon; const active = navigationItemIsActive(currentPath, item.href); return <Link key={item.href} href={item.href} className={`tool-nav-item ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}><span className="nav-icon"><Icon size={19} /></span><span className="nav-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>{active && <span className="active-dot" />}</Link>; })}
+        </nav>
+        <div className="sidebar-label sidebar-label-secondary">Resources &amp; support</div>
+        <nav className="tool-nav" aria-label="Resources and support">
+          {resourceNavigation.map((item) => { const Icon = item.icon; const active = navigationItemIsActive(currentPath, item.href); return <Link key={item.href} href={item.href} className={`tool-nav-item ${active ? "active" : ""}`} onClick={() => setMobileOpen(false)} title={item.label}><span className="nav-icon"><Icon size={19} /></span><span className="nav-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>{active && <span className="active-dot" />}</Link>; })}
         </nav>
         <div className="sidebar-footer">
           <div className="privacy-card"><ShieldCheck size={17} /><div><strong>Private by design</strong><span>Temporary data follows cleanup rules; local results are kept only when you choose.</span></div></div>

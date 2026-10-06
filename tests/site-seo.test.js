@@ -64,7 +64,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(shell, /href: "\/", label: "Home", detail: "NativeMedia Agent overview", icon: Home/);
   assert.match(shell, /href: "\/guides", label: "Guides", detail: "Practical file workflow guides", icon: BookOpen/);
   assert.match(shell, /href: "\/about", label: "About", detail: "How NativeMedia Agent works", icon: ShieldCheck/);
-  assert.doesNotMatch(shell, /href: "\/local-agent", label: "Local agent"/);
+  assert.match(shell, /href: "\/local-agent", label: "Local agent"/);
   assert.match(shell, /<Link href="\/local-agent" className=\{`topbar-status/);
   assert.match(shell, /agentSetupAttention/);
   assert.match(styles, /\.topbar-status\.agent-setup-cta/);
