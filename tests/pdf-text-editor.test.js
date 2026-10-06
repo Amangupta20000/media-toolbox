@@ -469,6 +469,49 @@ test("right-aligned embedded text remains visible when moved before export", asy
   assert.match((await searchableText(preview))[1], /Moved right aligned form text/);
 });
 
+test("all native text formatting controls remain visible in embedded-form export and preview", async () => {
+  const source = await createFormTextFixture();
+  const extracted = await extractPdfTextRuns(source);
+  const run = extracted.pages[1].runs.find((item) => item.text === "Text inside a form");
+  const edit = {
+    pageIndex: 1,
+    operatorOrdinal: run.ordinal,
+    runId: run.runId,
+    originalText: run.text,
+    originalTextHash: run.originalTextHash,
+    replacementText: "Formatted form text",
+    format: {
+      fontFamily: "Courier",
+      fontSize: 24,
+      bold: true,
+      italic: true,
+      underline: true,
+      color: "#d12a2a",
+      alignment: "center",
+      characterSpacing: 1.5,
+      lineSpacing: 1.4,
+    },
+    boxWidth: 240,
+    offsetX: 12,
+    offsetY: -8,
+  };
+  const assertFormattedOutput = async (bytes, label) => {
+    const outputDocument = await PDFDocument.load(bytes);
+    const outputContent = decodedFormContent(outputDocument, outputDocument.getPages()[1]);
+    assert.match(outputContent, /\/(?:MTFallback|MTPreviewFallback)\d+ 24 Tf 1\.5 Tc 33\.6 TL 0\.82 0\.165 0\.165 rg/, `${label} should emit font, size, spacing, line spacing, and colour operators`);
+    assert.match(outputContent, /12 8 Td/, `${label} should keep movement inside the text object`);
+    assert.ok([...outputContent.matchAll(/BT([\s\S]*?)ET/g)].every((match) => !/\bq\b|\bQ\b|\bcm\b/.test(match[1])), `${label} must not put graphics-state operators inside BT/ET`);
+    assert.match(Buffer.from(bytes).toString("latin1"), /Courier-BoldOblique/, `${label} should preserve bold italic font selection`);
+    assert.match((await searchableText(bytes))[1], /Formatted\s+form\s+text/, `${label} should keep the replacement selectable and visible`);
+  };
+
+  const output = await applyPdfTextEdits(source, [edit], { sourceHash: extracted.sourceHash });
+  await assertFormattedOutput(output.bytes, "export");
+
+  const preview = await createPdfTextPreview(source, [{ ...edit, mode: "native" }]);
+  await assertFormattedOutput(preview, "preview");
+});
+
 test("WinAnsi replacements inside a Form XObject use literal PDF strings", async () => {
   const source = await createFormTextFixture();
   const extracted = await extractPdfTextRuns(source);
