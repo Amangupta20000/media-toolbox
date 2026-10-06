@@ -295,6 +295,7 @@ export function SvgToPngTool() {
   }, [job, jobMode]);
 
   return <AppShell>
+    <div className="tool-page-layout">
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> Rasterize & export</div><h1>Free SVG to PNG converter with transparent backgrounds</h1><p>Convert SVG files or pasted SVG code into crisp PNG images at 1×, 2×, 3×, 4×, or an exact size without uploading in Browser mode.</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Local or browser processing</span></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
     <ProcessingOptionsPanel tool="svg-to-png" locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={selectProcessingMode} />
@@ -320,5 +321,6 @@ export function SvgToPngTool() {
       <ToolSeoContent pathname="/svg-to-png" />
       <ToolFaqContent pathname="/svg-to-png" />
     </>}
+    </div>
   </AppShell>;
 }

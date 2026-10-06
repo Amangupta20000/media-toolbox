@@ -92,6 +92,11 @@ a { color: inherit; text-decoration: none; }
 .topbar-setup-arrow { flex: 0 0 auto; animation: topbar-setup-arrow 1.4s ease-in-out infinite; }
 .topbar-menu-button { display: grid; flex: 0 0 auto; width: 35px; height: 35px; place-items: center; margin: 0; border: 1px solid var(--line); border-radius: 10px; color: var(--navy); background: white; }
 .content-wrap { width: min(1050px, calc(100% - 10.6vw)); margin: 0 auto; padding: 55px 0 46px; }
+.tool-page-layout { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.tool-page-layout > * { margin-block-start: 0 !important; margin-block-end: 0 !important; }
+.tool-page-layout > .processing-options-panel,
+.tool-page-layout > .tool-seo-content,
+.tool-page-layout > .tool-faq-content { width: 100%; max-width: 100%; }
 .app-footer { width: min(1050px, calc(100% - 10.6vw)); margin: auto auto 0; padding: 19px 0 27px; display: flex; flex-direction: column; gap: 9px; color: #8a9aaa; border-top: 1px solid var(--line); font-size: 10px; }
 .app-footer-main { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .app-footer-copyright { width: 100%; text-align: center; }
@@ -372,7 +377,7 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .capability-main { display: flex; align-items: center; gap: 8px; color: #607386; }
 .capability-main > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .capability-dot.ready { background: #45bd96; box-shadow: 0 0 0 4px rgba(69,189,150,.12); }
-.workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: stretch; }
+.workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: stretch; }
 .tool-card, .job-card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 9px 24px rgba(37, 62, 88, .035); }
 .tool-card { padding: 22px; }
 .primary-card { min-height: 306px; }
@@ -1338,6 +1343,9 @@ h1 { font-size: clamp(36px, 4.2vw, 50px); }
   .content-wrap { padding: 36px 14px 39px; }
   .content-wrap > .tool-seo-content,
   .content-wrap > .processing-options-panel { width: 100%; max-width: 100%; margin-left: 0; margin-right: 0; }
+  .tool-page-layout > .tool-seo-content,
+  .tool-page-layout > .processing-options-panel,
+  .tool-page-layout > .tool-faq-content { width: 100%; max-width: 100%; margin-left: 0; margin-right: 0; }
   .breadcrumb-wrap, .app-footer { padding-inline: 14px; }
   .app-footer { align-items: stretch; padding-bottom: 24px; }
   .app-footer-main { align-items: flex-start; flex-direction: column; gap: 9px; }

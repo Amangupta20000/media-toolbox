@@ -321,6 +321,7 @@ export function LocalProcessingToolPage({ tool }) {
       : <section className="tool-card settings-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Choose image output</h2></div><span className="optional-label">One ZIP archive</span></div><p className="card-description">Render every page at a selected scale and download the numbered images together.</p><div className="format-grid">{pdfFormats.map(([value, label, detail]) => <button type="button" key={value} className={"format-option " + (pdfFormat === value ? "selected" : "")} onClick={() => setPdfFormat(value)}><span className="format-radio" /><strong>{label}</strong><small>{detail}</small></button>)}</div><label className="field-label" htmlFor="pdf-image-scale">Output scale <span>Higher scale creates more pixels</span></label><select id="pdf-image-scale" className="select-input" value={pdfScale} onChange={(event) => setPdfScale(event.target.value)}>{pdfScales.map(([value, label, detail]) => <option key={value} value={value}>{label} · {detail}</option>)}</select>{pdfFormat === "jpg" && <><label className="field-label" htmlFor="pdf-image-quality">JPG quality <span>{pdfQuality}</span></label><input id="pdf-image-quality" className="pdf-quality-range" type="range" min="50" max="100" step="1" value={pdfQuality} onChange={(event) => setPdfQuality(Number(event.target.value))} /></>}<div className="info-note"><Info size={16} /><span>PDF to images supports up to 300 pages. Password-protected PDFs must be unlocked first.</span></div></section>;
 
   return <AppShell>
+    <div className="tool-page-layout">
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> {config.eyebrow}</div><h1>{config.title}</h1><p>{config.description}</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Original files stay untouched</span></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
     <ProcessingOptionsPanel tool={tool} locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={(mode) => { setProcessingMode(mode); setActiveView("tool"); }} />
@@ -338,5 +339,6 @@ export function LocalProcessingToolPage({ tool }) {
       <ToolSeoContent pathname={"/" + tool} />
       <ToolFaqContent pathname={"/" + tool} />
     </>}
+    </div>
   </AppShell>;
 }

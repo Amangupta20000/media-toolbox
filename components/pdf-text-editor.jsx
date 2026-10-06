@@ -1867,6 +1867,7 @@ export function PdfTextEditor() {
 
   return (
     <AppShell>
+      <div className="tool-page-layout">
       <div className="page-heading">
         <div>
           <div className="section-kicker"><span className="kicker-line" /> PDF text tools</div>
@@ -1945,6 +1946,7 @@ export function PdfTextEditor() {
           <ToolFaqContent pathname="/pdf-text-editor" />
         </>
       )}
+      </div>
     </AppShell>
   );
 }

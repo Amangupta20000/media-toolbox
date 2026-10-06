@@ -33,6 +33,26 @@ test("mobile layout uses one shared content gutter without nested width subtract
   assert.doesNotMatch(styles, /\.processing-options-panel \{ width: calc\(100% - 28px\); margin-bottom: 20px; \}/);
 });
 
+test("tool pages use a shared widget stack with consistent outer spacing", async () => {
+  const styles = await read("styles/globals.css");
+  const toolShells = [
+    "components/tool-page.jsx",
+    "components/local-processing-tool-page.jsx",
+    "components/svg-to-png-tool.jsx",
+    "components/pdf-editor.jsx",
+    "components/pdf-text-editor.jsx",
+  ];
+
+  for (const file of toolShells) {
+    assert.match(await read(file), /className="tool-page-layout"/, `${file} should use the shared widget stack`);
+  }
+
+  assert.match(styles, /\.tool-page-layout \{[^}]*display: flex[^}]*flex-direction: column[^}]*gap: 18px/);
+  assert.match(styles, /\.tool-page-layout > \* \{[^}]*margin-block-start: 0 !important[^}]*margin-block-end: 0 !important/);
+  assert.match(styles, /\.workspace-grid \{[^}]*gap: 18px/);
+  assert.match(styles, /\.mock-api-page \{ display: grid; gap: 22px; \}/);
+});
+
 test("consent banner keeps a fixed, hidden hydration placeholder", async () => {
   const runtime = await read("components/analytics.jsx");
   const styles = await read("styles/globals.css");

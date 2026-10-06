@@ -1954,6 +1954,7 @@ export function PdfEditor() {
   }, [activeView, job, saveJob, loadingFiles, selectedPage, previewZoom, pages, pdfFiles, processingMode, canRedo, canUndo]);
 
   return <AppShell>
+    <div className="tool-page-layout">
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> PDF tools <span className="pdf-capacity-note"><FileText size={14} /> {pdfCapacityLabel}</span></div><h1>Free PDF editor</h1><p>{processingMode === "browser" ? "Import, merge, reorder, rotate, and remove PDF pages in this browser, or start with blank pages. Duplicating pages, styled text boxes, and password-protected PDFs require Local agent." : unlimitedPdfAccess ? "Merge PDFs without count or file-size limits while Admin access is active, then reorder pages, remove pages, add images, or place styled text boxes." : "Merge PDFs, reorder pages, remove pages, add images, or place styled text boxes on PDF pages and new blank pages."}</p></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
     <ProcessingOptionsPanel tool="pdf-editor" locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={selectProcessingMode} />
@@ -2008,6 +2009,7 @@ export function PdfEditor() {
       <ToolSeoContent pathname="/pdf-editor" />
       <ToolFaqContent pathname="/pdf-editor" />
     </>}
+    </div>
   </AppShell>;
 }
 

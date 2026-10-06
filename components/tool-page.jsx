@@ -617,6 +617,7 @@ export function ToolPage({ tool }) {
   }, [batchJobs, jobMode, tool]);
 
   return <AppShell>
+    <div className="tool-page-layout">
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> {eyebrow}</div><h1>{title}</h1><p>{description}</p></div><div className="heading-note"><ShieldCheck size={16} /><span>Original files stay untouched</span></div></div>
     <ToolViewTabs value={activeView} onChange={setActiveView} />
     <ProcessingOptionsPanel tool={tool} locations={locations} value={processingMode} hidden={activeView !== "processing"} onSelect={selectProcessingMode} />
@@ -635,6 +636,7 @@ export function ToolPage({ tool }) {
     <ToolSeoContent pathname={`/${tool}`} />
     <ToolFaqContent pathname={`/${tool}`} />
     </>}
+    </div>
   </AppShell>;
 }
 
