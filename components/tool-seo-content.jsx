@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
-import { AUTHOR_NAME, CONTENT_LAST_UPDATED, metadataForPathname, normalizeSitePath } from "../lib/site-metadata.js";
+import { AUTHOR_NAME, lastModifiedForPathname, metadataForPathname, normalizeSitePath } from "../lib/site-metadata.js";
 import { TOOL_SEO_CONTENT } from "../lib/tool-seo-content.js";
 
 export function ToolSeoContent({ pathname }) {
-  const content = TOOL_SEO_CONTENT[normalizeSitePath(pathname)];
+  const normalizedPath = normalizeSitePath(pathname);
+  const content = TOOL_SEO_CONTENT[normalizedPath];
   if (!content) return null;
+  const lastUpdated = lastModifiedForPathname(normalizedPath);
   const relatedLinks = [
     ...(content.relatedLinks || []),
     ["/browser-vs-local-agent", "Browser vs Local agent", "Compare privacy, limits, and feature support before choosing a mode."],
@@ -17,7 +19,7 @@ export function ToolSeoContent({ pathname }) {
       <div className="section-kicker"><span className="kicker-line" /> Helpful guide</div>
       <h2 id="tool-seo-title">{content.introHeading || `About ${content.name}`}</h2>
       <p>{content.intro}</p>
-      <p className="tool-seo-byline">Written by <strong>{AUTHOR_NAME}</strong><span aria-hidden="true"> · </span>Last updated: <time dateTime={CONTENT_LAST_UPDATED}>{CONTENT_LAST_UPDATED}</time></p>
+      <p className="tool-seo-byline">Written by <strong>{AUTHOR_NAME}</strong><span aria-hidden="true"> · </span>Last updated: <time dateTime={lastUpdated}>{lastUpdated}</time></p>
     </div>
     <div className="tool-seo-grid">
       <article className="tool-seo-panel">

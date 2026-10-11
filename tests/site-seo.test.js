@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { FREE_ACCESS_CODE, FREE_ACCESS_CODE_LIFETIME_MS, FREE_ACCESS_DURATION_MS, FREE_ACCESS_REDEMPTION_WINDOW_MS } from "../lib/free-access.js";
-import { APPROVAL_ROUTE_PATHS, AUTHOR_EMAIL, AUTHOR_ID, AUTHOR_NAME, DEFERRED_ROUTES, INSTALLER_ROUTES, metadataForPathname, PRODUCT_NAME, PRODUCT_TAGLINE, PUBLIC_ROUTES, ROUTE_POLICY, SITE_URL } from "../lib/site-metadata.js";
+import { APPROVAL_ROUTE_PATHS, AUTHOR_EMAIL, AUTHOR_ID, AUTHOR_NAME, DEFERRED_ROUTES, INSTALLER_ROUTES, lastModifiedForPathname, metadataForPathname, PRODUCT_NAME, PRODUCT_TAGLINE, PUBLIC_ROUTES, ROUTE_POLICY, SITE_URL } from "../lib/site-metadata.js";
 import { TOOL_SEO_CONTENT } from "../lib/tool-seo-content.js";
 import { APPROVAL_GUIDES } from "../lib/approval-guides.js";
 
@@ -182,6 +182,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(toolSeo, /<summary className="tool-seo-faq-question"/);
   assert.match(toolSeo, /tool-guide/);
   assert.match(toolSeo, /Written by <strong>\{AUTHOR_NAME\}/);
+  assert.match(toolSeo, /lastModifiedForPathname\(normalizedPath\)/);
   assert.match(toolSeo, /Privacy and file safety/);
   assert.match(toolSeo, /tool-seo-comparison/);
   assert.match(toolSeo, /First-party example/);
@@ -417,4 +418,12 @@ test("sitemap uses accurate lastmod values without ranking hint fields", async (
   assert.match(sitemap, /lastmod/);
   assert.doesNotMatch(sitemap, /changefreq/);
   assert.doesNotMatch(sitemap, /priority/);
+});
+
+test("tool guide bylines use the same route date as the sitemap", () => {
+  for (const route of ["/pdf-compressor", "/image-converter", "/svg-to-png", "/pdf-editor", "/pdf-text-editor", "/pdf-to-images", "/video-repair"]) {
+    const sitemapEntry = PUBLIC_ROUTES.find(({ path }) => path === route);
+    assert.ok(sitemapEntry, `${route} should be in the sitemap`);
+    assert.equal(lastModifiedForPathname(route), sitemapEntry.lastmod, `${route} visible date should match its sitemap date`);
+  }
 });
