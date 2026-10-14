@@ -15,7 +15,8 @@ import { firstAvailable, runCommand } from "../lib/command.js";
 import { processJob, writeCapabilities } from "../worker/index.js";
 import { applyMockRequest, MOCK_API_LIMITS, MockApiError } from "../lib/mock-api.js";
 import { deleteMockProject, getMockProject, listMockProjects, saveMockProject } from "../lib/mock-api-storage.js";
-import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, activateOnline, activateTester, authorizeProcessing, ensureAgentAuth, getActivationRequestStatus as getActivationRequestStatusAgent, getAuthorizationState as getAuthorizationStateAgent, getDeviceId as getDeviceIdFromAuth, getLicenseAdminAudit as getLicenseAdminAuditAgent, getLicenseAdminRequests as getLicenseAdminRequestsAgent, getLicenseAdminState as getLicenseAdminStateAgent, getLicenseRequestConfig as getLicenseRequestConfigAgent, hasOnlineLicenseServer, isLicenseAdminTokenValid, loginActivation as loginActivationAgent, loginAdmin as loginAdminAgent, loginLicenseAdmin as loginLicenseAdminAgent, logoutActivation as logoutActivationAgent, logoutAdmin as logoutAdminAgent, logoutLicenseAdmin as logoutLicenseAdminAgent, requestActivationCode as requestActivationCodeAgent, approveLicenseRequest as approveLicenseRequestAgent, declineLicenseRequest as declineLicenseRequestAgent, startTrial as startTrialAgent, TESTER_ACTIVATION_CODE } from "./auth.js";
+import { acceptLegalConsent as acceptLegalConsentAgent, activate as activateAgent, activateFreeAccess, activateOnline, activateTester, authorizeProcessing, ensureAgentAuth, getActivationRequestStatus as getActivationRequestStatusAgent, getAuthorizationState as getAuthorizationStateAgent, getDeviceId as getDeviceIdFromAuth, getLicenseAdminAudit as getLicenseAdminAuditAgent, getLicenseAdminRequests as getLicenseAdminRequestsAgent, getLicenseAdminState as getLicenseAdminStateAgent, getLicenseRequestConfig as getLicenseRequestConfigAgent, hasOnlineLicenseServer, isLicenseAdminTokenValid, loginActivation as loginActivationAgent, loginAdmin as loginAdminAgent, loginLicenseAdmin as loginLicenseAdminAgent, logoutActivation as logoutActivationAgent, logoutAdmin as logoutAdminAgent, logoutLicenseAdmin as logoutLicenseAdminAgent, requestActivationCode as requestActivationCodeAgent, approveLicenseRequest as approveLicenseRequestAgent, declineLicenseRequest as declineLicenseRequestAgent, startTrial as startTrialAgent, TESTER_ACTIVATION_CODE } from "./auth.js";
+import { isFreeAccessCode } from "./free-access.js";
 
 const AGENT_VERSION = process.env.AGENT_VERSION || "0.2.1";
 const PROTOCOL_VERSION = 1;
@@ -1004,22 +1005,28 @@ export function loginActivation() {
   return authorization;
 }
 
-export function activateLicense(code) {
+export function activateLicense(code, now = Date.now()) {
   const normalizedCode = String(code || "").trim();
   if (normalizedCode === TESTER_ACTIVATION_CODE) {
-    const authorization = activateTester(normalizedCode);
+    const authorization = activateTester(normalizedCode, now);
+    rebuildAllowedOrigins();
+    revokeAllSessions();
+    return authorization;
+  }
+  if (isFreeAccessCode(normalizedCode)) {
+    const authorization = activateFreeAccess(normalizedCode, now);
     rebuildAllowedOrigins();
     revokeAllSessions();
     return authorization;
   }
   if (hasOnlineLicenseServer()) {
-    return activateOnline(code).then((authorization) => {
+    return activateOnline(code, now).then((authorization) => {
       rebuildAllowedOrigins();
       revokeAllSessions();
       return authorization;
     });
   }
-  const authorization = activateAgent(code);
+  const authorization = activateAgent(code, now);
   rebuildAllowedOrigins();
   revokeAllSessions();
   return authorization;

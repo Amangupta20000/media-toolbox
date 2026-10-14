@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, Copy, Gift, X } from "lucide-react";
-import { FREE_ACCESS_CODE, hasActiveAuthorizedLicense } from "../lib/free-access.js";
+import { FREE_ACCESS_ACTIVATION_DURATION_MS, FREE_ACCESS_CODE, FREE_ACCESS_EXPIRY_LABEL, hasActiveAuthorizedLicense } from "../lib/free-access.js";
 import { PRODUCT_NAME } from "../lib/site-metadata.js";
 import { pushAnalyticsEvent } from "../lib/analytics.js";
 
@@ -40,7 +40,6 @@ export function FreeAccessModal({ pathname, localAgentStatus }) {
   const [visible, setVisible] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
-  const [codeExpiryLabel, setCodeExpiryLabel] = useState("");
   const offerViewTrackedRef = useRef(false);
   const authorizedLicenseActive = hasActiveAuthorizedLicense(localAgentStatus);
 
@@ -55,13 +54,6 @@ export function FreeAccessModal({ pathname, localAgentStatus }) {
       markSessionCookie();
       setVisible(true);
       window.removeEventListener("scroll", showOnScroll);
-      fetch("/api/license/v1/free-access", { cache: "no-store" })
-        .then((response) => response.ok ? response.json() : null)
-        .then((payload) => {
-          const expiry = Number(payload?.redemptionExpiresAt || 0);
-          if (expiry > Date.now()) setCodeExpiryLabel(new Intl.DateTimeFormat(undefined, { year: "numeric", month: "long", day: "numeric" }).format(new Date(expiry)));
-        })
-        .catch(() => { /* The modal still explains the launch window if the status endpoint is unavailable. */ });
     };
     window.addEventListener("scroll", showOnScroll, { passive: true });
     return () => window.removeEventListener("scroll", showOnScroll);
@@ -103,7 +95,7 @@ export function FreeAccessModal({ pathname, localAgentStatus }) {
     }
   };
 
-  const expiryText = codeExpiryLabel || "the launch code expires";
+  const expiryText = FREE_ACCESS_EXPIRY_LABEL;
   return <div className="free-access-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
     <section className="free-access-dialog" role="dialog" aria-modal="true" aria-labelledby="free-access-title" aria-describedby="free-access-description">
       <button className="free-access-close" type="button" aria-label="Close launch offer" title="Close" onClick={close}><X size={18} /></button>
@@ -112,7 +104,7 @@ export function FreeAccessModal({ pathname, localAgentStatus }) {
       <h2 id="free-access-title">Try {PRODUCT_NAME} free until {expiryText}</h2>
       <p id="free-access-description">New here? Use our launch code to explore the toolbox on your desktop. No account is needed, and the Local agent keeps your files on your own computer.</p>
       <div className="free-access-code-row"><code>{FREE_ACCESS_CODE}</code><button className="primary-button" type="button" onClick={copy}>{copied ? <Check size={16} /> : <Copy size={16} />} {copied ? "Copied" : "Copy code"}</button></div>
-      <p className="free-access-note">Each activation gives 7 days. You can redeem the code unlimited times until {expiryText}.</p>
+      <p className="free-access-note">Each activation gives {FREE_ACCESS_ACTIVATION_DURATION_MS / 60000} minutes. You can redeem the code unlimited times until {expiryText}.</p>
       {copyError && <p className="free-access-copy-error" role="status">{copyError}</p>}
       <div className="free-access-actions"><Link className="text-link" href="/local-agent" onClick={close}>Open Local agent setup</Link><button className="secondary-button" type="button" onClick={close}>Maybe later</button></div>
     </section>

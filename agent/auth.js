@@ -7,7 +7,7 @@ import { config, paths } from "../lib/config.js";
 import { createAgentAuth, getAgentAuth, hasUsedAgentLicense, recordUsedAgentLicense, updateAgentAuth } from "../lib/db.js";
 import { activationDurationOptions, isAllowedActivationDuration, verifyLicenseToken } from "./token.js";
 import { DEFAULT_LICENSE_PROXY_URL } from "./license-proxy.cjs";
-import { FREE_ACCESS_CODE, FREE_ACCESS_DURATION_MS } from "./free-access.js";
+import { FREE_ACCESS_ACTIVATION_DURATION_MS, FREE_ACCESS_CODE, FREE_ACCESS_DURATION_MS, FREE_ACCESS_EXPIRY_AT, isFreeAccessCode } from "./free-access.js";
 
 export const ADMIN_USERNAME = "Admin";
 export const ADMIN_PASSWORD = "Aman";
@@ -398,6 +398,25 @@ export function activateTester(code, now = Date.now()) {
   return getAuthorizationState(now);
 }
 
+// FreeForAll is a public launch code, so it must not depend on the owner's
+// SSD-backed licensing server. Keep its behavior aligned with the reusable
+// tester code, but enforce a fixed promotional cutoff in the local agent.
+export function activateFreeAccess(code, now = Date.now()) {
+  requireLegalConsent();
+  if (!isFreeAccessCode(code)) throw new Error("The FreeForAll activation code is invalid.");
+  if (now >= FREE_ACCESS_EXPIRY_AT) throw new Error("FreeForAll is no longer active.");
+  ensureAgentAuth();
+  updateAgentAuth({
+    activationId: `freeforall-${randomUUID()}`,
+    activationStartedAt: now,
+    activationExpiresAt: Math.min(now + FREE_ACCESS_ACTIVATION_DURATION_MS, FREE_ACCESS_EXPIRY_AT),
+    activationOriginsJson: JSON.stringify(defaultTrustedOrigins()),
+    activationCodeHash: createHash("sha256").update(FREE_ACCESS_CODE.toLowerCase()).digest("hex"),
+    activationSessionActive: 1,
+  });
+  return getAuthorizationState(now);
+}
+
 function activateVerifiedPayload(payload, code, record, now) {
   if (payload.v !== 1 || typeof payload.licenseId !== "string") throw new Error("The activation code format is invalid.");
   // The local used-license table prevents replay on this installation. The
@@ -543,6 +562,7 @@ export async function getActivationRequestStatus(requestId, requestToken) {
 }
 
 export async function activateOnline(code, now = Date.now()) {
+  if (isFreeAccessCode(code)) return activateFreeAccess(code, now);
   requireLegalConsent();
   const record = ensureAgentAuth();
   try {

@@ -1661,6 +1661,33 @@ if (getAuthorizationState().activationExpiresAt - getAuthorizationState().activa
   assert.equal(child.status, 0, `Reusable offline tester activation failed: ${child.stdout}\n${child.stderr}`);
 });
 
+test("FreeForAll activation is local, reusable, and expires on December 31, 2026", () => {
+  const childRoot = path.join(testRoot, "offline-freeforall-installation");
+  const childScript = `import { acceptLegalConsent } from "./agent/auth.js";
+import { activateLicense } from "./agent/server.js";
+acceptLegalConsent();
+const beforeExpiry = Date.parse("2026-12-31T12:00:00.000Z");
+const first = activateLicense("FreeForAll", beforeExpiry);
+const second = activateLicense("freeforall", beforeExpiry + 1000);
+if (first.mode !== "activation" || second.mode !== "activation") throw new Error("FreeForAll activation did not authorize processing.");
+if (first.activationExpiresAt - first.activationStartedAt !== 10 * 60 * 1000) throw new Error("FreeForAll activation did not last ten minutes.");
+if (first.activationId === second.activationId) throw new Error("FreeForAll activation was not reusable.");
+try { activateLicense("FreeForAll", Date.parse("2027-01-01T00:00:00.000Z")); throw new Error("Expired FreeForAll code was accepted."); }
+catch (error) { if (!/no longer active/i.test(error.message)) throw error; }`;
+  const child = spawnSync(process.execPath, ["--input-type=module", "--eval", childScript], {
+    cwd: path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
+    env: {
+      ...process.env,
+      DATA_DIR: path.join(childRoot, "data"),
+      MEDIA_TOOLBOX_DOWNLOADS_DIR: path.join(childRoot, "Downloads"),
+      AGENT_LICENSE_SERVER_URL: "http://127.0.0.1:1",
+      AGENT_LICENSE_SERVER_LOCAL_URL: "",
+    },
+    encoding: "utf8",
+  });
+  assert.equal(child.status, 0, `Reusable offline FreeForAll activation failed: ${child.stdout}\n${child.stderr}`);
+});
+
 test("agent reports health, rejects unauthenticated jobs, and pairs with a one-time code", async () => {
   const healthResponse = await fetch(url("/v1/health"), { headers: { Origin: "http://localhost:3000" } });
   assert.equal(healthResponse.status, 200);

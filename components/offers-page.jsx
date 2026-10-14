@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, CalendarClock, Check, Copy, Gift, InfinityIcon, ShieldCheck, UserRoundCheck } from "lucide-react";
-import { FREE_ACCESS_CODE } from "../lib/free-access.js";
+import { FREE_ACCESS_ACTIVATION_DURATION_MS, FREE_ACCESS_CODE, FREE_ACCESS_EXPIRY_AT, FREE_ACCESS_EXPIRY_LABEL } from "../lib/free-access.js";
 import { PRODUCT_NAME } from "../lib/site-metadata.js";
 import { pushAnalyticsEvent } from "../lib/analytics.js";
 
@@ -27,14 +27,16 @@ const LOCAL_AGENT_OFFERS = Object.freeze([
     code: FREE_ACCESS_CODE,
     badge: "Active launch offer",
     title: "FreeForAll",
-    description: "Explore the full Local agent workflow on your own computer with a seven-day activation.",
-    access: "7 days per activation",
+    description: "Explore the full Local agent workflow on your own computer with a ten-minute activation.",
+    access: `${FREE_ACCESS_ACTIVATION_DURATION_MS / 60000} minutes per activation`,
     redemptionPolicy: "unlimited",
-    statusEndpoint: "/api/license/v1/free-access",
+    expiresAt: FREE_ACCESS_EXPIRY_AT,
+    expiryLabel: FREE_ACCESS_EXPIRY_LABEL,
   },
 ]);
 
-function formatExpiry(timestamp) {
+function formatExpiry(timestamp, label = "") {
+  if (label) return `Until ${label}`;
   if (!timestamp) return "Until the launch code expires";
   return `Until ${new Intl.DateTimeFormat(undefined, { year: "numeric", month: "long", day: "numeric" }).format(new Date(timestamp))}`;
 }
@@ -78,6 +80,11 @@ function OfferCard({ offer }) {
   }, [offer.id]);
 
   useEffect(() => {
+    if (offer.expiresAt) {
+      setExpiry(offer.expiresAt);
+      setAvailability(offer.expiresAt <= Date.now() ? "expired" : "active");
+      return undefined;
+    }
     if (!offer.statusEndpoint) {
       setAvailability("active");
       return undefined;
@@ -95,7 +102,7 @@ function OfferCard({ offer }) {
         if (active) setAvailability("unknown");
       });
     return () => { active = false; };
-  }, [offer.statusEndpoint]);
+  }, [offer.expiresAt, offer.statusEndpoint]);
 
   const active = availability !== "expired";
   const statusLabel = availability === "expired" ? "Offer ended" : availability === "unknown" ? "Check at redemption" : availability === "checking" ? "Checking availability…" : "Available now";
@@ -122,7 +129,7 @@ function OfferCard({ offer }) {
     <dl className="offer-facts">
       <div><dt>Access per activation</dt><dd>{offer.access}</dd></div>
       <div><dt>Redemption policy</dt><dd>{policy.label}</dd></div>
-      <div><dt>Availability</dt><dd>{formatExpiry(expiry)}</dd></div>
+      <div><dt>Availability</dt><dd>{formatExpiry(expiry, offer.expiryLabel)}</dd></div>
     </dl>
     <p className="offer-policy-note"><ShieldCheck size={16} aria-hidden="true" />{policy.description}</p>
     <div className="offer-card-actions"><Link className="primary-button" href="/local-agent">Open Local agent setup <ArrowRight size={16} /></Link>{availability === "unknown" && <small>Offer status could not be checked right now. The licensing service confirms availability when you redeem it.</small>}</div>
