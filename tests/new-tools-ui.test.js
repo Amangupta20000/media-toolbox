@@ -65,6 +65,14 @@ test("Mock API separates new-project and new-API actions", async () => {
   assert.match(page, /const newProject = \(\) =>/);
 });
 
+test("Mock API exposes Copy URL beside fetch and cURL examples", async () => {
+  const page = await read("components/mock-api-page.jsx");
+  assert.ok((page.match(/onCopy\(savedUrl\)/g) || []).length >= 2);
+  assert.match(page, /<Copy size=\{15\} \/> Copy URL/);
+  assert.match(page, /mockFetchExample\(project\.id/);
+  assert.match(page, /mockCurlExample\(project\.id/);
+});
+
 test("Mock API keeps collection terminology out of the workspace copy", async () => {
   const page = await read("components/mock-api-page.jsx");
   assert.doesNotMatch(page, /route name becomes the collection name/);
