@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowRight, CheckCircle2, Download, Globe2, Laptop, ShieldCheck, Sparkles } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
+import { AdsterraNativeBanner } from "./adsterra-native-banner.jsx";
 import { PROCESSING_MODE_GUIDE } from "../lib/processing-mode-guide.js";
 import { AUTHOR_NAME } from "../lib/site-metadata.js";
 
@@ -172,6 +173,7 @@ export function ProcessingModeGuide() {
       </header>
 
       <OnThisPage activeId={activeId} />
+      <AdsterraNativeBanner />
 
       <section id="overview" className="mode-guide-section" aria-labelledby="mode-guide-overview-title">
         <div className="mode-guide-section-heading"><div><div className="section-kicker"><span className="kicker-line" /> Overview</div><h2 id="mode-guide-overview-title">Two processing paths, one untouched original</h2></div><ShieldCheck size={28} aria-hidden="true" /></div>

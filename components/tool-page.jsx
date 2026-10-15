@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Download, FileCheck2, Info, LoaderCircle, LockKeyhole, RotateCcw, ShieldCheck, Sparkles, Zap } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
+import { AdsterraNativeBanner } from "./adsterra-native-banner.jsx";
 import { FileDropzone, formatBytes } from "./file-dropzone.jsx";
 import { clipboardImageFile, isSupportedImageFile } from "../lib/image-input.js";
 import { takeHistoryEdit } from "./history-edit.js";
@@ -731,6 +732,7 @@ function BatchJobStatusCard({ jobs, tool, mode, onReset }) {
       </article>;
     })}</div>
     <div className="job-actions"><button className="secondary-button" onClick={onReset}><RotateCcw size={17} /> {finished ? "Convert more images" : "Cancel batch"}</button></div>
+    {finished && completed > 0 && <AdsterraNativeBanner />}
   </section>;
 }
 
@@ -800,7 +802,7 @@ export function JobStatusCard({ job, tool, isImage, isPdfCompressor, mode, keepR
     {done && job.result && isPdfCompressor && <ResultPdfPreview result={job.result} />}
     {done && job.result && <div className="result-summary"><div><span>Output</span><strong>{job.result.filename}</strong></div><div><span>Size</span><strong>{formatBytes(job.result.bytes)}</strong></div>{isPdfCompressor && Number.isFinite(job.result.reductionPercent) && <div><span>Saved</span><strong>{job.result.reductionPercent > 0 ? `${job.result.reductionPercent}%` : "Already optimized"}</strong></div>}{isPdfCompressor && job.result.targetSizeMb && <div><span>Size target</span><strong>{job.result.targetMet ? `Under ${job.result.targetSizeMb} MB` : "Not reached"}</strong></div>}{isImage && job.result.targetSizeKb && <div><span>Size target</span><strong>{job.result.targetMet ? `Near ${job.result.targetSizeKb} KB` : "Not reached"}</strong></div>}{isImage && job.result.width && <div><span>Resolution</span><strong>{job.result.width} × {job.result.height}</strong></div>}{isImage && job.result.inputFormat === "svg" && job.result.scale && <div><span>Export size</span><strong>{job.result.scale === "custom" ? `${job.result.width} × ${job.result.height} px` : `${job.result.scale}× intrinsic`}</strong></div>}{isImage && job.result.inputFormat === "svg" && job.result.background && <div><span>Background</span><strong>{job.result.background === "color" ? "Solid colour" : job.result.background === "gradient" ? "Gradient" : "Transparent"}</strong></div>}{!isImage && !isPdfCompressor && job.result.durationMs !== null && job.result.durationMs !== undefined && Number.isFinite(Number(job.result.durationMs)) && <div><span>Duration</span><strong>{formatDuration(job.result.durationMs)}</strong></div>}<div><span>Method</span><strong>{job.result.method || "Completed"}</strong></div></div>}
     {job.warnings.length > 0 && <div className="warning-list">{job.warnings.map((warning) => <DismissibleMessage key={warning} resetKey={warning}><AlertTriangle size={16} /><span>{warning}</span></DismissibleMessage>)}</div>}
-    {done && job.result && <ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={filename} />} {done && job.result && <ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} />}<div className="job-actions">{done && job.result && <a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, filename)} download={filename} onClick={() => pushAnalyticsEvent("result_downloaded", { tool, result_type: isImage ? "image" : isPdfCompressor ? "pdf" : "video" })}><Download size={18} /> Download result</a>}<button className="secondary-button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Process another file" : "Cancel"}</button></div>
+    {done && job.result && <ResultDownloadNote result={job.result} mode={mode} keepResult={keepResult} filename={filename} />} {done && job.result && <ResultFilenameField originalFilename={job.result.filename} value={filenameStemValue || filenameStem(job.result.filename)} onChange={setFilenameStemValue} />}<div className="job-actions">{done && job.result && <a className="primary-button" href={downloadUrlWithFilename(job.result.downloadUrl, filename)} download={filename} onClick={() => pushAnalyticsEvent("result_downloaded", { tool, result_type: isImage ? "image" : isPdfCompressor ? "pdf" : "video" })}><Download size={18} /> Download result</a>}<button className="secondary-button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Process another file" : "Cancel"}</button></div>{done && job.result && <AdsterraNativeBanner />}
   </section>;
 }
 

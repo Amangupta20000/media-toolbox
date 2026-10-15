@@ -232,6 +232,7 @@ export function AppShell({ children }) {
       <main className="main-area">
         <div className="content-wrap">{showAgentSetupPrompt && <AgentSetupPrompt />}{children}</div>
         <Breadcrumbs pathname={currentPath} />
+        <div id="mobile-native-ad-dock" className="mobile-native-ad-dock" aria-label="Advertisement" />
         <AppFooter />
       </main>
     </div>

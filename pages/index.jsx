@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Archive, ArrowRight, Check, FileImage, FileText, Film, Image as ImageIcon, ShieldCheck } from "lucide-react";
 import { AppShell } from "../components/app-shell.jsx";
+import { AdsterraResponsiveBanner } from "../components/adsterra-responsive-banner.jsx";
 import { PRODUCT_NAME, PRODUCT_TAGLINE } from "../lib/site-metadata.js";
 
 const toolDirectory = [
@@ -31,6 +32,8 @@ export default function HomePage() {
       </div>
       <div className="home-trust-line"><ShieldCheck size={17} /><span>Processing location shown · source files are not overwritten</span></div>
     </section>
+
+    <AdsterraResponsiveBanner />
 
     <section className="home-section" aria-labelledby="home-tools-title">
       <div className="home-section-heading"><div><div className="section-kicker"><span className="kicker-line" /> Tool directory</div><h2 id="home-tools-title">Choose the tool for your file</h2></div><div className="home-section-heading-links"><Link className="text-link" href="/browser-vs-local-agent">Compare processing modes <ArrowRight size={15} /></Link></div></div>

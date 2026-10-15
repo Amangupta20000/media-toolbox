@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { ArrowRight, BookOpen, CheckCircle2, Download, FolderOpen, Globe2, Laptop, Monitor, MousePointerClick, RefreshCw, Settings2, ShieldCheck, Terminal } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
+import { AdsterraNativeBanner } from "./adsterra-native-banner.jsx";
+import { AdsterraResponsiveBanner } from "./adsterra-responsive-banner.jsx";
 import { ToolFaqContent } from "./tool-seo-content.jsx";
 import { AGENT_DOWNLOAD_PATHS } from "../lib/agent-downloads.js";
 
@@ -282,6 +284,7 @@ export function AgentSetupGuide() {
     <div className="agent-guide-hero-copy"><div className="section-kicker"><span className="kicker-line" /> Desktop setup guide</div><h1>How to install NativeMedia Agent</h1><p>Install the NativeMedia Agent Local agent on your computer, connect it to this browser, and keep supported media processing on your desktop.</p><div className="agent-guide-hero-actions"><Link className="primary-button" href="/local-agent"><CheckCircle2 size={17} /> Open Local agent</Link><a className="secondary-button" href={releasesUrl} target="_blank" rel="noreferrer"><Download size={17} /> Latest release</a><Link className="agent-guide-mode-link" href="/browser-vs-local-agent">Compare Browser mode and Local agent <ArrowRight size={14} /></Link></div></div>
       <SetupFlowDiagram />
     </section>
+    <AdsterraResponsiveBanner />
 
     <section className="agent-guide-platforms" aria-labelledby="agent-guide-platform-title">
       <div className="agent-guide-section-heading"><div><div className="section-kicker"><span className="kicker-line" /> Choose your computer</div><h2 id="agent-guide-platform-title">Install in four simple steps</h2><p>Pick your operating system. The website stays your interface; the Local agent does the work on your computer.</p></div><BookOpen size={30} aria-hidden="true" /></div>
@@ -293,5 +296,6 @@ export function AgentSetupGuide() {
 
     <section className="agent-guide-help" aria-labelledby="agent-guide-help-title"><div><div className="section-kicker"><span className="kicker-line" /> Need a hand?</div><h2 id="agent-guide-help-title">Still not connected?</h2><p>Open the Local agent page to see the exact connection status and the next action for this computer.</p></div><Link className="secondary-button" href="/local-agent">Open connection status <ArrowRight size={16} /></Link></section>
     <ToolFaqContent pathname="/how-to-setup-agent" />
+    <AdsterraNativeBanner />
   </AppShell>;
 }

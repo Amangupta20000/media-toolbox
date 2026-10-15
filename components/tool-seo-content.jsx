@@ -2,6 +2,8 @@ import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { AUTHOR_NAME, lastModifiedForPathname, metadataForPathname, normalizeSitePath } from "../lib/site-metadata.js";
 import { TOOL_SEO_CONTENT } from "../lib/tool-seo-content.js";
+import { AdsterraNativeBanner } from "./adsterra-native-banner.jsx";
+import { AdsterraResponsiveBanner } from "./adsterra-responsive-banner.jsx";
 
 export function ToolSeoContent({ pathname }) {
   const normalizedPath = normalizeSitePath(pathname);
@@ -15,6 +17,7 @@ export function ToolSeoContent({ pathname }) {
   ].filter(([href], index, links) => !metadataForPathname(href).noIndex && links.findIndex(([candidate]) => candidate === href) === index);
 
   return <section id="tool-guide" className="tool-seo-content" aria-labelledby="tool-seo-title">
+    {normalizedPath === "/local-agent" && <AdsterraResponsiveBanner />}
     <div className="tool-seo-intro">
       <div className="section-kicker"><span className="kicker-line" /> Helpful guide</div>
       <h2 id="tool-seo-title">{content.introHeading || `About ${content.name}`}</h2>
@@ -57,6 +60,7 @@ export function ToolSeoContent({ pathname }) {
       {content.troubleshooting?.length > 0 && <article className="tool-seo-panel"><h2>Common mistakes and troubleshooting</h2><ul>{content.troubleshooting.map((item) => <li key={item}>{item}</li>)}</ul></article>}
       {content.verification?.length > 0 && <article className="tool-seo-panel"><h2>Export verification checklist</h2><ol>{content.verification.map((item) => <li key={item}>{item}</li>)}</ol></article>}
     </section>}
+    {normalizedPath === "/local-agent" && <AdsterraNativeBanner />}
     {content.comparison?.length > 0 && <section className="tool-seo-comparison" aria-labelledby="tool-seo-comparison-title">
       <h2 id="tool-seo-comparison-title">At a glance</h2>
       <div className="tool-seo-comparison-scroll">

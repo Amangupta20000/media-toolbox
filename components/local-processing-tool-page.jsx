@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Clock3, Download, FileArchive, FileCheck2, Info, LoaderCircle, RotateCcw, ShieldCheck, Sparkles } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
+import { AdsterraNativeBanner } from "./adsterra-native-banner.jsx";
 import { FileDropzone, formatBytes } from "./file-dropzone.jsx";
 import { ProcessingMode } from "./processing-mode.jsx";
 import { ProcessingOptionsPanel } from "./processing-options.jsx";
@@ -125,7 +126,7 @@ function LocalToolJobCard({ job, tool, mode, keepResult, onReset }) {
     {(job.warnings || []).map((warning) => <DismissibleMessage key={warning} className="error-banner" resetKey={warning}><AlertTriangle size={16} /><span>{warning}</span></DismissibleMessage>)}
     {done && result && <ResultDownloadNote result={result} mode={mode} keepResult={keepResult} filename={filename} />}
     {done && result && <ResultFilenameField originalFilename={result.filename} value={filenameStemValue || filenameStem(result.filename)} onChange={setFilenameStemValue} />}
-    <div className="job-actions">{done && result && <a className="primary-button" href={downloadUrlWithFilename(result.downloadUrl, filename)} download={filename} onClick={() => pushAnalyticsEvent("result_downloaded", { tool, result_type: resultType })}><Download size={18} /> Download result</a>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Process another file" : "Cancel"}</button></div>
+    <div className="job-actions">{done && result && <a className="primary-button" href={downloadUrlWithFilename(result.downloadUrl, filename)} download={filename} onClick={() => pushAnalyticsEvent("result_downloaded", { tool, result_type: resultType })}><Download size={18} /> Download result</a>}<button className="secondary-button" type="button" onClick={onReset}><RotateCcw size={17} /> {done || failed ? "Process another file" : "Cancel"}</button></div>{done && result && <AdsterraNativeBanner />}
   </section>;
 }
 

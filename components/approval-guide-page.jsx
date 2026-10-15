@@ -3,6 +3,7 @@ import { ArrowRight, BookOpen, ShieldCheck } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { AUTHOR_NAME, CONTENT_LAST_UPDATED } from "../lib/site-metadata.js";
 import { GUIDE_INDEX } from "../lib/approval-guides.js";
+import { AdsterraNativeBanner } from "./adsterra-native-banner.jsx";
 
 function GuideByline({ lastUpdated }) {
   return <p className="approval-guide-byline">Written by <strong>{AUTHOR_NAME}</strong><span aria-hidden="true"> · </span>Last updated: <time dateTime={lastUpdated}>{lastUpdated}</time></p>;
@@ -74,6 +75,7 @@ export function ApprovalGuidesHub() {
           <span className="approval-guide-card-link">Read guide <ArrowRight size={15} /></span>
         </Link>)}
       </div>
+      <AdsterraNativeBanner />
     </article>
   </AppShell>;
 }

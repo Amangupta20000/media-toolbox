@@ -2,6 +2,7 @@
 
 import { Globe2, Laptop, LockKeyhole, ShieldCheck } from "lucide-react";
 import { browserSupportsTool } from "./browser-processing.js";
+import { AdsterraNativeBanner } from "./adsterra-native-banner.jsx";
 import { isProcessingLocationReady } from "./processing-client.js";
 import { pushAnalyticsEvent } from "../lib/analytics.js";
 
@@ -145,6 +146,7 @@ export function ProcessingOptionsPanel({ tool, locations, value, onSelect, hidde
       <h2 id="processing-options-title">Local agent is the recommended choice</h2>
       <p>Choose the option that fits your device and the kind of {toolName} you need. Local agent is best for desktop and advanced work; Browser mode is a convenient option for supported quick conversions.</p>
     </div>
+    {!hidden && <AdsterraNativeBanner />}
     <div className="processing-format-table-wrap">
       <table className="processing-format-table">
         <caption>How processing modes differ</caption>
