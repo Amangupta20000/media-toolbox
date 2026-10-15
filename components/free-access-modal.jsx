@@ -104,7 +104,7 @@ export function FreeAccessModal({ pathname, localAgentStatus }) {
       <h2 id="free-access-title">Try {PRODUCT_NAME} free until {expiryText}</h2>
       <p id="free-access-description">New here? Use our launch code to explore the toolbox on your desktop. No account is needed, and the Local agent keeps your files on your own computer.</p>
       <div className="free-access-code-row"><code>{FREE_ACCESS_CODE}</code><button className="primary-button" type="button" onClick={copy}>{copied ? <Check size={16} /> : <Copy size={16} />} {copied ? "Copied" : "Copy code"}</button></div>
-      <p className="free-access-note">Each activation gives {FREE_ACCESS_ACTIVATION_DURATION_MS / 60000} minutes. You can redeem the code unlimited times until {expiryText}.</p>
+      <p className="free-access-note">Each activation gives {FREE_ACCESS_ACTIVATION_DURATION_MS / (24 * 60 * 60 * 1000)} days. You can redeem the code unlimited times until {expiryText}.</p>
       {copyError && <p className="free-access-copy-error" role="status">{copyError}</p>}
       <div className="free-access-actions"><Link className="text-link" href="/local-agent" onClick={close}>Open Local agent setup</Link><button className="secondary-button" type="button" onClick={close}>Maybe later</button></div>
     </section>

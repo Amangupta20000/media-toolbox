@@ -1666,12 +1666,14 @@ test("FreeForAll activation is local, reusable, and expires on December 31, 2026
   const childScript = `import { acceptLegalConsent } from "./agent/auth.js";
 import { activateLicense } from "./agent/server.js";
 acceptLegalConsent();
-const beforeExpiry = Date.parse("2026-12-31T12:00:00.000Z");
+const beforeExpiry = Date.parse("2026-12-20T12:00:00.000Z");
 const first = activateLicense("FreeForAll", beforeExpiry);
 const second = activateLicense("freeforall", beforeExpiry + 1000);
 if (first.mode !== "activation" || second.mode !== "activation") throw new Error("FreeForAll activation did not authorize processing.");
-if (first.activationExpiresAt - first.activationStartedAt !== 10 * 60 * 1000) throw new Error("FreeForAll activation did not last ten minutes.");
+if (first.activationExpiresAt - first.activationStartedAt !== 7 * 24 * 60 * 60 * 1000) throw new Error("FreeForAll activation did not last seven days.");
 if (first.activationId === second.activationId) throw new Error("FreeForAll activation was not reusable.");
+const nearExpiry = activateLicense("FreeForAll", Date.parse("2026-12-31T12:00:00.000Z"));
+if (nearExpiry.activationExpiresAt !== Date.parse("2027-01-01T00:00:00.000Z")) throw new Error("FreeForAll activation was not capped at the promotional expiry.");
 try { activateLicense("FreeForAll", Date.parse("2027-01-01T00:00:00.000Z")); throw new Error("Expired FreeForAll code was accepted."); }
 catch (error) { if (!/no longer active/i.test(error.message)) throw error; }`;
   const child = spawnSync(process.execPath, ["--input-type=module", "--eval", childScript], {

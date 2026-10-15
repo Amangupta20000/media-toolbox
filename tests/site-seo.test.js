@@ -271,7 +271,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.doesNotMatch(freeAccessModal, /Try \{PRODUCT_NAME\} free for 7 days/);
   assert.match(freeAccessModal, /document\.cookie/);
   assert.match(styles, /\.free-access-backdrop \{ position: fixed/);
-  assert.equal(FREE_ACCESS_ACTIVATION_DURATION_MS, 10 * 60 * 1000);
+  assert.equal(FREE_ACCESS_ACTIVATION_DURATION_MS, 7 * 24 * 60 * 60 * 1000);
   assert.equal(FREE_ACCESS_EXPIRY_AT, Date.parse("2027-01-01T00:00:00.000Z"));
   assert.equal(FREE_ACCESS_EXPIRY_LABEL, "December 31, 2026");
   assert.equal(FREE_ACCESS_DURATION_MS, 7 * 24 * 60 * 60 * 1000);

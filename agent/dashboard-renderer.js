@@ -627,7 +627,7 @@
       render(await api.activate(licenseRequest.code));
       setLicenseRequest({ ...licenseRequest, status: "redeemed", code: null });
       stopLicenseRequestPolling();
-      showNotice("Activation completed. This agent is authorized for ten minutes.");
+      showNotice("Activation completed. This agent is authorized.");
     } catch (error) {
       showNotice(error.message || "The activation code could not be activated.");
       if (button) button.disabled = false;
