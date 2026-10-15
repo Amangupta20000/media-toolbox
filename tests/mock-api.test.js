@@ -64,6 +64,12 @@ test("database GET APIs filter records with query parameters", () => {
     { id: "2", name: "Alan", role: "developer", active: true },
     { id: "3", name: "Grace", role: "admin", active: false },
   ]);
+  const objectValue = normalizeMockProject({
+    id: "query-fallback-object",
+    name: "Query fallback object",
+    collections: [{ name: "config", methods: ["GET"], records: { enabled: true, region: "eu" } }],
+  });
+  assert.deepEqual(applyMockRequest(objectValue, { method: "GET", pathname: "/config?region=missing" }).body, { enabled: true, region: "eu" });
 });
 
 test("database GET APIs can unwrap exactly one matching record", () => {
