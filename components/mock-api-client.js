@@ -1,7 +1,7 @@
 import { applyMockRequest, formatMockProject, normalizeMockProject } from "../lib/mock-api.js";
 import { agentBaseUrl, requestLocalAgentJson } from "./processing-client.js";
 
-export const NATIVE_MOCK_API_BASE_URL = "http://10.0.2.2:4788";
+export const NATIVE_MOCK_API_BASE_URL = "http://127.0.0.1:4788";
 
 export function exportMockProject(value) {
   return formatMockProject(value);

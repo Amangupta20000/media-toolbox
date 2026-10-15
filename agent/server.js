@@ -37,6 +37,67 @@ const state = {
   cleanupTimer: null,
   authorizationMode: "locked",
 };
+const adbReverseState = {
+  command: null,
+  serials: new Set(),
+  timer: null,
+  lastLookupAt: 0,
+};
+
+function androidAdbCandidates() {
+  const executable = process.platform === "win32" ? "adb.exe" : "adb";
+  const sdkRoots = [
+    process.env.ANDROID_HOME,
+    process.env.ANDROID_SDK_ROOT,
+    process.platform === "darwin" ? path.join(os.homedir(), "Library", "Android", "sdk") : "",
+    process.platform === "win32" ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "Android", "Sdk") : "",
+    process.platform === "linux" ? path.join(os.homedir(), "Android", "Sdk") : "",
+  ].filter(Boolean);
+  return [...new Set([
+    process.env.ADB_PATH,
+    executable,
+    ...sdkRoots.map((root) => path.join(root, "platform-tools", executable)),
+  ].filter(Boolean))];
+}
+
+function connectedAndroidSerials(output) {
+  return String(output || "")
+    .split(/\r?\n/)
+    .slice(1)
+    .map((line) => line.trim().split(/\s+/))
+    .filter(([serial, status]) => serial && status === "device")
+    .map(([serial]) => serial);
+}
+
+async function syncAndroidReverse() {
+  if (state.nativeHttpPort !== DEFAULT_NATIVE_HTTP_PORT || process.env.AGENT_DISABLE_ADB_REVERSE === "1") return;
+  const now = Date.now();
+  if (!adbReverseState.command && now - adbReverseState.lastLookupAt >= 15000) {
+    adbReverseState.lastLookupAt = now;
+    adbReverseState.command = await firstAvailable(androidAdbCandidates());
+  }
+  if (!adbReverseState.command) return;
+  const listed = await runCommand(adbReverseState.command, ["devices"], { timeoutMs: 4000 });
+  if (listed.code !== 0) return;
+  const serials = connectedAndroidSerials(listed.stdout);
+  const mapped = new Set();
+  for (const serial of serials) {
+    const result = await runCommand(adbReverseState.command, ["-s", serial, "reverse", `tcp:${DEFAULT_NATIVE_HTTP_PORT}`, `tcp:${DEFAULT_NATIVE_HTTP_PORT}`], { timeoutMs: 4000 });
+    if (result.code === 0) mapped.add(serial);
+  }
+  adbReverseState.serials = mapped;
+}
+
+async function stopAndroidReverse() {
+  if (adbReverseState.timer) clearInterval(adbReverseState.timer);
+  adbReverseState.timer = null;
+  if (adbReverseState.command) {
+    for (const serial of adbReverseState.serials) {
+      await runCommand(adbReverseState.command, ["-s", serial, "reverse", "--remove", `tcp:${DEFAULT_NATIVE_HTTP_PORT}`], { timeoutMs: 4000 }).catch(() => undefined);
+    }
+  }
+  adbReverseState.serials = new Set();
+}
 
 function processingSessionCount() {
   return [...state.sessions.values()].filter((session) => session.scope !== "history").length;
@@ -605,7 +666,7 @@ function isLocalhostOrigin(value) {
 
 function mockOriginFor(request, response) {
   const requested = String(request.headers.origin || "").trim();
-  const origin = !requested ? null : (isLocalhostOrigin(requested) ? requested : null);
+  const origin = !requested ? null : (isLocalhostOrigin(requested) || state.allowedOrigins.has(requested) ? requested : null);
   const requestedHeaders = String(request.headers["access-control-request-headers"] || "")
     .split(",")
     .map((header) => header.trim())
@@ -1160,6 +1221,11 @@ export async function startAgentServer({ port = Number(process.env.AGENT_PORT) |
       state.nativeHttpServer = null;
     }
   }
+  if (state.nativeHttpPort === DEFAULT_NATIVE_HTTP_PORT && process.env.AGENT_DISABLE_ADB_REVERSE !== "1") {
+    syncAndroidReverse().catch(() => undefined);
+    adbReverseState.timer = setInterval(() => syncAndroidReverse().catch(() => undefined), 5000);
+    adbReverseState.timer.unref?.();
+  }
   state.cleanupTimer = setInterval(() => cleanupExpired().catch(() => undefined), 60 * 1000);
   state.cleanupTimer.unref?.();
   // Uploads normally start the queue immediately. Recover jobs that were
@@ -1172,6 +1238,7 @@ export async function startAgentServer({ port = Number(process.env.AGENT_PORT) |
 export async function stopAgentServer() {
   if (state.cleanupTimer) clearInterval(state.cleanupTimer);
   state.cleanupTimer = null;
+  await stopAndroidReverse();
   if (state.nativeHttpServer) await new Promise((resolve) => state.nativeHttpServer.close(resolve));
   state.nativeHttpServer = null;
   state.nativeHttpPort = null;

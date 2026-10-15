@@ -207,10 +207,11 @@ test("Mock API integration URLs use one hydration-safe native endpoint", async (
   assert.doesNotMatch(page, /agentBaseUrlValue/);
   assert.match(client, /baseUrl = agentBaseUrl\(\)/);
   assert.ok(client.includes('String(baseUrl).replace(/\\/$/, "")'));
-  assert.match(client, /export const NATIVE_MOCK_API_BASE_URL = "http:\/\/10\.0\.2\.2:4788"/);
+  assert.match(client, /export const NATIVE_MOCK_API_BASE_URL = "http:\/\/127\.0\.0\.1:4788"/);
   assert.match(client, /nativeHttpMockApiUrl/);
-  assert.match(page, /http:\/\/10\.0\.2\.2:4788/);
-  assert.doesNotMatch(page, /adb reverse/);
+  assert.match(page, /http:\/\/127\.0\.0\.1:4788/);
+  assert.match(page, /automatically bridges connected Android devices/);
+  assert.doesNotMatch(page, /10\.0\.2\.2/);
 });
 
 test("Mock API guided POST builder derives and stores internal update actions", async () => {
