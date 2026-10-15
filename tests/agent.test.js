@@ -189,6 +189,37 @@ test("localhost mock APIs support browser preflight and integration requests", a
   }
 });
 
+test("native Mock API HTTP companion serves the same runtime routes without TLS", async () => {
+  const { deleteMockProject, saveMockProject } = await import("../lib/mock-api-storage.js");
+  if (!agent.getAgentState().authorization.authorized) {
+    agent.acceptLegal();
+    agent.startTrial();
+  }
+  const project = {
+    id: "native-companion-api",
+    name: "Native Companion API",
+    mode: "database",
+    collections: [{ name: "users", methods: ["GET"], records: [{ name: "Ada" }] }],
+    endpoints: [{ id: "users-get", mode: "database", collection: "users", method: "GET", path: "/users" }],
+  };
+  await saveMockProject(project);
+  await agent.stopAgentServer();
+  server = await agent.startAgentServer({ port: 0, nativeHttpPort: 0 });
+  port = server.address().port;
+  const nativePort = agent.getAgentState().mockApi.nativeHttpPort;
+  assert.ok(nativePort > 0);
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${nativePort}/v1/mock/${project.id}/users`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), [{ name: "Ada" }]);
+    const websiteRoute = await fetch(`http://127.0.0.1:${nativePort}/v1/health`);
+    assert.equal(websiteRoute.status, 404);
+  } finally {
+    await deleteMockProject(project.id);
+  }
+});
+
 test("Local Agent serves guided POST consent mutations over multi-segment routes", async () => {
   const { deleteMockProject, saveMockProject } = await import("../lib/mock-api-storage.js");
   const project = {

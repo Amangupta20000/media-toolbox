@@ -21,10 +21,13 @@ import { isFreeAccessCode } from "./free-access.js";
 const AGENT_VERSION = process.env.AGENT_VERSION || "0.2.1";
 const PROTOCOL_VERSION = 1;
 const DEFAULT_PORT = 4789;
+const DEFAULT_NATIVE_HTTP_PORT = 4788;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const HISTORY_TOOLS = new Set(["image-converter", "svg-to-png", "video-repair", "video-compressor", "audio-extractor", "pdf-to-images", "pdf-editor", "pdf-text-editor", "pdf-compressor"]);
 const state = {
   server: null,
+  nativeHttpServer: null,
+  nativeHttpPort: null,
   port: DEFAULT_PORT,
   protocol: "http",
   pairingCode: String(randomInt(100000, 1000000)),
@@ -678,6 +681,7 @@ async function handle(request, response) {
       protocol: state.protocol,
       platform: process.platform,
       arch: process.arch,
+      mockApi: { nativeHttpPort: state.nativeHttpPort },
       paired,
       sessionCount,
       trustedOrigin,
@@ -826,9 +830,9 @@ async function handle(request, response) {
   if (url.pathname === "/v1/capabilities" && request.method === "GET") {
     try {
       const value = JSON.parse(await fsp.readFile(paths.capabilities, "utf8"));
-      return json(response, 200, { ...value, agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, mockApi: { hosting: "localhost", postActions: true, methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] } }, request, origin);
+      return json(response, 200, { ...value, agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, mockApi: { hosting: "localhost", nativeHttpPort: state.nativeHttpPort, postActions: true, methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] } }, request, origin);
     } catch {
-      return json(response, 200, { status: "starting", agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, pdf: {}, image: {}, video: {}, mockApi: { hosting: "localhost", postActions: true, methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] } }, request, origin);
+      return json(response, 200, { status: "starting", agentVersion: AGENT_VERSION, protocolVersion: PROTOCOL_VERSION, pdf: {}, image: {}, video: {}, mockApi: { hosting: "localhost", nativeHttpPort: state.nativeHttpPort, postActions: true, methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] } }, request, origin);
     }
   }
 
@@ -953,6 +957,16 @@ async function handle(request, response) {
   return json(response, 404, { error: "Agent route not found." }, request, origin);
 }
 
+function nativeMockRequestHandler(request, response) {
+  const url = new URL(request.url || "/", "http://127.0.0.1");
+  if (!isMockRuntimePath(url.pathname)) return json(response, 404, { error: "Native HTTP companion exposes Mock API routes only." }, request, null);
+  return handle(request, response).catch((error) => {
+    console.error("Native Mock API request failed", error);
+    if (!response.headersSent) json(response, 500, { error: "The local Mock API could not complete the request." }, request, null);
+    else response.destroy();
+  });
+}
+
 export function getAgentState() {
   pruneExpiredSessions();
   const authorization = refreshAuthorization();
@@ -961,6 +975,7 @@ export function getAgentState() {
     port: state.port,
     running: Boolean(state.server),
     protocol: state.protocol,
+    mockApi: { nativeHttpPort: state.nativeHttpPort },
     agentVersion: AGENT_VERSION,
     protocolVersion: PROTOCOL_VERSION,
     sessionCount: state.sessions.size,
@@ -1097,9 +1112,10 @@ export function getManagementState() {
     }));
 }
 
-export async function startAgentServer({ port = Number(process.env.AGENT_PORT) || DEFAULT_PORT, host = "127.0.0.1", protocol = process.env.AGENT_PROTOCOL || "http", certPath = process.env.AGENT_TLS_CERT || "", keyPath = process.env.AGENT_TLS_KEY || "" } = {}) {
+export async function startAgentServer({ port = Number(process.env.AGENT_PORT) || DEFAULT_PORT, host = "127.0.0.1", protocol = process.env.AGENT_PROTOCOL || "http", certPath = process.env.AGENT_TLS_CERT || "", keyPath = process.env.AGENT_TLS_KEY || "", nativeHttpPort = port === 0 ? null : (Number(process.env.AGENT_NATIVE_HTTP_PORT) || DEFAULT_NATIVE_HTTP_PORT) } = {}) {
   if (state.server) return state.server;
   state.port = port;
+  state.nativeHttpPort = null;
   const tlsEnabled = protocol === "https";
   if (tlsEnabled && (!certPath || !keyPath)) throw new Error("HTTPS agent mode requires a certificate and private key.");
   ensureAgentAuth();
@@ -1124,6 +1140,26 @@ export async function startAgentServer({ port = Number(process.env.AGENT_PORT) |
     state.server.listen(port, host, resolve);
   });
   state.port = state.server.address().port;
+  // Native clients such as Android do not need the website's transport and do
+  // not trust the per-install macOS certificate. Expose only Mock API routes
+  // on a separate loopback HTTP port so the same emulator URL works whether
+  // the primary agent transport is HTTP or HTTPS. The companion is disabled
+  // for ephemeral test servers.
+  if (nativeHttpPort !== null) {
+    state.nativeHttpServer = http.createServer(nativeMockRequestHandler);
+    try {
+      await new Promise((resolve, reject) => {
+        state.nativeHttpServer.once("error", reject);
+        state.nativeHttpServer.listen(nativeHttpPort, host, resolve);
+      });
+      state.nativeHttpPort = state.nativeHttpServer.address().port;
+      console.log(`Native Mock API HTTP companion listening on http://${host}:${state.nativeHttpPort}`);
+    } catch (error) {
+      console.warn(`Native Mock API HTTP companion is unavailable on port ${nativeHttpPort}: ${error.message}`);
+      await new Promise((resolve) => state.nativeHttpServer.listening ? state.nativeHttpServer.close(resolve) : resolve());
+      state.nativeHttpServer = null;
+    }
+  }
   state.cleanupTimer = setInterval(() => cleanupExpired().catch(() => undefined), 60 * 1000);
   state.cleanupTimer.unref?.();
   // Uploads normally start the queue immediately. Recover jobs that were
@@ -1136,6 +1172,9 @@ export async function startAgentServer({ port = Number(process.env.AGENT_PORT) |
 export async function stopAgentServer() {
   if (state.cleanupTimer) clearInterval(state.cleanupTimer);
   state.cleanupTimer = null;
+  if (state.nativeHttpServer) await new Promise((resolve) => state.nativeHttpServer.close(resolve));
+  state.nativeHttpServer = null;
+  state.nativeHttpPort = null;
   if (!state.server) return;
   await new Promise((resolve) => state.server.close(resolve));
   state.server = null;

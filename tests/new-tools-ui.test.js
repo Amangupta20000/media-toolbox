@@ -79,7 +79,7 @@ test("Mock API history exposes endpoint-level actions", async () => {
   assert.match(page, /onClick=\{\(\) => editHistoryEndpoint\(item, endpoint\.id\)\}/);
   assert.match(page, /onClick=\{\(\) => simulateHistoryEndpoint\(item, endpoint\.id\)\}/);
   assert.match(page, /onClick=\{\(\) => deleteHistoryEndpoint\(item, endpoint\.id\)\}/);
-  assert.match(page, /const url = hostingMode === "server" \? serverMockApiUrl\(item\.id, endpoint\.path, serverBaseUrlValue\) : localMockApiUrl\(item\.id, endpoint\.path, agentBaseUrlValue\)/);
+  assert.match(page, /const url = hostingMode === "server" \? serverMockApiUrl\(item\.id, endpoint\.path, serverBaseUrlValue\) : nativeHttpMockApiUrl\(item\.id, endpoint\.path\)/);
 });
 
 test("Mock API sidebar shows an unsaved draft before it is saved", async () => {
@@ -192,14 +192,17 @@ test("Mock API JSON fields use one growing editor with formatting and collapsibl
   assert.match(styles, /\.json-beautifier-toolbar[^\n]*z-index: 5/);
 });
 
-test("Mock API URLs use a hydration-safe initial transport", async () => {
+test("Mock API integration URLs use one hydration-safe native endpoint", async () => {
   const page = await read("components/mock-api-page.jsx");
   const client = await read("components/mock-api-client.js");
-  assert.match(page, /useState\("http:\/\/127\.0\.0\.1:4789"\)/);
-  assert.match(page, /setAgentBaseUrlValue\(agentBaseUrl\(\)\)/);
-  assert.match(page, /agentBaseUrlValue=\{agentBaseUrlValue\}/);
+  assert.match(page, /NATIVE_MOCK_API_BASE_URL/);
+  assert.doesNotMatch(page, /agentBaseUrlValue/);
   assert.match(client, /baseUrl = agentBaseUrl\(\)/);
   assert.ok(client.includes('String(baseUrl).replace(/\\/$/, "")'));
+  assert.match(client, /export const NATIVE_MOCK_API_BASE_URL = "http:\/\/10\.0\.2\.2:4788"/);
+  assert.match(client, /nativeHttpMockApiUrl/);
+  assert.match(page, /http:\/\/10\.0\.2\.2:4788/);
+  assert.doesNotMatch(page, /adb reverse/);
 });
 
 test("Mock API guided POST builder derives and stores internal update actions", async () => {

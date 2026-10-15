@@ -1,6 +1,8 @@
 import { applyMockRequest, formatMockProject, normalizeMockProject } from "../lib/mock-api.js";
 import { agentBaseUrl, requestLocalAgentJson } from "./processing-client.js";
 
+export const NATIVE_MOCK_API_BASE_URL = "http://10.0.2.2:4788";
+
 export function exportMockProject(value) {
   return formatMockProject(value);
 }
@@ -104,15 +106,20 @@ export function localMockApiUrl(projectId, pathname = "/users", baseUrl = agentB
   return `${String(baseUrl).replace(/\/$/, "")}/v1/mock/${encodeURIComponent(projectId)}${path}`;
 }
 
+export function nativeHttpMockApiUrl(projectId, pathname = "/users", baseUrl = NATIVE_MOCK_API_BASE_URL) {
+  const path = pathname.startsWith("/") ? pathname : `/${pathname}`;
+  return `${String(baseUrl).replace(/\/$/, "")}/v1/mock/${encodeURIComponent(projectId)}${path}`;
+}
+
 export function mockFetchExample(projectId, { method = "GET", pathname = "/users", body = "", headers = {}, hostingMode = "local", baseUrl = "" } = {}) {
-  const url = hostingMode === "server" ? serverMockApiUrl(projectId, pathname, baseUrl) : localMockApiUrl(projectId, pathname, baseUrl || undefined);
+  const url = hostingMode === "server" ? serverMockApiUrl(projectId, pathname, baseUrl) : nativeHttpMockApiUrl(projectId, pathname, baseUrl || undefined);
   const headerLine = Object.keys(headers).length ? `,\n  headers: ${JSON.stringify(headers, null, 2)}` : "";
   const fetchBody = body && method !== "GET" && method !== "DELETE" ? `,\n  body: ${JSON.stringify(body)}` : "";
   return `fetch(${JSON.stringify(url)}, {\n  method: ${JSON.stringify(method)}${headerLine}${fetchBody}\n}).then((response) => response.status === 204 ? null : response.json())`;
 }
 
 export function mockCurlExample(projectId, { method = "GET", pathname = "/users", body = "", headers = {}, hostingMode = "local", baseUrl = "" } = {}) {
-  const url = hostingMode === "server" ? serverMockApiUrl(projectId, pathname, baseUrl) : localMockApiUrl(projectId, pathname, baseUrl || undefined);
+  const url = hostingMode === "server" ? serverMockApiUrl(projectId, pathname, baseUrl) : nativeHttpMockApiUrl(projectId, pathname, baseUrl || undefined);
   const headerPart = Object.entries(headers).map(([key, value]) => ` -H ${JSON.stringify(`${key}: ${value}`)}`).join("");
   const hasContentType = Object.keys(headers).some((key) => key.toLowerCase() === "content-type");
   const bodyPart = body && method !== "GET" && method !== "DELETE" ? `${hasContentType ? "" : " -H 'Content-Type: application/json'"} -d '${body.replaceAll("'", "'\\''")}'` : "";
