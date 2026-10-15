@@ -37,12 +37,18 @@ export function useAdLifecycle(enabled = true) {
 
     checkPosition();
     if (!ready && "IntersectionObserver" in window) {
-      observer = new IntersectionObserver((entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-        const rect = slot.getBoundingClientRect();
-        markReady(rect.top < viewportHeight() && rect.bottom > 0);
-      }, { rootMargin: "100vh 0px" });
-      observer.observe(slot);
+      try {
+        observer = new IntersectionObserver((entries) => {
+          if (!entries.some((entry) => entry.isIntersecting)) return;
+          const rect = slot.getBoundingClientRect();
+          markReady(rect.top < viewportHeight() && rect.bottom > 0);
+        }, { rootMargin: `${Math.max(1, Math.ceil(viewportHeight()))}px 0px` });
+        observer.observe(slot);
+      } catch {
+        // Some embedded/mobile browsers can expose IntersectionObserver but
+        // reject its options. Scroll/resize checks below remain a safe fallback.
+        observer = undefined;
+      }
     }
     window.addEventListener("scroll", checkPosition, { passive: true });
     window.addEventListener("resize", checkPosition);

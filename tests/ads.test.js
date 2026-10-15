@@ -64,7 +64,9 @@ test("each ad widget keeps exactly one provider iframe inside its own labeled wr
   assert.match(gutter, /useAdLifecycle\(true\)/);
   assert.match(gutter, /loading=\{loading\}/);
   assert.match(lifecycle, /AD_REFRESH_INTERVAL_MS = 60_000/);
-  assert.match(lifecycle, /rootMargin: "100vh 0px"/);
+  assert.match(lifecycle, /rootMargin: `\$\{Math\.max\(1, Math\.ceil\(viewportHeight\(\)\)\)\}px 0px`/);
+  assert.match(lifecycle, /try \{[\s\S]*new IntersectionObserver/);
+  assert.match(lifecycle, /catch \{[\s\S]*observer = undefined/);
   assert.match(lifecycle, /document\.visibilityState !== "visible"/);
 });
 
@@ -115,23 +117,36 @@ const PAGE_ERROR_MARKERS = [
   /Hydration failed/i,
 ];
 
-async function fetchWithTimeout(url) {
-  return fetch(url, { signal: AbortSignal.timeout(2500) });
+async function fetchWithTimeout(url, headers) {
+  return fetch(url, { headers, signal: AbortSignal.timeout(2500) });
 }
 
-test("ad-bearing pages return successful HTML without a server or hydration error", async (t) => {
+const AD_TEST_VIEWPORTS = [
+  {
+    name: "desktop",
+    headers: { "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140 Safari/537.36" },
+  },
+  {
+    name: "mobile",
+    headers: { "user-agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36" },
+  },
+];
+
+test("ad-bearing pages return successful desktop and mobile HTML without an error", async (t) => {
   const baseUrl = (process.env.ADS_TEST_BASE_URL || "http://localhost:3300").replace(/\/$/, "");
   try {
-    await fetchWithTimeout(`${baseUrl}/`);
+    await fetchWithTimeout(`${baseUrl}/`, AD_TEST_VIEWPORTS[0].headers);
   } catch {
     t.skip(`Live page smoke test skipped: ${baseUrl} is not running. Set ADS_TEST_BASE_URL to a running app URL.`);
     return;
   }
 
-  for (const route of AD_ROUTES) {
-    const response = await fetchWithTimeout(`${baseUrl}${route}`);
-    const html = await response.text();
-    assert.equal(response.status, 200, `${route} should return HTTP 200`);
-    for (const marker of PAGE_ERROR_MARKERS) assert.doesNotMatch(html, marker, `${route} should not contain ${marker}`);
+  for (const viewport of AD_TEST_VIEWPORTS) {
+    for (const route of AD_ROUTES) {
+      const response = await fetchWithTimeout(`${baseUrl}${route}`, viewport.headers);
+      const html = await response.text();
+      assert.equal(response.status, 200, `${viewport.name} ${route} should return HTTP 200`);
+      for (const marker of PAGE_ERROR_MARKERS) assert.doesNotMatch(html, marker, `${viewport.name} ${route} should not contain ${marker}`);
+    }
   }
 });
