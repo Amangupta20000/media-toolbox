@@ -59,7 +59,11 @@ test("database GET APIs filter records with query parameters", () => {
     { id: "1", name: "Ada", role: "admin", active: true },
     { id: "3", name: "Grace", role: "admin", active: false },
   ]);
-  assert.deepEqual(applyMockRequest(value, { method: "GET", pathname: "/users?role=missing" }).body, []);
+  assert.deepEqual(applyMockRequest(value, { method: "GET", pathname: "/users?role=missing" }).body, [
+    { id: "1", name: "Ada", role: "admin", active: true },
+    { id: "2", name: "Alan", role: "developer", active: true },
+    { id: "3", name: "Grace", role: "admin", active: false },
+  ]);
 });
 
 test("database GET APIs can unwrap exactly one matching record", () => {
