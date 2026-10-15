@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useAdLifecycle } from "./ad-lifecycle.js";
 
 const ADSTERRA_SCRIPT_SRC = "https://bauval.org/21/52b2a9d313e02d8d8ea31a538b04248f";
 const ADSTERRA_CONTAINER_ID = "container-52b2a9d313e02d8d8ea31a538b04248f";
@@ -13,6 +14,7 @@ export function AdsterraNativeBanner() {
   const [mobileDock, setMobileDock] = useState(null);
   const [frameHeight, setFrameHeight] = useState(NATIVE_FRAME_MIN_HEIGHT);
   const frameRef = useRef(null);
+  const { slotRef, shouldRender, loading, refreshToken } = useAdLifecycle(mounted);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 680px)");
@@ -46,9 +48,9 @@ export function AdsterraNativeBanner() {
 
   if (!mounted) return null;
 
-  const banner = <aside className="adsterra-native-ad" data-ad-type="native" aria-label="Advertisement">
+  const banner = <aside ref={slotRef} className="adsterra-native-ad" data-ad-type="native" aria-label="Advertisement">
     <span className="adsterra-native-ad-label">Advertisement</span>
-    <iframe ref={frameRef} className="adsterra-native-ad-frame" title="Advertisement" width="100%" height={frameHeight} loading="lazy" srcDoc={adDocument} />
+    {shouldRender && <iframe key={refreshToken} ref={frameRef} className="adsterra-native-ad-frame" title="Advertisement" width="100%" height={frameHeight} loading={loading} srcDoc={adDocument} />}
   </aside>;
 
   return mobile && mobileDock ? createPortal(banner, mobileDock) : banner;

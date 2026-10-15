@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useAdLifecycle } from "./ad-lifecycle.js";
 
 const GUTTER_BANNER = {
   src: "https://bauval.org/22/15bdc5b2743e8dd55cfed656ec94577c",
@@ -9,9 +10,10 @@ const GUTTER_BANNER = {
 
 export function AdsterraGutterBanner() {
   const adDocument = useMemo(() => `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;overflow:hidden;background:transparent}body{width:${GUTTER_BANNER.options.width}px;height:${GUTTER_BANNER.options.height}px}</style></head><body><script>window.atOptions=${JSON.stringify(GUTTER_BANNER.options)};<\/script><script src="${GUTTER_BANNER.src}"><\/script></body></html>`, []);
+  const { slotRef, shouldRender, loading, refreshToken } = useAdLifecycle(true);
 
-  return <aside className="adsterra-gutter-ad" data-ad-type="gutter" aria-label="Advertisement">
+  return <aside ref={slotRef} className="adsterra-gutter-ad" data-ad-type="gutter" aria-label="Advertisement">
     <span className="adsterra-gutter-ad-label">Advertisement</span>
-    <iframe className="adsterra-gutter-ad-frame" title="Advertisement" width={GUTTER_BANNER.options.width} height={GUTTER_BANNER.options.height} loading="lazy" srcDoc={adDocument} />
+    {shouldRender && <iframe key={refreshToken} className="adsterra-gutter-ad-frame" title="Advertisement" width={GUTTER_BANNER.options.width} height={GUTTER_BANNER.options.height} loading={loading} srcDoc={adDocument} />}
   </aside>;
 }

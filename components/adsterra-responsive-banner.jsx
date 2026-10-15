@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useAdLifecycle } from "./ad-lifecycle.js";
 
 const DESKTOP_BANNER = {
   id: "4dded9c08ff44c0a1065bbfc746caf0c",
@@ -16,6 +17,7 @@ const MOBILE_BANNER = {
 
 export function AdsterraResponsiveBanner() {
   const [placement, setPlacement] = useState(null);
+  const { slotRef, shouldRender, loading, refreshToken } = useAdLifecycle(true);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 680px)");
@@ -27,8 +29,8 @@ export function AdsterraResponsiveBanner() {
 
   const adDocument = useMemo(() => placement ? `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;overflow:hidden;background:transparent}body{width:${placement.options.width}px;height:${placement.options.height}px}</style></head><body><script>window.atOptions=${JSON.stringify(placement.options)};<\/script><script src="${placement.src}"><\/script></body></html>` : "", [placement]);
 
-  return <aside className="adsterra-standard-ad" data-ad-type="responsive" aria-label="Advertisement">
+  return <aside ref={slotRef} className="adsterra-standard-ad" data-ad-type="responsive" aria-label="Advertisement">
     <span className="adsterra-standard-ad-label">Advertisement</span>
-    {placement && <iframe className="adsterra-standard-ad-frame" title="Advertisement" width={placement.options.width} height={placement.options.height} loading="lazy" srcDoc={adDocument} />}
+    {placement && shouldRender && <iframe key={`${placement.id}-${refreshToken}`} className="adsterra-standard-ad-frame" title="Advertisement" width={placement.options.width} height={placement.options.height} loading={loading} srcDoc={adDocument} />}
   </aside>;
 }

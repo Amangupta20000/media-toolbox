@@ -40,25 +40,32 @@ test("each ad widget keeps exactly one provider iframe inside its own labeled wr
   const native = await read("components/adsterra-native-banner.jsx");
   const responsive = await read("components/adsterra-responsive-banner.jsx");
   const gutter = await read("components/adsterra-gutter-banner.jsx");
+  const lifecycle = await read("components/ad-lifecycle.js");
 
   assert.equal(count(native, /<iframe\b/g), 1);
-  assert.match(native, /const banner = <aside className="adsterra-native-ad" data-ad-type="native" aria-label="Advertisement">[\s\S]*<iframe[\s\S]*srcDoc=\{adDocument\}/);
+  assert.match(native, /const banner = <aside[\s\S]*className="adsterra-native-ad" data-ad-type="native" aria-label="Advertisement">[\s\S]*<iframe[\s\S]*srcDoc=\{adDocument\}/);
   assert.match(native, /createPortal\(banner, mobileDock\)/);
   assert.match(native, /getElementById\("\$\{ADSTERRA_CONTAINER_ID\}"\)[\s\S]*getBoundingClientRect\(\)/);
   assert.match(native, /https:\/\/bauval\.org\/21\/52b2a9d313e02d8d8ea31a538b04248f/);
-  assert.match(native, /loading="lazy"/);
+  assert.match(native, /useAdLifecycle\(mounted\)/);
+  assert.match(native, /loading=\{loading\}/);
 
   assert.equal(count(responsive, /<iframe\b/g), 1);
-  assert.match(responsive, /return <aside className="adsterra-standard-ad" data-ad-type="responsive" aria-label="Advertisement">[\s\S]*\{placement && <iframe[\s\S]*srcDoc=\{adDocument\}/);
+  assert.match(responsive, /return <aside[\s\S]*className="adsterra-standard-ad" data-ad-type="responsive" aria-label="Advertisement">[\s\S]*<iframe[\s\S]*srcDoc=\{adDocument\}/);
   assert.match(responsive, /https:\/\/bauval\.org\/22\/4dded9c08ff44c0a1065bbfc746caf0c/);
   assert.match(responsive, /https:\/\/bauval\.org\/22\/294fa97b1cd4086e19b0d065698254cb/);
-  assert.match(responsive, /loading="lazy"/);
+  assert.match(responsive, /useAdLifecycle\(true\)/);
+  assert.match(responsive, /loading=\{loading\}/);
 
   assert.equal(count(gutter, /<iframe\b/g), 1);
-  assert.match(gutter, /return <aside className="adsterra-gutter-ad" data-ad-type="gutter" aria-label="Advertisement">[\s\S]*<iframe[\s\S]*srcDoc=\{adDocument\}/);
+  assert.match(gutter, /return <aside[\s\S]*className="adsterra-gutter-ad" data-ad-type="gutter" aria-label="Advertisement">[\s\S]*<iframe[\s\S]*srcDoc=\{adDocument\}/);
   assert.match(gutter, /https:\/\/bauval\.org\/22\/15bdc5b2743e8dd55cfed656ec94577c/);
   assert.match(gutter, /width=\{GUTTER_BANNER\.options\.width\} height=\{GUTTER_BANNER\.options\.height\}/);
-  assert.match(gutter, /loading="lazy"/);
+  assert.match(gutter, /useAdLifecycle\(true\)/);
+  assert.match(gutter, /loading=\{loading\}/);
+  assert.match(lifecycle, /AD_REFRESH_INTERVAL_MS = 60_000/);
+  assert.match(lifecycle, /rootMargin: "100vh 0px"/);
+  assert.match(lifecycle, /document\.visibilityState !== "visible"/);
 });
 
 test("each page state has no more than one widget of either ad type", async () => {

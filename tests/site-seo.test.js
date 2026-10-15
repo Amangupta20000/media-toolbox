@@ -310,8 +310,9 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(adsterra, /container-52b2a9d313e02d8d8ea31a538b04248f/);
   assert.match(adsterra, /data-cfasync="false"/);
   assert.match(adsterra, /srcDoc=\{adDocument\}/);
-  assert.match(adsterra, /<iframe ref=\{frameRef\} className="adsterra-native-ad-frame"/);
-  assert.match(adsterra, /loading="lazy"/);
+  assert.match(adsterra, /<iframe key=\{refreshToken\} ref=\{frameRef\} className="adsterra-native-ad-frame"/);
+  assert.match(adsterra, /useAdLifecycle\(mounted\)/);
+  assert.match(adsterra, /loading=\{loading\}/);
   assert.match(adsterra, /createPortal/);
   assert.match(adsterra, /mobile-native-ad-dock/);
   assert.match(adsterra, /matchMedia\("\(max-width: 680px\)"\)/);
@@ -328,8 +329,9 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(adsterraResponsive, /height: 50, width: 320/);
   assert.match(adsterraResponsive, /matchMedia\("\(max-width: 680px\)"\)/);
   assert.match(adsterraResponsive, /srcDoc=\{adDocument\}/);
-  assert.match(adsterraResponsive, /<iframe className="adsterra-standard-ad-frame"/);
-  assert.match(adsterraResponsive, /loading="lazy"/);
+  assert.match(adsterraResponsive, /<iframe key=\{`\$\{placement\.id\}-\$\{refreshToken\}`\} className="adsterra-standard-ad-frame"/);
+  assert.match(adsterraResponsive, /useAdLifecycle\(true\)/);
+  assert.match(adsterraResponsive, /loading=\{loading\}/);
   assert.match(adsterraResponsive, /<\\\/script>/);
   assert.match(processingModeGuide, /AdsterraNativeBanner/);
   assert.match(approvalGuidePage, /import \{ AdsterraNativeBanner \} from "\.\/adsterra-native-banner\.jsx"/);
