@@ -30,7 +30,7 @@ const pageAdStates = [
   { name: "mock API guide", file: "components/mock-api-page.jsx", native: 1, responsive: 0 },
   { name: "processing options", file: "components/processing-options.jsx", native: 1, responsive: 0 },
   { name: "local processing result", file: "components/local-processing-tool-page.jsx", native: 1, responsive: 0 },
-  { name: "PDF editor result", file: "components/pdf-editor.jsx", native: 1, responsive: 0 },
+  { name: "PDF editor result and guide", file: "components/pdf-editor.jsx", native: 1, responsive: 1 },
   { name: "PDF text editor result", file: "components/pdf-text-editor.jsx", native: 1, responsive: 0 },
   { name: "single-file result", file: "components/tool-page.jsx", start: "export function JobStatusCard(", end: "function ConversionProgress(", native: 1, responsive: 0 },
   { name: "batch result", file: "components/tool-page.jsx", start: "function BatchJobStatusCard(", end: "function BatchDownloadAction(", native: 1, responsive: 0 },
@@ -43,6 +43,7 @@ test("each ad widget keeps exactly one provider iframe inside its own labeled wr
   assert.equal(count(native, /<iframe\b/g), 1);
   assert.match(native, /const banner = <aside className="adsterra-native-ad" data-ad-type="native" aria-label="Advertisement">[\s\S]*<iframe[\s\S]*srcDoc=\{adDocument\}/);
   assert.match(native, /createPortal\(banner, mobileDock\)/);
+  assert.match(native, /getElementById\("\$\{ADSTERRA_CONTAINER_ID\}"\)[\s\S]*getBoundingClientRect\(\)/);
   assert.match(native, /https:\/\/bauval\.org\/21\/52b2a9d313e02d8d8ea31a538b04248f/);
   assert.match(native, /loading="lazy"/);
 
@@ -81,6 +82,7 @@ test("ad widgets reserve layout space and expose a responsive mobile placement",
 
 const AD_ROUTES = [
   "/",
+  "/pdf-editor",
   "/guides",
   "/browser-vs-local-agent",
   "/local-agent",

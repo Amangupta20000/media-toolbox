@@ -213,6 +213,8 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(toolSeo, /normalizedPath === "\/local-agent" && <AdsterraNativeBanner \/>[\s\S]*tool-seo-comparison/);
   assert.match(toolPage, /import \{ AdsterraNativeBanner \} from "\.\/adsterra-native-banner\.jsx"/);
   assert.match(toolPage, /done && job\.result && <AdsterraNativeBanner \/>/);
+  assert.match(pdfEditor, /import \{ AdsterraResponsiveBanner \} from "\.\/adsterra-responsive-banner\.jsx"/);
+  assert.match(pdfEditor, /<AdsterraResponsiveBanner \/>\s*<ToolSeoContent pathname="\/pdf-editor" \/>/);
   assert.match(setupGuide, /import \{ AdsterraNativeBanner \} from "\.\/adsterra-native-banner\.jsx"/);
   assert.match(setupGuide, /import \{ AdsterraResponsiveBanner \} from "\.\/adsterra-responsive-banner\.jsx"/);
   assert.match(setupGuide, /<\/section>\s*<AdsterraResponsiveBanner \/>\s*<section className="agent-guide-platforms"/);
