@@ -63,15 +63,14 @@ export function useAdLifecycle(enabled = true) {
   useEffect(() => {
     if (!shouldRender) return undefined;
 
-    const refreshIfVisible = () => {
-      if (document.visibilityState !== "visible") return;
+    const refreshIfInViewport = () => {
       const slot = slotRef.current;
       if (!slot) return;
       const rect = slot.getBoundingClientRect();
       const height = window.innerHeight || document.documentElement.clientHeight || 0;
       if (rect.bottom > 0 && rect.top < height) setRefreshToken((value) => value + 1);
     };
-    const timer = window.setInterval(refreshIfVisible, AD_REFRESH_INTERVAL_MS);
+    const timer = window.setInterval(refreshIfInViewport, AD_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [shouldRender]);
 

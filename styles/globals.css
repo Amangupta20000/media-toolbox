@@ -2363,13 +2363,13 @@ body { font-size: 14px; }
 .mode-guide-start-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; max-width: 390px; }
 .mode-guide-start-actions a { text-decoration: none; }
 .adsterra-native-ad { width: 100%; min-height: 340px; margin: 24px 0; padding: 9px 12px 12px; overflow: hidden; color: #8095a4; background: rgba(255, 255, 255, .48); border: 1px solid #d7e7eb; border-radius: 13px; }
-.adsterra-native-ad-label { display: block; margin-bottom: 7px; color: #8095a4; font-size: 9px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.adsterra-native-ad-label { display: block; margin-bottom: 7px; color: #8095a4; font-size: 9px; font-weight: 750; letter-spacing: .08em; text-align: center; text-transform: uppercase; }
 .adsterra-native-ad-frame { display: block; width: 100%; max-width: 100%; border: 0; }
 .mobile-native-ad-dock { display: none; }
 [data-theme="dark"] .adsterra-native-ad { color: #9aafbd; background: rgba(18, 37, 54, .72); border-color: #2e4758; }
 [data-theme="dark"] .adsterra-native-ad-label { color: #9aafbd; }
 .adsterra-standard-ad { display: flex; width: 100%; min-height: 101px; margin: 24px 0; padding: 9px 12px 12px; flex-direction: column; align-items: center; overflow: hidden; color: #8095a4; background: rgba(255, 255, 255, .48); border: 1px solid #d7e7eb; border-radius: 13px; }
-.adsterra-standard-ad-label { align-self: stretch; margin-bottom: 7px; color: #8095a4; font-size: 9px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.adsterra-standard-ad-label { align-self: stretch; margin-bottom: 7px; color: #8095a4; font-size: 9px; font-weight: 750; letter-spacing: .08em; text-align: center; text-transform: uppercase; }
 .adsterra-standard-ad-frame { display: block; max-width: 100%; border: 0; }
 [data-theme="dark"] .adsterra-standard-ad { color: #9aafbd; background: rgba(18, 37, 54, .72); border-color: #2e4758; }
 [data-theme="dark"] .adsterra-standard-ad-label { color: #9aafbd; }

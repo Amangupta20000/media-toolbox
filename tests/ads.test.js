@@ -67,7 +67,8 @@ test("each ad widget keeps exactly one provider iframe inside its own labeled wr
   assert.match(lifecycle, /rootMargin: `\$\{Math\.max\(1, Math\.ceil\(viewportHeight\(\)\)\)\}px 0px`/);
   assert.match(lifecycle, /try \{[\s\S]*new IntersectionObserver/);
   assert.match(lifecycle, /catch \{[\s\S]*observer = undefined/);
-  assert.match(lifecycle, /document\.visibilityState !== "visible"/);
+  assert.doesNotMatch(lifecycle, /document\.visibilityState !== "visible"/);
+  assert.match(lifecycle, /const refreshIfInViewport = \(\) =>/);
 });
 
 test("each page state has no more than one widget of either ad type", async () => {
