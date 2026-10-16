@@ -874,7 +874,7 @@ h1 { margin: 11px 0 9px; color: var(--navy); font-size: clamp(31px, 4vw, 45px); 
 .eyebrow { font-size: 10px; }
 .topbar-title { font-size: 14px; }
 .topbar-status { font-size: 12px; }
-.content-wrap { width: min(1120px, calc(100% - 9vw)); padding-top: 64px; }
+.content-wrap { width: min(1450px, calc(100% - 4vw)); padding-top: 64px; }
 .section-kicker { font-size: 12px; }
 h1 { font-size: clamp(36px, 4.2vw, 50px); }
 .page-heading p { font-size: 15px; }

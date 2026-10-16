@@ -77,6 +77,12 @@ test("hamburger navigation exposes all public user-facing route groups", async (
   assert.doesNotMatch(navigation, /href: "\/downloads\//);
 });
 
+test("desktop tool content expands around the ad gutter", async () => {
+  const styles = await read("styles/globals.css");
+
+  assert.match(styles, /\.content-wrap \{ width: min\(1450px, calc\(100% - 4vw\)\); padding-top: 64px; \}/);
+});
+
 test("consent banner keeps a fixed, hidden hydration placeholder", async () => {
   const runtime = await read("components/analytics.jsx");
   const styles = await read("styles/globals.css");
