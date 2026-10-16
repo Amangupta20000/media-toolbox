@@ -66,7 +66,7 @@ test("each ad widget keeps exactly one provider iframe inside its own labeled wr
   assert.match(gutter, /width=\{GUTTER_BANNER\.options\.width\} height=\{GUTTER_BANNER\.options\.height\}/);
   assert.match(gutter, /useAdLifecycle\(true\)/);
   assert.match(gutter, /loading=\{loading\}/);
-  assert.match(lifecycle, /AD_REFRESH_INTERVAL_MS = 60_000/);
+  assert.match(lifecycle, /AD_REFRESH_INTERVAL_MS = 45_000/);
   assert.match(lifecycle, /rootMargin: `\$\{Math\.max\(1, Math\.ceil\(viewportHeight\(\)\)\)\}px 0px`/);
   assert.match(lifecycle, /try \{[\s\S]*new IntersectionObserver/);
   assert.match(lifecycle, /catch \{[\s\S]*observer = undefined/);

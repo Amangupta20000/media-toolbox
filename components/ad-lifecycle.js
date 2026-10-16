@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-export const AD_REFRESH_INTERVAL_MS = 60_000;
+export const AD_REFRESH_INTERVAL_MS = 45_000;
 
 export function useAdLifecycle(enabled = true) {
   const slotRef = useRef(null);
