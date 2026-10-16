@@ -30,7 +30,7 @@ const pageAdStates = [
   { name: "mock API guide", file: "components/mock-api-page.jsx", native: 1, responsive: 0 },
   { name: "processing options", file: "components/processing-options.jsx", native: 1, responsive: 0 },
   { name: "local processing result", file: "components/local-processing-tool-page.jsx", native: 1, responsive: 0 },
-  { name: "PDF editor result and guide", file: "components/pdf-editor.jsx", native: 1, responsive: 1 },
+  { name: "PDF editor result and guide", file: "components/pdf-editor.jsx", native: 1, responsive: 0 },
   { name: "PDF text editor result", file: "components/pdf-text-editor.jsx", native: 1, responsive: 0 },
   { name: "single-file result", file: "components/tool-page.jsx", start: "export function JobStatusCard(", end: "function ConversionProgress(", native: 1, responsive: 0 },
   { name: "batch result", file: "components/tool-page.jsx", start: "function BatchJobStatusCard(", end: "function BatchDownloadAction(", native: 1, responsive: 0 },

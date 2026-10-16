@@ -104,7 +104,7 @@ export function ToolSeoContent({ pathname }) {
   const nativeAdAfter = guideWidgets.some(({ key }) => key === "practical-checks") ? "practical-checks" : "overview";
 
   return <section id="tool-guide" className="tool-seo-content" aria-labelledby="tool-seo-title">
-    {normalizedPath === "/local-agent" && <AdsterraResponsiveBanner />}
+    <AdsterraResponsiveBanner />
     <div className="tool-seo-intro">
       <div className="section-kicker"><span className="kicker-line" /> Helpful guide</div>
       <h2 id="tool-seo-title">{content.introHeading || `About ${content.name}`}</h2>

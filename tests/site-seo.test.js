@@ -220,13 +220,12 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(processingOptions, /Local agent is the recommended choice/);
   assert.match(processingOptions, /import \{ AdsterraNativeBanner \} from "\.\/adsterra-native-banner\.jsx"/);
   assert.match(processingOptions, /\{!hidden && <AdsterraNativeBanner \/>}\s*<div className="processing-format-table-wrap">/);
-  assert.match(toolSeo, /normalizedPath === "\/local-agent" && <AdsterraResponsiveBanner \/>[\s\S]*tool-seo-intro/);
+  assert.match(toolSeo, /<AdsterraResponsiveBanner \/>\s*<div className="tool-seo-intro"/);
   assert.match(toolSeo, /const nativeAdAfter = guideWidgets\.some\(\(\{ key \}\) => key === "practical-checks"\) \? "practical-checks" : "overview"/);
   assert.match(toolSeo, /normalizedPath === "\/local-agent" && key === nativeAdAfter && <AdsterraNativeBanner \/>/);
   assert.match(toolPage, /import \{ AdsterraNativeBanner \} from "\.\/adsterra-native-banner\.jsx"/);
   assert.match(toolPage, /done && job\.result && <AdsterraNativeBanner \/>/);
-  assert.match(pdfEditor, /import \{ AdsterraResponsiveBanner \} from "\.\/adsterra-responsive-banner\.jsx"/);
-  assert.match(pdfEditor, /<AdsterraResponsiveBanner \/>\s*<ToolSeoContent pathname="\/pdf-editor" \/>/);
+  assert.doesNotMatch(pdfEditor, /AdsterraResponsiveBanner/);
   assert.match(setupGuide, /import \{ AdsterraNativeBanner \} from "\.\/adsterra-native-banner\.jsx"/);
   assert.match(setupGuide, /import \{ AdsterraResponsiveBanner \} from "\.\/adsterra-responsive-banner\.jsx"/);
   assert.match(setupGuide, /<\/section>\s*<AdsterraResponsiveBanner \/>\s*<section className="agent-guide-platforms"/);
