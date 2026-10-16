@@ -54,6 +54,9 @@ test("each ad widget keeps exactly one provider iframe inside its own labeled wr
   assert.match(responsive, /return <aside[\s\S]*className="adsterra-standard-ad" data-ad-type="responsive" aria-label="Advertisement">[\s\S]*<iframe[\s\S]*srcDoc=\{adDocument\}/);
   assert.match(responsive, /https:\/\/bauval\.org\/22\/4dded9c08ff44c0a1065bbfc746caf0c/);
   assert.match(responsive, /https:\/\/bauval\.org\/22\/294fa97b1cd4086e19b0d065698254cb/);
+  assert.match(responsive, /https:\/\/bauval\.org\/22\/764e8a37d547c9836174b45a9aa6392c/);
+  assert.match(responsive, /https:\/\/bauval\.org\/22\/02cdbbb30585ac335349d4b678e1a9ec/);
+  assert.match(responsive, /variant = "primary"/);
   assert.match(responsive, /useAdLifecycle\(true\)/);
   assert.match(responsive, /loading=\{loading\}/);
 

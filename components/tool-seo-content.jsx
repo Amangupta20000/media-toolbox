@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
+import { Fragment } from "react";
 import { AUTHOR_NAME, lastModifiedForPathname, metadataForPathname, normalizeSitePath } from "../lib/site-metadata.js";
 import { TOOL_SEO_CONTENT } from "../lib/tool-seo-content.js";
 import { AdsterraNativeBanner } from "./adsterra-native-banner.jsx";
@@ -88,26 +89,33 @@ export function ToolSeoContent({ pathname }) {
   </section>;
 }
 
-function FaqSection({ content }) {
+function FaqSection({ content, insertAd = false }) {
+  const adAfter = Math.ceil(content.faqs.length / 2);
+
   return <article className="tool-seo-faq" aria-labelledby="tool-seo-faq-title">
     <h2 id="tool-seo-faq-title">Frequently asked questions</h2>
     <div className="tool-seo-faq-list">
-      {content.faqs.map(([question, answer], index) => <details className="tool-seo-faq-item" key={question} open>
-        <summary className="tool-seo-faq-question">
-          <span>{question}</span>
-          <ChevronDown size={17} aria-hidden="true" />
-        </summary>
-        <p id={`tool-seo-faq-answer-${index}`} className="tool-seo-faq-answer">{answer}</p>
-      </details>)}
+      {content.faqs.map(([question, answer], index) => <Fragment key={question}>
+        <details className="tool-seo-faq-item" open>
+          <summary className="tool-seo-faq-question">
+            <span>{question}</span>
+            <ChevronDown size={17} aria-hidden="true" />
+          </summary>
+          <p id={`tool-seo-faq-answer-${index}`} className="tool-seo-faq-answer">{answer}</p>
+        </details>
+        {insertAd && index + 1 === adAfter && <AdsterraResponsiveBanner variant="secondary" />}
+      </Fragment>)}
     </div>
   </article>;
 }
 
 export function ToolFaqContent({ pathname }) {
-  const content = TOOL_SEO_CONTENT[normalizeSitePath(pathname)];
+  const normalizedPath = normalizeSitePath(pathname);
+  const content = TOOL_SEO_CONTENT[normalizedPath];
   if (!content?.faqs?.length) return null;
+  const guideAdAlreadyPresent = new Set(["/local-agent", "/how-to-setup-agent", "/pdf-editor"]);
 
   return <section className="tool-seo-content tool-faq-content" aria-label={`${content.name} frequently asked questions`}>
-    <FaqSection content={content} />
+    <FaqSection content={content} insertAd={!guideAdAlreadyPresent.has(normalizedPath)} />
   </section>;
 }
