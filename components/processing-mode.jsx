@@ -20,6 +20,7 @@ export function ProcessingMode({ value, onChange, onChangeView, locations, tool 
   const modes = ["local", ...(browserAvailable ? ["browser"] : []), ...(serverAvailable ? ["server"] : [])];
   const ready = (mode) => Boolean(locations?.[mode]?.connected || locations?.[mode]?.ready);
   const localUnavailable = !Boolean(locations?.local?.available && ready("local"));
+  const checkingLocations = !locations;
   const availableModeLabels = ["local", ...(browserAvailable ? ["browser"] : []), ...(serverAvailable ? ["server"] : [])].map((mode) => labels[mode][0]);
   return <div className={`processing-mode ${compact ? "compact" : ""}`}>
     <div className="processing-mode-heading"><span><Settings2 size={16} /> Processing location</span><small>{availableModeLabels.join(" + ")}</small></div>
@@ -28,15 +29,20 @@ export function ProcessingMode({ value, onChange, onChangeView, locations, tool 
       {modes.map((mode) => {
         const [label, detail, Icon] = labels[mode];
         const available = Boolean(locations?.[mode]?.available && ready(mode));
+        const unavailableDetail = checkingLocations
+          ? mode === "browser" ? "Checking browser support…" : mode === "local" ? "Checking Local agent connection…" : "Checking server connection…"
+          : mode === "local" ? "Start and authorize the agent" : mode === "browser" ? browserAvailable ? "Not supported in this browser" : "This tool cannot run in the browser" : "Connect to the server to continue";
+        const availabilityLabel = checkingLocations ? "Checking" : available ? "Available" : "Unavailable";
         return <button type="button" key={mode} className={`processing-mode-option ${value === mode ? "selected" : ""} ${!available ? "unavailable" : ""}`} disabled={!available} onClick={() => { pushAnalyticsEvent("processing_mode_selected", { tool, mode }); onChange(mode); }}>
-          <Icon size={18} /><span><strong>{label}</strong><small>{available ? detail : mode === "local" ? "Start and authorize the agent" : mode === "browser" ? "This tool cannot run in the browser" : "Connect to the server to continue"}</small></span><em>{value === mode ? "Selected" : available ? "Available" : "Unavailable"}</em>
+          <Icon size={18} /><span><strong>{label}</strong><small>{available ? detail : unavailableDetail}</small></span><em>{value === mode ? "Selected" : availabilityLabel}</em>
         </button>;
       })}
     </div>
     <div className="processing-mode-help" aria-live="polite">
-      {localUnavailable && browserAvailable && value === "browser" && <span>Local agent is unavailable; Browser mode is limited to quick conversions in this tool.</span>}
-      {localUnavailable && (!browserAvailable || value !== "browser") && <><span>Local agent requires Admin login or activation. </span><Link href="/local-agent">Open Local agent setup</Link></>}
-      {!localUnavailable && <span aria-hidden="true">&nbsp;</span>}
+      {checkingLocations && <span>{browserAvailable ? "Checking browser and Local agent support…" : "Checking processing support…"}</span>}
+      {!checkingLocations && localUnavailable && browserAvailable && value === "browser" && <span>Local agent is unavailable; Browser mode is limited to quick conversions in this tool.</span>}
+      {!checkingLocations && localUnavailable && (!browserAvailable || value !== "browser") && <><span>Local agent requires Admin login or activation. </span><Link href="/local-agent">Open Local agent setup</Link></>}
+      {!checkingLocations && !localUnavailable && <span aria-hidden="true">&nbsp;</span>}
     </div>
   </div>;
 }

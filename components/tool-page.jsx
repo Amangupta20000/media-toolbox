@@ -363,8 +363,8 @@ export function ToolPage({ tool }) {
   const busy = Boolean(jobId && job && (job.status === "queued" || job.status === "processing")) || batchBusy;
   const canSubmit = Boolean(isImage ? imageFiles.length : source) && !busy && !uploadProgress;
   const title = isImage ? "Free private image converter" : isPdfCompressor ? "Free PDF compressor" : "Repair damaged MP4, MOV, and video files locally";
-  const eyebrow = isImage ? "Convert without uploads" : isPdfCompressor ? "Reduce PDF size" : "Recover damaged video";
-  const description = isImage ? "Convert JPG, JPEG, PNG, GIF, or BMP images in this browser, or use Local agent for HEIC, TIFF, larger files, and full desktop format support." : isPdfCompressor ? "Reduce PDF file size with a balanced browser profile or advanced Local agent profiles while keeping the original PDF untouched." : "Use the Local agent to repair readable video containers, rebuild missing metadata, and create a new file without changing your original video.";
+  const eyebrow = isImage ? "Private browser conversion" : isPdfCompressor ? "Reduce PDF size" : "Recover damaged video";
+  const description = isImage ? "Convert supported images in your browser without uploading them to a server. Use Local agent for HEIC, TIFF, larger files, and full native format support." : isPdfCompressor ? "Reduce PDF file size with a balanced browser profile or advanced Local agent profiles while keeping the original PDF untouched." : "Use the Local agent to repair readable video containers, rebuild missing metadata, and create a new file without changing your original video.";
   const heicReady = capabilities?.image?.heic || capabilities?.image?.sips;
   const imageMagickReady = capabilities?.image?.imagemagick !== false;
   const sipsReady = capabilities?.image?.sips === true;

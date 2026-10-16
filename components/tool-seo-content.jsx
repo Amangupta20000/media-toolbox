@@ -10,8 +10,9 @@ export function ToolSeoContent({ pathname }) {
   const content = TOOL_SEO_CONTENT[normalizedPath];
   if (!content) return null;
   const lastUpdated = lastModifiedForPathname(normalizedPath);
+  const contentRelatedLinks = (content.relatedLinks || []).map((link) => Array.isArray(link) ? link : [link.href, link.label, link.description]);
   const relatedLinks = [
-    ...(content.relatedLinks || []),
+    ...contentRelatedLinks,
     ["/browser-vs-local-agent", "Browser vs Local agent", "Compare privacy, limits, and feature support before choosing a mode."],
     ["/guides", "Read the practical guides", "Learn how to choose a workflow and check the exported result."],
   ].filter(([href], index, links) => !metadataForPathname(href).noIndex && links.findIndex(([candidate]) => candidate === href) === index);
@@ -70,6 +71,16 @@ export function ToolSeoContent({ pathname }) {
         </table>
       </div>
     </section>}
+    {content.comparison && !Array.isArray(content.comparison) && <article className="tool-seo-panel tool-seo-comparison">
+      <h2>{content.comparison.heading}</h2>
+      {content.comparison.description && <p className="tool-seo-panel-description">{content.comparison.description}</p>}
+      <div className="tool-seo-comparison-table-wrap">
+        <table className="tool-seo-comparison-table">
+          <thead><tr><th scope="col">Processing mode</th><th scope="col">Supported conversion</th><th scope="col">Limit</th></tr></thead>
+          <tbody>{content.comparison.rows.map(([mode, supported, limit]) => <tr key={mode}><th scope="row">{mode}</th><td>{supported}</td><td>{limit}</td></tr>)}</tbody>
+        </table>
+      </div>
+    </article>}
     {relatedLinks.length > 0 && <nav className="tool-seo-related" aria-labelledby="tool-seo-related-title">
       <h2 id="tool-seo-related-title">Related tools and guides</h2>
       <div className="tool-seo-related-grid">{relatedLinks.map(([href, label, detail]) => <Link className="tool-seo-related-link" href={href} key={href}><span><strong>{label}</strong><small>{detail}</small></span><span aria-hidden="true">→</span></Link>)}</div>

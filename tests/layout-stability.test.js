@@ -80,7 +80,7 @@ test("hamburger navigation exposes all public user-facing route groups", async (
 test("desktop tool content expands around the ad gutter", async () => {
   const styles = await read("styles/globals.css");
 
-  assert.match(styles, /\.content-wrap \{ width: min\(1450px, calc\(100% - 4vw\)\); padding-top: 64px; \}/);
+  assert.match(styles, /\.content-wrap \{ width: min\(1450px, calc\(100% - 2vw\)\); padding-top: 64px; \}/);
 });
 
 test("consent banner keeps a fixed, hidden hydration placeholder", async () => {

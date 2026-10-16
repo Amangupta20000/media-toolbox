@@ -24,6 +24,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   const setupGuide = await read("components/agent-setup-guide.jsx");
   const toolSeo = await read("components/tool-seo-content.jsx");
   const toolSeoData = await read("lib/tool-seo-content.js");
+  const siteMetadata = await read("lib/site-metadata.js");
   const footer = await read("components/app-footer.jsx");
   const seo = await read("components/seo-head.jsx");
   const processingMode = await read("components/processing-mode.jsx");
@@ -126,6 +127,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.doesNotMatch(shell, /ToolSeoContent/);
   assert.match(history, /Helpful guide/);
   assert.match(toolPage, /ToolSeoContent pathname=\{`\/\$\{tool\}`\}/);
+  assert.match(toolPage, /Free private image converter/);
   assert.match(toolPage, /ToolFaqContent pathname=\{`\/\$\{tool\}`\}/);
   assert.match(toolPage, /processBrowserPdfCompression/);
   assert.match(toolPage, /BROWSER_PDF_MAX_BYTES/);
@@ -181,6 +183,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(processingMode, /onChangeView/);
   assert.match(processingMode, /Reliable processing on this device/);
   assert.match(processingMode, /Some features may be unavailable or less reliable/);
+  assert.match(processingMode, /Checking browser support/);
   assert.doesNotMatch(history, /server/i);
   assert.match(toolSeo, /Frequently asked questions/);
   assert.match(toolSeo, /export function ToolFaqContent/);
@@ -195,7 +198,11 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(toolSeo, /Export verification checklist/);
   assert.match(toolSeo, /content.faqs.map\(\(\[question, answer\], index\) =>/);
   assert.match(toolSeo, /Related tools and guides/);
+  assert.match(toolSeo, /tool-seo-comparison-table/);
+  assert.match(toolSeo, /tool-seo-related-link/);
   assert.match(toolSeoData, /"Which image formats are supported\?"/);
+  assert.match(toolSeoData, /Free private image conversion/);
+  assert.match(siteMetadata, /image converter no upload/);
   assert.match(toolSeoData, /"Can every damaged video be repaired\?"/);
   assert.match(toolSeoData, /"Which keyboard shortcuts are available\?"/);
   assert.match(toolSeoData, /Browser mode is available for quick conversions/);
@@ -409,6 +416,8 @@ test("SEO metadata is route-specific and normalizes query strings", () => {
   assert.equal(metadataForPathname("/pdf-editor?tab=history").title, "Free PDF Editor — Merge & Organize Pages | NativeMedia Agent");
   assert.equal(metadataForPathname("/privacy/").title, "Privacy Policy | NativeMedia Agent");
   assert.equal(metadataForPathname("/contact/").title, "Contact Us | NativeMedia Agent");
+  assert.equal(metadataForPathname("/image-converter").title, "Free Private Image Converter — No Upload | NativeMedia Agent");
+  assert.match(metadataForPathname("/image-converter").description, /without uploading them to a server/);
   assert.equal(metadataForPathname("/offers").breadcrumbLabel, "Offers");
   assert.equal(metadataForPathname("/how-to-setup-agent").breadcrumbLabel, "How to set up the agent");
   assert.equal(metadataForPathname("/mock-api").title, "Free Mock API Generator for Frontend Testing | NativeMedia Agent");
