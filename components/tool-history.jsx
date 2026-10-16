@@ -7,6 +7,7 @@ import { formatBytes } from "./file-dropzone.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
 import { historyReopenMode, rememberHistoryEdit } from "./history-edit.js";
 import { deleteLocalHistory, getLocalHistory, openLocalResultsFolder } from "./processing-client.js";
+import { AdsterraResponsiveBanner } from "./adsterra-responsive-banner.jsx";
 
 const toolNames = {
   "image-converter": "Image conversion",
@@ -208,7 +209,9 @@ export function ToolHistory({ tool }) {
     window.location.assign(tool === "pdf-editor" ? "/pdf-editor" : tool === "pdf-text-editor" ? "/pdf-text-editor" : tool === "pdf-compressor" ? "/pdf-compressor" : tool === "video-repair" ? "/video-repair" : tool === "svg-to-png" ? "/svg-to-png" : "/image-converter");
   };
 
-  return <section className="history-panel" aria-labelledby={`${tool}-history-title`}>
+  return <>
+    <AdsterraResponsiveBanner />
+    <section className="history-panel" aria-labelledby={`${tool}-history-title`}>
     <div className="history-panel-heading">
       <div><span className="section-kicker"><span className="kicker-line" /> Saved results</span><h2 id={`${tool}-history-title`}><Icon size={21} /> {toolNames[tool] || "Tool"} history</h2><p>Download or remove results kept by the Local agent.</p></div>
       <div className="history-heading-actions">{localReady && <button className="secondary-button" type="button" onClick={openResultsFolder} disabled={openingResults || bulkDeleting}><FolderOpen size={16} /> {openingResults ? "Opening…" : "Open Results folder"}</button>}{selectedItems.length > 0 && <button className="secondary-button history-bulk-delete" type="button" onClick={() => removeItems(selectedItems)} disabled={bulkDeleting}><Trash2 size={16} /> {bulkDeleting ? "Deleting…" : `Delete selected (${selectedItems.length})`}</button>}<button className="secondary-button" type="button" onClick={loadHistory} disabled={loading || bulkDeleting}><RefreshCw className={loading ? "spin" : ""} size={16} /> Refresh</button></div>
@@ -231,7 +234,8 @@ export function ToolHistory({ tool }) {
     {!loading && <p className="history-note">Delete removes the selected result from its current storage. If the file is missing or the Local agent is unavailable, the history listing stays.</p>}
     {message && <DismissibleMessage className="error-banner" resetKey={message}><AlertTriangle size={17} /><span>{message}</span></DismissibleMessage>}
     {previewItem && <HistoryPreviewModal item={previewItem} onClose={() => setPreviewItem(null)} onDelete={() => removeItem(previewItem)} onEdit={() => editItem(previewItem)} deleting={deletingId === previewItem.id} />}
-  </section>;
+    </section>
+  </>;
 }
 
 function previewUrlFor(result) {

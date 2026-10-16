@@ -12,6 +12,8 @@ async function read(relativePath) {
 test("History supports selecting and deleting multiple visible results", async () => {
   const history = await read("components/tool-history.jsx");
   const styles = await read("styles/globals.css");
+  assert.match(history, /import \{ AdsterraResponsiveBanner \} from "\.\/adsterra-responsive-banner\.jsx"/);
+  assert.match(history, /return <>\s*<AdsterraResponsiveBanner \/>\s*<section className="history-panel"/);
   assert.match(history, /const \[selectedIds, setSelectedIds\] = useState\(\(\) => new Set\(\)\)/);
   assert.match(history, /const selectedItems = items\.filter\(\(item\) => selectedIds\.has\(item\.id\)\)/);
   assert.match(history, /Select visible history results/);
