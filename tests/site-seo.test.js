@@ -197,9 +197,10 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(toolSeo, /First-party example/);
   assert.match(toolSeo, /Export verification checklist/);
   assert.match(toolSeo, /content.faqs.map\(\(\[question, answer\], index\) =>/);
-  assert.match(toolSeo, /const adAfter = Math\.ceil\(content\.faqs\.length \/ 2\)/);
-  assert.match(toolSeo, /insertAd && index \+ 1 === adAfter && <AdsterraResponsiveBanner variant="secondary" \/>/);
-  assert.match(toolSeo, /<FaqSection content=\{content\} insertAd \/>/);
+  assert.match(toolSeo, /const guideWidgets = \[/);
+  assert.match(toolSeo, /const adAfter = Math\.ceil\(guideWidgets\.length \/ 2\)/);
+  assert.match(toolSeo, /index \+ 1 === adAfter && <AdsterraResponsiveBanner variant="secondary" \/>/);
+  assert.doesNotMatch(toolSeo, /FaqSection content=\{content\} insertAd/);
   assert.match(toolSeo, /Related tools and guides/);
   assert.match(toolSeo, /tool-seo-comparison-table/);
   assert.match(toolSeo, /tool-seo-related-link/);
@@ -220,7 +221,8 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(processingOptions, /import \{ AdsterraNativeBanner \} from "\.\/adsterra-native-banner\.jsx"/);
   assert.match(processingOptions, /\{!hidden && <AdsterraNativeBanner \/>}\s*<div className="processing-format-table-wrap">/);
   assert.match(toolSeo, /normalizedPath === "\/local-agent" && <AdsterraResponsiveBanner \/>[\s\S]*tool-seo-intro/);
-  assert.match(toolSeo, /normalizedPath === "\/local-agent" && <AdsterraNativeBanner \/>[\s\S]*tool-seo-comparison/);
+  assert.match(toolSeo, /const nativeAdAfter = guideWidgets\.some\(\(\{ key \}\) => key === "practical-checks"\) \? "practical-checks" : "overview"/);
+  assert.match(toolSeo, /normalizedPath === "\/local-agent" && key === nativeAdAfter && <AdsterraNativeBanner \/>/);
   assert.match(toolPage, /import \{ AdsterraNativeBanner \} from "\.\/adsterra-native-banner\.jsx"/);
   assert.match(toolPage, /done && job\.result && <AdsterraNativeBanner \/>/);
   assert.match(pdfEditor, /import \{ AdsterraResponsiveBanner \} from "\.\/adsterra-responsive-banner\.jsx"/);
