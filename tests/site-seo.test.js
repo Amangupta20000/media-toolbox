@@ -199,7 +199,7 @@ test("public site surfaces have legal links and SEO metadata", async () => {
   assert.match(toolSeo, /content.faqs.map\(\(\[question, answer\], index\) =>/);
   assert.match(toolSeo, /const adAfter = Math\.ceil\(content\.faqs\.length \/ 2\)/);
   assert.match(toolSeo, /insertAd && index \+ 1 === adAfter && <AdsterraResponsiveBanner variant="secondary" \/>/);
-  assert.match(toolSeo, /new Set\(\["\/local-agent", "\/how-to-setup-agent", "\/pdf-editor"\]\)/);
+  assert.match(toolSeo, /<FaqSection content=\{content\} insertAd \/>/);
   assert.match(toolSeo, /Related tools and guides/);
   assert.match(toolSeo, /tool-seo-comparison-table/);
   assert.match(toolSeo, /tool-seo-related-link/);

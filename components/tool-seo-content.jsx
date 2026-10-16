@@ -113,9 +113,8 @@ export function ToolFaqContent({ pathname }) {
   const normalizedPath = normalizeSitePath(pathname);
   const content = TOOL_SEO_CONTENT[normalizedPath];
   if (!content?.faqs?.length) return null;
-  const guideAdAlreadyPresent = new Set(["/local-agent", "/how-to-setup-agent", "/pdf-editor"]);
 
   return <section className="tool-seo-content tool-faq-content" aria-label={`${content.name} frequently asked questions`}>
-    <FaqSection content={content} insertAd={!guideAdAlreadyPresent.has(normalizedPath)} />
+    <FaqSection content={content} insertAd />
   </section>;
 }
