@@ -18,6 +18,9 @@ test("web license admin groups audit events and exposes search, OS, and sort con
   assert.match(component, /audit-device-group/);
   assert.match(component, /Operating system/);
   assert.match(component, /Newest activity/);
+  assert.match(component, /getLocalAdminSession/);
+  assert.match(component, /Credentials are verified by the website server/);
+  assert.doesNotMatch(component, /Admin \/ 12345/);
   assert.match(styles, /\.audit-log-controls/);
   assert.match(styles, /\.audit-device-group/);
 });

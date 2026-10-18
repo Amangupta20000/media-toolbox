@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, Check, Github, LoaderCircle, LogIn, LogOut, RefreshCw, ShieldAlert, X } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
-import { approveLicenseRequest, declineLicenseRequest, getAdminAuditLog, getAdminLicenseRequests, licenseServerUrl, loginLicenseAdmin, logoutLicenseAdmin, storedAdminToken, updateGithubAgentLicenseServerUrl } from "./license-client.js";
+import { approveLicenseRequest, declineLicenseRequest, getAdminAuditLog, getAdminLicenseRequests, getLocalAdminSession, licenseServerUrl, loginLicenseAdmin, logoutLicenseAdmin, logoutLocalAdmin, storedAdminToken, updateGithubAgentLicenseServerUrl } from "./license-client.js";
 
 function date(value) {
   return value ? new Date(value).toLocaleString() : "—";
@@ -102,6 +102,7 @@ export function LicenseAdmin() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [offlineOnly, setOfflineOnly] = useState(false);
   const [releaseServerUrl, setReleaseServerUrl] = useState("");
   const [auditSearch, setAuditSearch] = useState("");
   const [auditOsFilter, setAuditOsFilter] = useState("all");
@@ -111,25 +112,64 @@ export function LicenseAdmin() {
   const visibleAuditEventCount = auditGroups.reduce((total, group) => total + group.items.length, 0);
 
   const refresh = useCallback(async () => {
-    if (!storedAdminToken()) return;
+    if (!storedAdminToken()) {
+      setOfflineOnly(true);
+      setItems([]);
+      setAuditItems([]);
+      setAuditStoragePath("");
+      setError("");
+      return;
+    }
     try {
       const [requests, audit] = await Promise.all([getAdminLicenseRequests(), getAdminAuditLog()]);
       setItems(requests.items || []);
       setAuditItems(audit.items || []);
       setAuditStoragePath(audit.storagePath || "");
+      setOfflineOnly(false);
       setLoggedIn(true);
       setError("");
     } catch (refreshError) {
-      setError(refreshError.message || "The licensing requests could not be loaded.");
+      if ([502, 503, 504].includes(Number(refreshError?.status)) || /licensing server|timed out|could not be reached/i.test(String(refreshError?.message || ""))) {
+        setOfflineOnly(true);
+        setItems([]);
+        setAuditItems([]);
+        setAuditStoragePath("");
+        setError("");
+      } else setError(refreshError.message || "The licensing requests could not be loaded.");
       if (refreshError.status === 401) setLoggedIn(false);
     }
   }, []);
 
-  useEffect(() => { setReleaseServerUrl(licenseServerUrl()); if (storedAdminToken()) { setLoggedIn(true); refresh(); } }, [refresh]);
+  useEffect(() => {
+    let active = true;
+    setReleaseServerUrl(licenseServerUrl());
+    if (storedAdminToken()) {
+      setLoggedIn(true);
+      refresh();
+    } else {
+      getLocalAdminSession().then((session) => {
+        if (!active || !session.authenticated) return;
+        setLoggedIn(true);
+        setOfflineOnly(true);
+      }).catch(() => {});
+    }
+    return () => { active = false; };
+  }, [refresh]);
 
   const login = async (event) => {
     event.preventDefault(); setBusy(true); setError("");
-    try { await loginLicenseAdmin(username, password); setPassword(""); setLoggedIn(true); await refresh(); }
+    try {
+      const result = await loginLicenseAdmin(username, password);
+      setPassword("");
+      setLoggedIn(true);
+      if (result.offline) {
+        setOfflineOnly(true);
+        setItems([]);
+        setAuditItems([]);
+        setAuditStoragePath("");
+        setMessage("Admin access enabled. The licensing service is offline, so no requests or audit records are available.");
+      } else await refresh();
+    }
     catch (loginError) { setError(loginError.message || "Admin login failed."); }
     finally { setBusy(false); }
   };
@@ -141,7 +181,7 @@ export function LicenseAdmin() {
     finally { setBusy(false); }
   };
 
-  const logout = async () => { setBusy(true); try { await logoutLicenseAdmin(); } catch { /* local logout still clears the session */ } finally { setLoggedIn(false); setItems([]); setAuditItems([]); setAuditStoragePath(""); setAuditSearch(""); setAuditOsFilter("all"); setAuditSort("newest"); setBusy(false); } };
+  const logout = async () => { setBusy(true); try { await Promise.allSettled([logoutLicenseAdmin(), logoutLocalAdmin()]); } finally { setLoggedIn(false); setOfflineOnly(false); setItems([]); setAuditItems([]); setAuditStoragePath(""); setAuditSearch(""); setAuditOsFilter("all"); setAuditSort("newest"); setBusy(false); } };
 
   const updateGithubVariable = async (event) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
@@ -154,8 +194,9 @@ export function LicenseAdmin() {
 
   return <AppShell>
     <div className="page-heading"><div><div className="section-kicker"><span className="kicker-line" /> Owner tools</div><h1>License requests</h1><p>Approve one-time activation codes from 10 minutes up to 1 day for trusted website origins.</p></div><div className="heading-note"><ShieldAlert size={16} /><span>Keep this page private</span></div></div>
-    {!licenseServerUrl() && <DismissibleMessage className="error-banner" resetKey="license-server-url-missing"><ShieldAlert size={18} /><span>Set NEXT_PUBLIC_LICENSE_SERVER_URL before using the owner dashboard.</span></DismissibleMessage>}
-    {!loggedIn ? <section className="agent-pair-card"><div className="card-heading"><div><span className="card-index">01</span><h2>Admin login</h2></div><span className="required-label">Owner only</span></div><p className="card-description">Sign in to approve or decline requests. The default local owner account is Admin / 12345; change this deployment credential before sharing the dashboard.</p><form className="admin-login-form" onSubmit={login}><label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label><button className="primary-button" type="submit" disabled={busy || !licenseServerUrl()}><LogIn size={17} /> {busy ? "Signing in…" : "Sign in"}</button></form></section> : <><section className="agent-sessions-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Pending and completed requests</h2></div><div className="agent-open-actions"><button className="secondary-button" type="button" onClick={refresh} disabled={busy}><RefreshCw size={16} /> Refresh</button><button className="secondary-button" type="button" onClick={logout} disabled={busy}><LogOut size={16} /> Log out</button></div></div><div className="license-request-list">{items.length ? items.map((item) => <div className="license-request-row" key={item.id}><div><strong>{item.requesterLabel || "Website user"}</strong><small>{item.origin}</small><small>{duration(item.durationMs)} · Created {date(item.createdAt)} · expires {date(item.expiresAt)}</small><small>Status: {item.status}</small></div>{item.status === "pending" && <div className="agent-open-actions"><button className="primary-button" type="button" onClick={() => decide(item, "approve")} disabled={busy}><Check size={16} /> Approve</button><button className="secondary-button" type="button" onClick={() => decide(item, "decline")} disabled={busy}><X size={16} /> Decline</button></div>}</div>) : <div className="agent-session-empty">No license requests yet.</div>}</div></section><section className="agent-pair-card audit-log-card"><div className="card-heading"><div><span className="card-index">03</span><h2><Activity size={18} /> License &amp; device audit</h2></div><button className="secondary-button" type="button" onClick={refresh} disabled={busy}><RefreshCw size={16} /> Refresh log</button></div><p className="card-description">Activation requests, approvals, redemptions, expiries, admin sessions, and device activity are recorded in the SSD licensing database. Events are combined by device ID, device name, or operating system.</p><div className="audit-log-controls" aria-label="Audit log filters"><label>Search<input type="search" value={auditSearch} onChange={(event) => setAuditSearch(event.target.value)} placeholder="Device, OS, event, or ID" /></label><label>Operating system<select value={auditOsFilter} onChange={(event) => setAuditOsFilter(event.target.value)}><option value="all">All systems</option><option value="macOS">macOS</option><option value="Windows">Windows</option><option value="Linux">Linux</option><option value="Android">Android</option><option value="iOS">iOS</option><option value="FreeBSD">FreeBSD</option><option value="Unknown">Unknown</option></select></label><label>Sort<select value={auditSort} onChange={(event) => setAuditSort(event.target.value)}><option value="newest">Newest activity</option><option value="oldest">Oldest activity</option><option value="events">Most events</option><option value="device">Device name</option></select></label><span className="audit-log-count" aria-live="polite">{visibleAuditEventCount} events · {auditGroups.length} devices</span></div><div className="audit-log-list audit-log-groups">{auditGroups.length ? auditGroups.map((group) => <details className="audit-device-group" key={group.key} open><summary><div className="audit-device-summary"><strong>{group.label}</strong><small>{group.os}{group.deviceName && group.deviceName !== group.label ? ` · ${group.deviceName}` : ""}{group.deviceId ? ` · ID ${group.deviceId}` : ""}</small></div><span>{group.items.length} event{group.items.length === 1 ? "" : "s"}</span></summary><div className="audit-device-events">{group.items.map(({ item }) => <div className="audit-log-row" key={item.id}><div><strong>{auditLabels[item.event] || item.event}</strong><small>{date(item.createdAt)} · {item.origin || "No browser origin"}{item.requestId ? ` · Request ${String(item.requestId).slice(0, 8)}` : ""}</small><small>{auditDetailText(item) || "No additional details"}</small></div></div>)}</div></details>) : <div className="agent-session-empty">{auditItems.length ? "No matching audit events." : "No audit events yet."}</div>}</div>{auditStoragePath && <p className="agent-session-note"><LoaderCircle size={14} /> Stored in <code>{auditStoragePath}</code>.</p>}</section><section className="agent-pair-card"><div className="card-heading"><div><span className="card-index">04</span><h2>Release configuration</h2></div><span className="optional-label">Owner only</span></div><p className="card-description">The SSD licensing server updates the GitHub Actions repository variable used by future desktop-agent releases. The GitHub token stays on the licensing server and is never sent to this page.</p><form className="admin-login-form" onSubmit={updateGithubVariable}><label>Agent licensing-server URL<input value={releaseServerUrl} onChange={(event) => setReleaseServerUrl(event.target.value)} placeholder="https://your-device.tailnet.ts.net" autoComplete="url" /></label><button className="primary-button" type="submit" disabled={busy || !releaseServerUrl}><Github size={17} /> {busy ? "Updating…" : "Update GitHub variable"}</button></form><p className="agent-session-note"><LoaderCircle size={14} /> Use the HTTPS Tailscale Funnel URL. Future releases embed it as <code>AGENT_LICENSE_SERVER_URL</code>.</p></section></>}
+    {!licenseServerUrl() && <p className="agent-session-note"><ShieldAlert size={14} /> The separate licensing service is not configured. Admin access can still open this page, but requests, audit records, and release updates need the SSD-backed service.</p>}
+    {offlineOnly && loggedIn && <p className="agent-session-note"><ShieldAlert size={14} /> Admin access is active locally. The SSD licensing service is unavailable, so this page is showing an empty offline state.</p>}
+    {!loggedIn ? <section className="agent-pair-card"><div className="card-heading"><div><span className="card-index">01</span><h2>Admin login</h2></div><span className="required-label">Owner only</span></div><p className="card-description">Sign in to open the owner dashboard. Credentials are verified by the website server and are not included in the browser bundle.</p><form className="admin-login-form" onSubmit={login}><label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label><button className="primary-button" type="submit" disabled={busy}><LogIn size={17} /> {busy ? "Signing in…" : "Sign in"}</button></form></section> : <><section className="agent-sessions-card"><div className="card-heading"><div><span className="card-index">02</span><h2>Pending and completed requests</h2></div><div className="agent-open-actions"><button className="secondary-button" type="button" onClick={refresh} disabled={busy || offlineOnly}><RefreshCw size={16} /> Refresh</button><button className="secondary-button" type="button" onClick={logout} disabled={busy}><LogOut size={16} /> Log out</button></div></div><div className="license-request-list">{items.length ? items.map((item) => <div className="license-request-row" key={item.id}><div><strong>{item.requesterLabel || "Website user"}</strong><small>{item.origin}</small><small>{duration(item.durationMs)} · Created {date(item.createdAt)} · expires {date(item.expiresAt)}</small><small>Status: {item.status}</small></div>{item.status === "pending" && <div className="agent-open-actions"><button className="primary-button" type="button" onClick={() => decide(item, "approve")} disabled={busy}><Check size={16} /> Approve</button><button className="secondary-button" type="button" onClick={() => decide(item, "decline")} disabled={busy}><X size={16} /> Decline</button></div>}</div>) : <div className="agent-session-empty">No license requests yet.</div>}</div></section><section className="agent-pair-card audit-log-card"><div className="card-heading"><div><span className="card-index">03</span><h2><Activity size={18} /> License &amp; device audit</h2></div><button className="secondary-button" type="button" onClick={refresh} disabled={busy || offlineOnly}><RefreshCw size={16} /> Refresh log</button></div><p className="card-description">Activation requests, approvals, redemptions, expiries, admin sessions, and device activity appear here when the SSD licensing service is available.</p><div className="audit-log-controls" aria-label="Audit log filters"><label>Search<input type="search" value={auditSearch} onChange={(event) => setAuditSearch(event.target.value)} placeholder="Device, OS, event, or ID" /></label><label>Operating system<select value={auditOsFilter} onChange={(event) => setAuditOsFilter(event.target.value)}><option value="all">All systems</option><option value="macOS">macOS</option><option value="Windows">Windows</option><option value="Linux">Linux</option><option value="Android">Android</option><option value="iOS">iOS</option><option value="FreeBSD">FreeBSD</option><option value="Unknown">Unknown</option></select></label><label>Sort<select value={auditSort} onChange={(event) => setAuditSort(event.target.value)}><option value="newest">Newest activity</option><option value="oldest">Oldest activity</option><option value="events">Most events</option><option value="device">Device name</option></select></label><span className="audit-log-count" aria-live="polite">{visibleAuditEventCount} events · {auditGroups.length} devices</span></div><div className="audit-log-list audit-log-groups">{auditGroups.length ? auditGroups.map((group) => <details className="audit-device-group" key={group.key} open><summary><div className="audit-device-summary"><strong>{group.label}</strong><small>{group.os}{group.deviceName && group.deviceName !== group.label ? ` · ${group.deviceName}` : ""}{group.deviceId ? ` · ID ${group.deviceId}` : ""}</small></div><span>{group.items.length} event{group.items.length === 1 ? "" : "s"}</span></summary><div className="audit-device-events">{group.items.map(({ item }) => <div className="audit-log-row" key={item.id}><div><strong>{auditLabels[item.event] || item.event}</strong><small>{date(item.createdAt)} · {item.origin || "No browser origin"}{item.requestId ? ` · Request ${String(item.requestId).slice(0, 8)}` : ""}</small><small>{auditDetailText(item) || "No additional details"}</small></div></div>)}</div></details>) : <div className="agent-session-empty">{auditItems.length ? "No matching audit events." : "No audit events yet."}</div>}</div>{auditStoragePath && <p className="agent-session-note"><LoaderCircle size={14} /> Stored in <code>{auditStoragePath}</code>.</p>}</section><section className="agent-pair-card"><div className="card-heading"><div><span className="card-index">04</span><h2>Release configuration</h2></div><span className="optional-label">Owner only</span></div><p className="card-description">The SSD licensing service updates the GitHub Actions repository variable used by future desktop-agent releases. The GitHub token stays on the licensing service and is never sent to this page.</p><form className="admin-login-form" onSubmit={updateGithubVariable}><label>Agent licensing-server URL<input value={releaseServerUrl} onChange={(event) => setReleaseServerUrl(event.target.value)} placeholder="https://your-device.tailnet.ts.net" autoComplete="url" /></label><button className="primary-button" type="submit" disabled={busy || !releaseServerUrl}><Github size={17} /> {busy ? "Updating…" : "Update GitHub variable"}</button></form><p className="agent-session-note"><LoaderCircle size={14} /> Use the HTTPS Tailscale Funnel URL. Future releases embed it as <code>AGENT_LICENSE_SERVER_URL</code>.</p></section></>}
     {message && <div className="success-banner"><Check size={17} /><span>{message}</span></div>}
     {error && <DismissibleMessage className="error-banner" resetKey={error}><ShieldAlert size={17} /><span>{error}</span></DismissibleMessage>}
     {loggedIn && <p className="agent-session-note"><LoaderCircle size={14} /> Click Refresh to load the latest requests. The activation code is shown only to the requesting browser, not in this owner list.</p>}
