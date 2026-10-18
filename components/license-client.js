@@ -3,6 +3,8 @@ const LOCAL_LICENSE_SERVER_URL = "http://127.0.0.1:4900";
 const LICENSE_PROXY_URL = "/api/license";
 const LOCAL_ADMIN_SESSION_URL = "/api/admin/session";
 const ADMIN_TOKEN_KEY = "media-toolbox-license-admin-token";
+const ADMIN_TOKEN_EXPIRES_KEY = "media-toolbox-license-admin-token-expires-at";
+const ADMIN_TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
 
 export function licenseServerUrl() {
   return LICENSE_SERVER_URL;
@@ -56,19 +58,78 @@ function isLicenseServiceUnavailable(error) {
 
 export function storedAdminToken() {
   if (typeof window === "undefined") return "";
-  return window.sessionStorage.getItem(ADMIN_TOKEN_KEY) || "";
+  let sharedToken = "";
+  let canMigrateSessionToken = false;
+  try {
+    const stored = window.localStorage.getItem(ADMIN_TOKEN_KEY) || "";
+    const expiresAt = Number(window.localStorage.getItem(ADMIN_TOKEN_EXPIRES_KEY));
+    if (Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= Date.now()) {
+      window.localStorage.removeItem(ADMIN_TOKEN_KEY);
+      // Keep the expired timestamp as a tombstone so an older sessionStorage
+      // copy cannot immediately re-promote the same expired token.
+      window.localStorage.setItem(ADMIN_TOKEN_EXPIRES_KEY, String(expiresAt));
+    } else {
+      sharedToken = stored;
+      canMigrateSessionToken = !stored;
+    }
+  } catch {
+    // Some privacy modes deny localStorage. The per-tab session remains a
+    // useful fallback for the tab that performed the login.
+  }
+  let sessionToken = "";
+  try {
+    sessionToken = window.sessionStorage.getItem(ADMIN_TOKEN_KEY) || "";
+  } catch {
+    // The shared copy is still usable when sessionStorage is unavailable.
+  }
+  // Migrate a token created by an older build so an already-authenticated
+  // admin tab can immediately share access with the audio tab.
+  if (!sharedToken && sessionToken && canMigrateSessionToken) {
+    try {
+      window.localStorage.setItem(ADMIN_TOKEN_KEY, sessionToken);
+      window.localStorage.setItem(ADMIN_TOKEN_EXPIRES_KEY, String(Date.now() + ADMIN_TOKEN_TTL_MS));
+    } catch {
+      // Continue with the per-tab token if shared storage is unavailable.
+    }
+  }
+  return sharedToken || sessionToken;
 }
 
-export function storeAdminToken(token) {
+export function storeAdminToken(token, expiresAt = 0) {
   if (typeof window !== "undefined") {
-    window.sessionStorage.setItem(ADMIN_TOKEN_KEY, String(token || ""));
+    const value = String(token || "");
+    try {
+      if (value) {
+        window.localStorage.setItem(ADMIN_TOKEN_KEY, value);
+        const expiry = Number(expiresAt);
+        if (Number.isFinite(expiry) && expiry > 0) window.localStorage.setItem(ADMIN_TOKEN_EXPIRES_KEY, String(expiry));
+        else window.localStorage.removeItem(ADMIN_TOKEN_EXPIRES_KEY);
+      } else {
+        window.localStorage.removeItem(ADMIN_TOKEN_KEY);
+        window.localStorage.removeItem(ADMIN_TOKEN_EXPIRES_KEY);
+      }
+    } catch {
+      // Keep the session-storage copy when shared storage is unavailable.
+    }
+    try {
+      if (value) window.sessionStorage.setItem(ADMIN_TOKEN_KEY, value);
+      else window.sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+    } catch {
+      // The auth event still lets an already-open page refresh its state.
+    }
     window.dispatchEvent(new CustomEvent("media-toolbox-admin-auth", { detail: { authenticated: Boolean(token) } }));
   }
 }
 
 export function clearAdminToken() {
   if (typeof window !== "undefined") {
-    window.sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+    try {
+      window.localStorage.removeItem(ADMIN_TOKEN_KEY);
+      window.localStorage.removeItem(ADMIN_TOKEN_EXPIRES_KEY);
+    } catch {
+      // Continue clearing the per-tab copy.
+    }
+    try { window.sessionStorage.removeItem(ADMIN_TOKEN_KEY); } catch { /* unavailable storage is harmless */ }
     window.dispatchEvent(new CustomEvent("media-toolbox-admin-auth", { detail: { authenticated: false } }));
   }
 }
@@ -97,7 +158,7 @@ export async function loginLicenseAdmin(username, password) {
   if (!licenseServerUrl()) return { ...(await loginLocalAdmin(username, password)), offline: true };
   try {
     const value = await licenseFetch("/v1/admin/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
-    storeAdminToken(value.token);
+    storeAdminToken(value.token, value.expiresAt);
     // Keep the same-origin gate active across reloads without exposing the
     // password or depending on the SSD service for the page shell.
     await loginLocalAdmin(username, password).catch(() => {});

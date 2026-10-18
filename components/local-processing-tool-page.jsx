@@ -176,8 +176,9 @@ export function LocalProcessingToolPage({ tool }) {
     const refreshAdminAccess = () => setAdminUrlAccess(locations?.local?.authorization?.mode === "admin" || locations?.local?.health?.authorization?.mode === "admin" || Boolean(storedAdminToken()));
     refreshAdminAccess();
     window.addEventListener("media-toolbox-admin-auth", refreshAdminAccess);
+    window.addEventListener("storage", refreshAdminAccess);
     const timer = window.setInterval(refreshAdminAccess, 3000);
-    return () => { window.removeEventListener("media-toolbox-admin-auth", refreshAdminAccess); window.clearInterval(timer); };
+    return () => { window.removeEventListener("media-toolbox-admin-auth", refreshAdminAccess); window.removeEventListener("storage", refreshAdminAccess); window.clearInterval(timer); };
   }, [isAudio, locations]);
 
   useEffect(() => {

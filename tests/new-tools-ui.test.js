@@ -41,6 +41,7 @@ test("local tools keep their processing behavior while the approval surface is f
   assert.match(page, /Video to audio converter/);
   assert.match(page, /adminUrlAccess/);
   assert.match(page, /media-toolbox-admin-auth/);
+  assert.match(page, /addEventListener\("storage", refreshAdminAccess\)/);
   assert.match(page, /Admin media URL/);
   assert.doesNotMatch(page, /yt-dlp/i);
   assert.doesNotMatch(seo, /yt-dlp/i);
