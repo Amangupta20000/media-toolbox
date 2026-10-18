@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, Check, Github, LoaderCircle, LogIn, LogOut, RefreshCw, ShieldAlert, X } from "lucide-react";
 import { AppShell } from "./app-shell.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
-import { approveLicenseRequest, declineLicenseRequest, getAdminAuditLog, getAdminLicenseRequests, getLocalAdminSession, licenseServerUrl, loginLicenseAdmin, logoutLicenseAdmin, logoutLocalAdmin, storedAdminToken, updateGithubAgentLicenseServerUrl } from "./license-client.js";
+import { approveLicenseRequest, clearAdminToken, declineLicenseRequest, getAdminAuditLog, getAdminLicenseRequests, getLocalAdminSession, licenseServerUrl, loginLicenseAdmin, logoutLicenseAdmin, logoutLocalAdmin, storedAdminToken, updateGithubAgentLicenseServerUrl } from "./license-client.js";
 
 function date(value) {
   return value ? new Date(value).toLocaleString() : "—";
@@ -129,7 +129,8 @@ export function LicenseAdmin() {
       setLoggedIn(true);
       setError("");
     } catch (refreshError) {
-      if ([502, 503, 504].includes(Number(refreshError?.status)) || /licensing server|timed out|could not be reached/i.test(String(refreshError?.message || ""))) {
+      if ([502, 503, 504].includes(Number(refreshError?.status)) || /licensing server|timed out|could not be reached|failed to fetch|network/i.test(String(refreshError?.message || ""))) {
+        clearAdminToken();
         setOfflineOnly(true);
         setItems([]);
         setAuditItems([]);

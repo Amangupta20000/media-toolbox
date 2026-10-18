@@ -51,7 +51,7 @@ async function localAdminFetch(options = {}) {
 }
 
 function isLicenseServiceUnavailable(error) {
-  return [502, 503, 504].includes(Number(error?.status)) || /not configured|could not be reached|timed out|request failed|fetch failed|network/i.test(String(error?.message || ""));
+  return [502, 503, 504].includes(Number(error?.status)) || /not configured|could not be reached|timed out|request failed|fetch failed|failed to fetch|network/i.test(String(error?.message || ""));
 }
 
 export function storedAdminToken() {
