@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { createJobFromMultipart, parseMultipart, paths } from "../../../lib/job-intake.js";
 import { adminTokenFromRequest, isValidLicenseAdminToken } from "../../../lib/admin-access.js";
+import { validSession } from "../admin/session.js";
 
 export const config = { api: { bodyParser: false, responseLimit: false, externalResolver: true } };
 
@@ -29,7 +30,9 @@ export default async function handler(request, response) {
   try {
     const { fields, files } = await parseMultipart(request, jobDir);
     const remoteMediaRequested = fields.tool === "audio-extractor" && String(fields.sourceUrl || "").trim();
-    const allowRemoteMediaUrl = !remoteMediaRequested || await isValidLicenseAdminToken(adminTokenFromRequest(request));
+    const allowRemoteMediaUrl = !remoteMediaRequested
+      || validSession(request)
+      || await isValidLicenseAdminToken(adminTokenFromRequest(request));
     if (remoteMediaRequested && !allowRemoteMediaUrl) {
       const error = new Error("Media URL extraction is restricted to an authorized Admin session.");
       error.statusCode = 403;

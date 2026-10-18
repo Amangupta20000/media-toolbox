@@ -31,7 +31,7 @@ function cookieValue(request) {
   return entry ? decodeURIComponent(entry.slice(COOKIE_NAME.length + 1)) : "";
 }
 
-function validSession(request) {
+export function validSession(request) {
   const token = cookieValue(request);
   const [payload, signature] = token.split(".");
   if (!payload || !signature) return false;
@@ -59,6 +59,33 @@ function secureCookie(request) {
 function setSessionCookie(response, request, token, maxAge = SESSION_TTL_SECONDS) {
   const secure = secureCookie(request) ? "; Secure" : "";
   response.setHeader("Set-Cookie", `${COOKIE_NAME}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; SameSite=Strict${secure}`);
+}
+
+const AUDIO_GRANT_TTL_SECONDS = 90;
+
+function signAudioGrant(payload) {
+  const encoded = encode(JSON.stringify(payload));
+  return `${encoded}.${sign(encoded)}`;
+}
+
+export function createAdminAudioGrant({ challenge, origin } = {}) {
+  const expiresAt = Date.now() + AUDIO_GRANT_TTL_SECONDS * 1000;
+  return signAudioGrant({ kind: "audio-url-admin", challenge: String(challenge || ""), origin: String(origin || ""), expiresAt });
+}
+
+export function verifyAdminAudioGrant(value) {
+  const [payload, signature] = String(value || "").split(".");
+  if (!payload || !signature) return null;
+  const actualSignature = Buffer.from(signature);
+  const expectedSignature = Buffer.from(sign(payload));
+  if (actualSignature.length !== expectedSignature.length || !timingSafeEqual(actualSignature, expectedSignature)) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (parsed.kind !== "audio-url-admin" || !parsed.challenge || !parsed.origin || Number(parsed.expiresAt) <= Date.now()) return null;
+    return { challenge: String(parsed.challenge), origin: String(parsed.origin), expiresAt: Number(parsed.expiresAt) };
+  } catch {
+    return null;
+  }
 }
 
 function json(response, status, payload) {

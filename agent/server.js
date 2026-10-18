@@ -32,6 +32,7 @@ const state = {
   protocol: "http",
   pairingCode: String(randomInt(100000, 1000000)),
   sessions: new Map(),
+  audioAdminChallenges: new Map(),
   allowedOrigins: new Set(),
   queueRunning: false,
   cleanupTimer: null,
@@ -158,7 +159,7 @@ function addCors(request, response, allowAny = false) {
     // the permission header.
     response.setHeader("Access-Control-Allow-Private-Network", "true");
   }
-  response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Range, X-Requested-With");
+  response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Range, X-Requested-With, X-Media-Toolbox-Admin-Grant, X-Media-Toolbox-Admin-Token");
   response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD");
   response.setHeader("Access-Control-Expose-Headers", "Accept-Ranges, Content-Disposition, Content-Length, Content-Range");
   response.setHeader("Access-Control-Max-Age", "600");
@@ -223,6 +224,9 @@ function pruneExpiredSessions() {
       changed = true;
     }
   }
+  for (const [challenge, entry] of state.audioAdminChallenges) {
+    if (entry.expiresAt < now) state.audioAdminChallenges.delete(challenge);
+  }
   if (changed) rebuildAllowedOrigins();
 }
 
@@ -234,6 +238,34 @@ function validateWebsiteOrigin(value, requestOrigin = "") {
   if (!["http:", "https:"].includes(parsedOrigin.protocol) || parsedOrigin.pathname !== "/" || parsedOrigin.search || parsedOrigin.hash) throw new Error("Only an HTTP or HTTPS website origin can be paired.");
   if (requestOrigin && requestOrigin !== requestedOrigin) throw new Error("The pairing origin does not match this browser.");
   return requestedOrigin;
+}
+
+async function verifyWebAudioAdminGrant(grant, origin, session) {
+  const requestedGrant = String(grant || "").trim();
+  const requestedOrigin = String(origin || "").trim();
+  if (!requestedGrant || !requestedOrigin || !state.allowedOrigins.has(requestedOrigin) || !session) return false;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4500);
+  try {
+    const response = await fetch(`${requestedOrigin}/api/admin/audio-grant`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ grant: requestedGrant }),
+      signal: controller.signal,
+    });
+    let body = {};
+    try { body = await response.json(); } catch { /* the status still explains the failure */ }
+    if (!response.ok || body.authorized !== true || body.origin !== requestedOrigin) return false;
+    const challenge = String(body.challenge || "");
+    const pending = state.audioAdminChallenges.get(challenge);
+    if (!pending || pending.expiresAt <= Date.now() || pending.origin !== requestedOrigin || pending.token !== session.token) return false;
+    state.audioAdminChallenges.delete(challenge);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function issueSession(origin, clientLabel = "", scope = "processing") {
@@ -816,6 +848,20 @@ async function handle(request, response) {
   // has already verified that it matches the origin used during pairing.
   if (origin && origin !== auth.session.origin) return json(response, 403, { error: "This website origin is not paired with the local agent." }, request, origin);
 
+  if (url.pathname === "/v1/admin/audio-grant/challenge" && request.method === "POST") {
+    try {
+      const body = await readJson(request);
+      const requestedOrigin = validateWebsiteOrigin(body.origin || request.headers.origin, request.headers.origin);
+      if (requestedOrigin !== auth.session.origin) throw new Error("The Admin media URL grant must use the paired website origin.");
+      const challenge = randomUUID();
+      const expiresAt = Date.now() + 90 * 1000;
+      state.audioAdminChallenges.set(challenge, { token: auth.token, origin: requestedOrigin, expiresAt });
+      return json(response, 200, { challenge, expiresAt }, request, origin);
+    } catch (error) {
+      return json(response, 400, { error: error instanceof Error ? error.message : "The Admin media URL grant could not be created." }, request, origin);
+    }
+  }
+
   if (url.pathname === "/v1/mock-apis" && request.method === "GET") {
     const projects = await listMockProjects();
     return json(response, 200, { items: projects }, request, origin);
@@ -962,9 +1008,14 @@ async function handle(request, response) {
       const { fields, files } = await parseMultipart(request, jobDir, unlimitedPdfEditor ? { fileSize: Number.POSITIVE_INFINITY, maxFiles: Number.POSITIVE_INFINITY } : undefined);
       const remoteMediaRequested = fields.tool === "audio-extractor" && String(fields.sourceUrl || "").trim();
       const webAdminToken = String(request.headers["x-media-toolbox-admin-token"] || "").trim();
+      const webAdminGrant = String(request.headers["x-media-toolbox-admin-grant"] || "").trim();
+      const webAdminGrantAuthorized = remoteMediaRequested && webAdminGrant
+        ? await verifyWebAudioAdminGrant(webAdminGrant, auth.session.origin, auth.session)
+        : false;
       const allowRemoteMediaUrl = Boolean(!remoteMediaRequested
         || authorization.mode === "admin"
-        || (webAdminToken && await isLicenseAdminTokenValid(webAdminToken)));
+        || (webAdminToken && await isLicenseAdminTokenValid(webAdminToken))
+        || webAdminGrantAuthorized);
       if (remoteMediaRequested && !allowRemoteMediaUrl) {
         const error = new Error("Media URL extraction is restricted to an authorized Admin session.");
         error.statusCode = 403;

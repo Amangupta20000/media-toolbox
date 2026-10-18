@@ -13,6 +13,7 @@ async function read(relativePath) {
 
 test("local tools keep their processing behavior while the approval surface is focused", async () => {
   const page = await read("components/local-processing-tool-page.jsx");
+  const processingClient = await read("components/processing-client.js");
   const seo = await read("lib/tool-seo-content.js");
   const processing = await read("components/processing-options.jsx");
   const history = await read("components/tool-history.jsx");
@@ -42,7 +43,11 @@ test("local tools keep their processing behavior while the approval surface is f
   assert.match(page, /adminUrlAccess/);
   assert.match(page, /media-toolbox-admin-auth/);
   assert.match(page, /addEventListener\("storage", refreshAdminAccess\)/);
+  assert.match(page, /getLocalAdminSession/);
+  assert.match(page, /requestAudioUrlAdminGrant/);
   assert.match(page, /Admin media URL/);
+  assert.match(processingClient, /\/api\/admin\/audio-grant/);
+  assert.match(processingClient, /X-Media-Toolbox-Admin-Grant/);
   assert.doesNotMatch(page, /yt-dlp/i);
   assert.doesNotMatch(seo, /yt-dlp/i);
   assert.match(seo, /Convert video to audio files/);

@@ -13,8 +13,8 @@ import { downloadFilename, downloadUrlWithFilename, filenameStem, ResultFilename
 import { ToolFaqContent, ToolSeoContent } from "./tool-seo-content.jsx";
 import { ToolHistory, ToolViewTabs } from "./tool-history.jsx";
 import { DismissibleMessage } from "./dismissible-message.jsx";
-import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, preferredProcessingMode, processingCapabilities, probeProcessingLocations, uploadWithProgress } from "./processing-client.js";
-import { storedAdminToken } from "./license-client.js";
+import { deleteProcessingJob, getProcessingJob, isProcessingLocationReady, preferredProcessingMode, processingCapabilities, probeProcessingLocations, requestAudioUrlAdminGrant, uploadWithProgress } from "./processing-client.js";
+import { getLocalAdminSession, storedAdminToken } from "./license-client.js";
 import { pushAnalyticsEvent } from "../lib/analytics.js";
 
 const VIDEO_ACCEPT = "video/*,.mkv,.webm,.avi,.3gp,.mpeg,.mpg";
@@ -173,12 +173,17 @@ export function LocalProcessingToolPage({ tool }) {
 
   useEffect(() => {
     if (!isAudio || typeof window === "undefined") return undefined;
-    const refreshAdminAccess = () => setAdminUrlAccess(locations?.local?.authorization?.mode === "admin" || locations?.local?.health?.authorization?.mode === "admin" || Boolean(storedAdminToken()));
-    refreshAdminAccess();
+    let active = true;
+    const refreshAdminAccess = async () => {
+      const websiteAdmin = await getLocalAdminSession().then((value) => Boolean(value.authenticated)).catch(() => false);
+      if (!active) return;
+      setAdminUrlAccess(locations?.local?.authorization?.mode === "admin" || locations?.local?.health?.authorization?.mode === "admin" || Boolean(storedAdminToken()) || websiteAdmin);
+    };
+    refreshAdminAccess().catch(() => undefined);
     window.addEventListener("media-toolbox-admin-auth", refreshAdminAccess);
     window.addEventListener("storage", refreshAdminAccess);
     const timer = window.setInterval(refreshAdminAccess, 3000);
-    return () => { window.removeEventListener("media-toolbox-admin-auth", refreshAdminAccess); window.removeEventListener("storage", refreshAdminAccess); window.clearInterval(timer); };
+    return () => { active = false; window.removeEventListener("media-toolbox-admin-auth", refreshAdminAccess); window.removeEventListener("storage", refreshAdminAccess); window.clearInterval(timer); };
   }, [isAudio, locations]);
 
   useEffect(() => {
@@ -302,7 +307,9 @@ export function LocalProcessingToolPage({ tool }) {
     pushAnalyticsEvent("processing_started", { tool, mode: processingMode });
     try {
       setUploadProgress(1);
-      const response = await uploadWithProgress(form, processingMode, setUploadProgress, { adminToken: usingAudioUrl ? storedAdminToken() : "" });
+      const adminToken = usingAudioUrl ? storedAdminToken() : "";
+      const adminGrant = usingAudioUrl && processingMode === "local" && !adminToken ? await requestAudioUrlAdminGrant() : "";
+      const response = await uploadWithProgress(form, processingMode, setUploadProgress, { adminToken, adminGrant });
       const id = response.jobId || response.jobIds?.[0];
       if (!id) throw new Error("The processing job was not created.");
       setUploadProgress(0);

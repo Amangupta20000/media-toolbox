@@ -380,6 +380,25 @@ export async function requestLocalAgentJson(path, options = {}) {
   return payload;
 }
 
+export async function requestAudioUrlAdminGrant() {
+  const challenge = await requestLocalAgentJson("/admin/audio-grant/challenge", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ origin: window.location.origin }),
+  });
+  const response = await fetch("/api/admin/audio-grant", {
+    method: "POST",
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ challenge: challenge.challenge, origin: window.location.origin }),
+  });
+  let body = {};
+  try { body = await response.json(); } catch { /* the status still explains the failure */ }
+  if (!response.ok || !body.grant) throw new Error(body.error || "Website Admin login is required for media URL extraction.");
+  return body.grant;
+}
+
 function historyRequestOptions(options = {}) {
   const token = storedHistoryToken();
   return { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` } };
@@ -389,12 +408,13 @@ function endpoint(mode, path) {
   return mode === "local" ? `${agentBaseUrl()}/v1${path}` : `/api${path}`;
 }
 
-export function uploadWithProgress(form, mode, onProgress, { adminToken = "" } = {}) {
+export function uploadWithProgress(form, mode, onProgress, { adminToken = "", adminGrant = "" } = {}) {
   const startUpload = () => new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", endpoint(mode, "/jobs"));
     if (mode === "local") xhr.setRequestHeader("Authorization", `Bearer ${storedAgentToken()}`);
     if (adminToken) xhr.setRequestHeader("X-Media-Toolbox-Admin-Token", adminToken);
+    if (adminGrant) xhr.setRequestHeader("X-Media-Toolbox-Admin-Grant", adminGrant);
     xhr.upload.onprogress = (event) => { if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100)); };
     xhr.onerror = () => reject(new Error(mode === "local" ? "The local agent could not be reached or is not authorized. Open the Local agent dashboard." : "The selected processing service could not be reached."));
     xhr.onload = () => {
