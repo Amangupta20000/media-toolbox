@@ -6,7 +6,6 @@ import { useRouter } from "next/router";
 import { Archive, ArrowRight, AudioLines, BookOpen, ChevronDown, Clock3, Code2, ExternalLink, FileImage, FileText, Film, Gift, Home, Image as ImageIcon, LockKeyhole, Mail, Menu, Moon, Scale, ShieldCheck, Sun, WandSparkles } from "lucide-react";
 import { probeLocalAgent } from "./processing-client.js";
 import { AppFooter } from "./app-footer.jsx";
-import { AdsterraGutterBanner } from "./adsterra-gutter-banner.jsx";
 import { FreeAccessModal } from "./free-access-modal.jsx";
 import { metadataForPathname, normalizeSitePath, PRODUCT_TAGLINE } from "../lib/site-metadata.js";
 import { formatAccessDuration } from "../lib/access-duration.js";
@@ -236,7 +235,6 @@ export function AppShell({ children }) {
         <div id="mobile-native-ad-dock" className="mobile-native-ad-dock" aria-label="Advertisement" />
         <AppFooter />
       </main>
-      <AdsterraGutterBanner />
     </div>
     <FreeAccessModal pathname={currentPath} localAgentStatus={localAgentStatus} />
   </div>;

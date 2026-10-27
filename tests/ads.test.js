@@ -39,7 +39,6 @@ const pageAdStates = [
 test("each ad widget keeps exactly one provider iframe inside its own labeled wrapper", async () => {
   const native = await read("components/adsterra-native-banner.jsx");
   const responsive = await read("components/adsterra-responsive-banner.jsx");
-  const gutter = await read("components/adsterra-gutter-banner.jsx");
   const lifecycle = await read("components/ad-lifecycle.js");
 
   assert.equal(count(native, /<iframe\b/g), 1);
@@ -60,12 +59,6 @@ test("each ad widget keeps exactly one provider iframe inside its own labeled wr
   assert.match(responsive, /useAdLifecycle\(true\)/);
   assert.match(responsive, /loading=\{loading\}/);
 
-  assert.equal(count(gutter, /<iframe\b/g), 1);
-  assert.match(gutter, /return <aside[\s\S]*className="adsterra-gutter-ad" data-ad-type="gutter" aria-label="Advertisement">[\s\S]*<iframe[\s\S]*srcDoc=\{adDocument\}/);
-  assert.match(gutter, /https:\/\/bauval\.org\/22\/15bdc5b2743e8dd55cfed656ec94577c/);
-  assert.match(gutter, /width=\{GUTTER_BANNER\.options\.width\} height=\{GUTTER_BANNER\.options\.height\}/);
-  assert.match(gutter, /useAdLifecycle\(true\)/);
-  assert.match(gutter, /loading=\{loading\}/);
   assert.match(lifecycle, /AD_REFRESH_INTERVAL_MS = 45_000/);
   assert.match(lifecycle, /rootMargin: `\$\{Math\.max\(1, Math\.ceil\(viewportHeight\(\)\)\)\}px 0px`/);
   assert.match(lifecycle, /try \{[\s\S]*new IntersectionObserver/);
@@ -98,10 +91,8 @@ test("ad widgets reserve layout space and expose a responsive mobile placement",
   assert.match(shell, /id="mobile-native-ad-dock"[\s\S]*<AppFooter \/>/);
   assert.match(styles, /\.mobile-native-ad-dock \{[^}]*display: none/);
   assert.match(styles, /\.mobile-native-ad-dock \{ display: block; width: 100%; padding: 0 14px; \}/);
-  assert.match(styles, /\.adsterra-gutter-ad \{[^}]*width: 160px[^}]*min-height: 620px/);
-  assert.match(styles, /@media \(min-width: 1240px\) \{ \.adsterra-gutter-ad \{ display: block; \} \}/);
-  assert.match(shell, /import \{ AdsterraGutterBanner \} from "\.\/adsterra-gutter-banner\.jsx"/);
-  assert.match(shell, /<AppFooter \/>[\s\S]*<\/main>[\s\S]*<AdsterraGutterBanner \/>/);
+  assert.doesNotMatch(styles, /adsterra-gutter-ad|160x600/);
+  assert.doesNotMatch(shell, /AdsterraGutterBanner|adsterra-gutter-ad/);
 });
 
 const AD_ROUTES = [
