@@ -26,6 +26,11 @@ test("History supports selecting and deleting multiple visible results", async (
   assert.match(history, /value="saved">Saved<\/option>/);
   assert.match(history, /value="completed">Completed<\/option>/);
   assert.match(history, /item\.historyStatus \|\| "completed"/);
+  assert.match(history, /function historyTimestamp\(item\)/);
+  assert.match(history, /return Number\(item\.createdAt \|\| item\.updatedAt \|\| 0\)/);
+  assert.match(history, /sortBy === "oldest"\) return historyTimestamp\(left\) - historyTimestamp\(right\)/);
+  assert.match(history, /return historyTimestamp\(right\) - historyTimestamp\(left\)/);
+  assert.match(history, /historyDate\(item\.createdAt \|\| item\.updatedAt\)/);
   assert.doesNotMatch(history, /durationFilter/);
   assert.doesNotMatch(history, /Any duration/);
   assert.doesNotMatch(history, /formatDuration/);

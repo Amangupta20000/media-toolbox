@@ -2027,9 +2027,12 @@ test("agent replaces a retained PDF-editor result when exporting the same editin
   };
 
   const firstJobId = await submitBlankPdf({ filename: "saved-original.pdf" });
-  await waitForCompletion(firstJobId);
+  const firstCompleted = await waitForCompletion(firstJobId);
   const firstResultFiles = await fs.readdir(path.join(process.env.DATA_DIR, "Results"));
   assert.ok(firstResultFiles.includes(`${firstJobId.slice(0, 8)}-saved-original.pdf`));
+
+  const newerJobId = await submitBlankPdf({ filename: "newer-pdf.pdf" });
+  await waitForCompletion(newerJobId);
 
   const replacementJobId = await submitBlankPdf({ filename: "renamed-export.pdf", replaceJobId: firstJobId });
   await waitForCompletion(replacementJobId);
@@ -2048,9 +2051,13 @@ test("agent replaces a retained PDF-editor result when exporting the same editin
   assert.ok(history.items.some((item) => item.id === replacementJobId));
   assert.equal(history.items.some((item) => item.id === firstJobId), false);
   assert.equal(history.items.find((item) => item.id === replacementJobId)?.historyStatus, "completed");
+  assert.equal(history.items[0]?.id, newerJobId);
+  assert.equal(history.items.find((item) => item.id === replacementJobId)?.createdAt, firstCompleted.createdAt);
 
-  const deleted = await fetch(url(`/v1/history/${replacementJobId}`), { method: "DELETE", headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" } });
-  assert.equal(deleted.status, 200);
+  for (const jobId of [replacementJobId, newerJobId]) {
+    const deleted = await fetch(url(`/v1/history/${jobId}`), { method: "DELETE", headers: { Authorization: `Bearer ${sessionToken}`, Origin: "http://localhost:3000" } });
+    assert.equal(deleted.status, 200);
+  }
 });
 
 test("agent supports automatic browser sessions and ending one or all sessions", async () => {

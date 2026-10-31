@@ -54,6 +54,10 @@ function historyDate(value) {
   return Number.isNaN(date.getTime()) ? "Unknown date" : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
+function historyTimestamp(item) {
+  return Number(item.createdAt || item.updatedAt || 0);
+}
+
 async function loadLocalHistory(tool) {
   try {
     const payload = await getLocalHistory(tool);
@@ -113,10 +117,10 @@ export function ToolHistory({ tool }) {
     return filtered.sort((left, right) => {
       const leftResult = left.result || {};
       const rightResult = right.result || {};
-      if (sortBy === "oldest") return Number(left.updatedAt || left.createdAt || 0) - Number(right.updatedAt || right.createdAt || 0);
+      if (sortBy === "oldest") return historyTimestamp(left) - historyTimestamp(right);
       if (sortBy === "name") return String(leftResult.filename || "").localeCompare(String(rightResult.filename || ""));
       if (sortBy === "size") return Number(rightResult.bytes || 0) - Number(leftResult.bytes || 0);
-      return Number(right.updatedAt || right.createdAt || 0) - Number(left.updatedAt || left.createdAt || 0);
+      return historyTimestamp(right) - historyTimestamp(left);
     });
   }, [items, query, statusFilter, sizeFilter, sortBy]);
 
@@ -227,7 +231,7 @@ export function ToolHistory({ tool }) {
       const result = item.result || {};
       return <article className="history-item" key={`${item.storage}-${item.id}`}>
         <label className="history-item-select"><input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelected(item.id)} disabled={bulkDeleting} aria-label={`Select ${result.filename || "saved result"}`} /></label><div className="history-item-icon"><Icon size={19} /></div>
-        <div className="history-item-copy"><strong title={result.filename}>{result.filename || "Saved result"}</strong><span>{historyDate(item.updatedAt || item.createdAt)} · {formatBytes(result.bytes || 0)} · {item.storage === "local" ? "Local" : "Saved result"}</span><small><span className="history-status-badge">{(item.historyStatus || "completed") === "saved" ? "Saved" : "Completed"}</span> · {item.location || (item.storage === "local" ? "Local agent Results folder" : "Temporary processing storage")}</small></div>
+        <div className="history-item-copy"><strong title={result.filename}>{result.filename || "Saved result"}</strong><span>{historyDate(item.createdAt || item.updatedAt)} · {formatBytes(result.bytes || 0)} · {item.storage === "local" ? "Local" : "Saved result"}</span><small><span className="history-status-badge">{(item.historyStatus || "completed") === "saved" ? "Saved" : "Completed"}</span> · {item.location || (item.storage === "local" ? "Local agent Results folder" : "Temporary processing storage")}</small></div>
         <div className="history-item-actions">{!["pdf-compressor", "video-compressor", "audio-extractor", "pdf-to-images"].includes(tool) && <button className="icon-button history-edit-button" type="button" onClick={() => editItem(item)} disabled={bulkDeleting} aria-label={`Edit ${result.filename || "saved result"}`} title="Edit file"><Pencil size={17} /></button>}<button className="icon-button history-preview-button" type="button" onClick={() => setPreviewItem(item)} disabled={bulkDeleting} aria-label={`Preview ${result.filename || "saved result"}`} title="Preview"><Eye size={17} /></button><a className="secondary-button" href={result.downloadUrl} download={result.filename} aria-disabled={bulkDeleting} onClick={(event) => { if (bulkDeleting) event.preventDefault(); }}><Download size={16} /> Download</a><button className="icon-button history-delete-button" type="button" onClick={() => removeItem(item)} disabled={deletingIds.has(item.id)} aria-label={`Delete ${result.filename || "saved result"}`} title={item.storage === "local" ? "Delete from device" : "Delete result"}><Trash2 size={17} /></button></div>
       </article>;
     })}</div>}
