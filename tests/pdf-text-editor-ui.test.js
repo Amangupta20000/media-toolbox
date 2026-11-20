@@ -114,6 +114,9 @@ test("PDF text editor supports constrained browser replacement and identity-chec
   assert.match(shell, /Zoom out/);
   assert.match(shell, /Zoom in/);
   assert.match(shell, /Preview zoom/);
+  assert.match(shell, /data-preview-zoom-control="in"/);
+  assert.match(shell, /data-preview-zoom-control="out"/);
+  assert.match(shell, /stepPreviewZoom/);
   assert.match(shell, /import\("\.\.\/lib\/pdf-text-preview\.js"\)/);
   assert.match(shell, /await Promise\.all\(pageModels\.map\(\(page\) => previewPdf\.getPage/);
   assert.match(shell, /setPreviewRevision\(\(current\) => current \+ 1\)/);
@@ -201,6 +204,7 @@ test("PDF text editor supports constrained browser replacement and identity-chec
   assert.match(shell, /renderViewport/);
   assert.match(shell, /GlobalWorkerOptions\.workerSrc = "\/api\/pdf\/worker"/);
   assert.match(await read("styles/globals.css"), /\.pdf-text-page-frame \{[^}]*height: auto[^}]*min-height: 0[^}]*overflow: visible/);
+  assert.match(await read("styles/globals.css"), /\.pdf-text-page-frame \{[^}]*max-width: 100%[^}]*min-width: 0/);
   assert.match(await read("styles/globals.css"), /\.pdf-text-page-frame\[data-preview-zoomed="false"\] \.pdf-text-page-surface \{[^}]*max-width: 100%/);
   assert.match(await read("styles/globals.css"), /\.pdf-text-page-surface \{[^}]*margin: 0 auto/);
   assert.match(shell, /calculatePreviewPageLayout/);

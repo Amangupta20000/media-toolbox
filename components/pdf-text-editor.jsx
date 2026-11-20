@@ -23,6 +23,7 @@ import { takeHistoryEdit } from "./history-edit.js";
 import { fontFamilyFromPdfName, hasTextFormat, normalizeTextFormat, scaleTextFormat, textFormatDefaults } from "../lib/pdf-text-format.js";
 import { PDF_TEXT_BOX_FONTS } from "../lib/pdf-text-box.js";
 import { buildPreviewOffsets, calculatePreviewPageLayout, estimatePreviewPageCardHeight, previewIndexAtOffset, previewViewportLimits } from "../lib/pdf-preview-layout.js";
+import { stepPreviewZoom } from "../lib/preview-zoom.js";
 import { pushAnalyticsEvent } from "../lib/analytics.js";
 
 async function loadPdfLibrary() {
@@ -1404,10 +1405,10 @@ export function PdfTextEditor() {
       }
       if (event.key === "+" || event.key === "=") {
         event.preventDefault();
-        setPreviewZoom((current) => Math.min(3, Math.round((current + 0.1) * 10) / 10));
+        setPreviewZoom((current) => stepPreviewZoom(current, 0.1));
       } else if (event.key === "-") {
         event.preventDefault();
-        setPreviewZoom((current) => Math.max(0.6, Math.round((current - 0.1) * 10) / 10));
+        setPreviewZoom((current) => stepPreviewZoom(current, -0.1));
       } else if (event.key === "0") {
         event.preventDefault();
         setPreviewZoom(1);
@@ -1619,7 +1620,7 @@ export function PdfTextEditor() {
     setEditorValue(currentRun.editable ? (edits[currentRun.runId] ?? currentRun.text) : "");
     setError(currentRun.editable || currentRun.graphic ? "" : currentRun.reason);
   };
-  const changePreviewZoom = (delta) => setPreviewZoom((current) => Math.min(3, Math.max(0.6, Math.round((current + delta) * 10) / 10)));
+  const changePreviewZoom = (delta) => setPreviewZoom((current) => stepPreviewZoom(current, delta));
   const resetPreviewZoom = () => setPreviewZoom(1);
   const refreshEditedPreview = async (nextEdits, nextOffsets = textOffsets, nextTransforms = textTransforms, nextFormats = textFormats) => {
     if (!sourceBytesRef.current || !pdfLibrary) return;
@@ -1917,9 +1918,9 @@ export function PdfTextEditor() {
                       <button className="icon-button" type="button" onClick={redoTextEdit} disabled={!textHistoryRef.current.future.length} aria-label="Redo PDF text editor change" title="Redo (⌘/Ctrl+Y)"><Redo2 size={16} /></button>
                     </div>
                     <div className="pdf-zoom-controls" aria-label="Preview zoom">
-                      <button className="icon-button" type="button" onClick={() => changePreviewZoom(-0.1)} aria-label="Zoom out" title="Zoom out (-)"><ZoomOut size={16} /></button>
-                      <button className="pdf-zoom-value" type="button" onClick={resetPreviewZoom} title="Reset zoom (0)">{Math.round(previewZoom * 100)}%</button>
-                      <button className="icon-button" type="button" onClick={() => changePreviewZoom(0.1)} aria-label="Zoom in" title="Zoom in (+)"><ZoomIn size={16} /></button>
+                      <button className="icon-button" type="button" onClick={() => changePreviewZoom(-0.1)} aria-label="Zoom out" title="Zoom out (-)" data-preview-zoom-control="out"><ZoomOut size={16} /></button>
+                      <button className="pdf-zoom-value" type="button" onClick={resetPreviewZoom} title="Reset zoom (0)" aria-live="polite" data-preview-zoom-control="reset">{Math.round(previewZoom * 100)}%</button>
+                      <button className="icon-button" type="button" onClick={() => changePreviewZoom(0.1)} aria-label="Zoom in" title="Zoom in (+)" data-preview-zoom-control="in"><ZoomIn size={16} /></button>
                     </div>
                     <button className="primary-button" type="button" onClick={submit} disabled={!canSubmit || Boolean(saveJob)} data-analytics-cta="export_pdf_text_edit" data-analytics-surface="pdf-text-editor">
                       {uploadProgress ? <><LoaderCircle className="spin" size={17} /> Uploading {uploadProgress}%</> : checkingLocation ? <><LoaderCircle className="spin" size={17} /> Checking worker…</> : <><Pencil size={17} /> Export edited PDF</>}

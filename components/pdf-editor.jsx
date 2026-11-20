@@ -19,6 +19,7 @@ import { MAX_PDF_COUNT, MAX_PDF_TOTAL_BYTES } from "../lib/pdf-limits.js";
 import { normalizeImageRotation, rotatedImageDrawPlacement } from "../lib/pdf-image-placement.js";
 import { assembleBrowserPdf, BROWSER_PDF_FIDELITY_WARNING } from "../lib/pdf-browser-editor.js";
 import { calculatePreviewPageLayout, previewViewportLimits } from "../lib/pdf-preview-layout.js";
+import { stepPreviewZoom } from "../lib/preview-zoom.js";
 import { PDF_TEXT_BOX_FONTS, textBoxCssFontFamily, textBoxTextRuns } from "../lib/pdf-text-box.js";
 import { pushAnalyticsEvent } from "../lib/analytics.js";
 
@@ -959,7 +960,7 @@ export function PdfEditor() {
     if (!selectedPage && !canUndo && !canRedo) setMoreToolsOpen(false);
   }, [canRedo, canUndo, selectedPage]);
 
-  const changePreviewZoom = (delta) => setPreviewZoom((current) => Math.min(3, Math.max(0.6, Math.round((current + delta) * 10) / 10)));
+  const changePreviewZoom = (delta) => setPreviewZoom((current) => stepPreviewZoom(current, delta));
   const resetPreviewZoom = () => setPreviewZoom(1);
 
   const rotateSelectedPage = (delta) => {
@@ -1973,7 +1974,7 @@ export function PdfEditor() {
           <button className="secondary-button" type="button" onClick={openPdfPicker} disabled={loadingFiles || pdfFiles.length >= pdfCountLimit} title="Add PDF"><Plus size={17} /> Add PDF</button>
           {(pdfFiles.length > 0 || pages.length > 0) && <button className="secondary-button pdf-new-session-button" type="button" onClick={startNewSession} disabled={loadingFiles || Boolean(uploadProgress)} title="Discard this PDF session and start a new one"><RotateCcw size={17} /> New session</button>}
           <button className="secondary-button" type="button" onClick={addBlankPage}><FilePlus2 size={17} /> Blank page</button>
-          <div className="pdf-zoom-controls" aria-label="Preview zoom"><button className="icon-button" type="button" onClick={() => changePreviewZoom(-0.1)} aria-label="Zoom out" title="Zoom out (-)"><ZoomOut size={16} /></button><button className="pdf-zoom-value" type="button" onClick={resetPreviewZoom} title="Reset zoom (0)">{Math.round(previewZoom * 100)}%</button><button className="icon-button" type="button" onClick={() => changePreviewZoom(0.1)} aria-label="Zoom in" title="Zoom in (+)"><ZoomIn size={16} /></button></div>
+          <div className="pdf-zoom-controls" aria-label="Preview zoom"><button className="icon-button" type="button" onClick={() => changePreviewZoom(-0.1)} aria-label="Zoom out" title="Zoom out (-)" data-preview-zoom-control="out"><ZoomOut size={16} /></button><button className="pdf-zoom-value" type="button" onClick={resetPreviewZoom} title="Reset zoom (0)" aria-live="polite" data-preview-zoom-control="reset">{Math.round(previewZoom * 100)}%</button><button className="icon-button" type="button" onClick={() => changePreviewZoom(0.1)} aria-label="Zoom in" title="Zoom in (+)" data-preview-zoom-control="in"><ZoomIn size={16} /></button></div>
           <div ref={moreToolsRef} className="pdf-more-tools">
             <button className="icon-button pdf-more-tools-trigger" type="button" aria-label="Open other PDF tools" aria-haspopup="menu" aria-expanded={moreToolsOpen} title={selectedPage ? "Other tools" : canUndo || canRedo ? "Undo or redo document changes" : "Add a page to use other tools"} disabled={!selectedPage && !canUndo && !canRedo} onClick={() => setMoreToolsOpen((current) => !current)}><MoreHorizontal size={20} /></button>
             {moreToolsOpen && (selectedPage || canUndo || canRedo) && <div className="pdf-more-tools-menu" role="menu" aria-label="Other PDF tools">

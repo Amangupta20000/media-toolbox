@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildPreviewOffsets, calculatePreviewPageLayout, estimatePreviewPageCardHeight, previewIndexAtOffset, previewViewportLimits } from "../lib/pdf-preview-layout.js";
+import { normalizePreviewZoom, stepPreviewZoom } from "../lib/preview-zoom.js";
+
+test("preview zoom steps are clamped and do not accumulate floating-point drift", () => {
+  assert.equal(normalizePreviewZoom("not-a-number"), 1);
+  assert.equal(normalizePreviewZoom(0), 0.6);
+  assert.equal(normalizePreviewZoom(5), 3);
+  assert.equal(stepPreviewZoom(1, 0.1), 1.1);
+  assert.equal(stepPreviewZoom(1.2, -0.1), 1.1);
+  assert.equal(stepPreviewZoom(3, 0.1), 3);
+  assert.equal(stepPreviewZoom(0.6, -0.1), 0.6);
+});
 
 test("preview layout fits each page orientation while preserving its aspect ratio", () => {
   const portrait = calculatePreviewPageLayout({ pageWidth: 595, pageHeight: 842, availableWidth: 700, maxPreviewHeight: 760, zoom: 1 });

@@ -25,7 +25,11 @@ test("PDF editor renders full previews at high resolution while keeping thumbnai
   assert.match(shell, /calculatePreviewPageLayout/);
   assert.match(shell, /const scale = layout\.scale/);
   assert.match(shell, /data-preview-zoomed/);
+  assert.match(shell, /data-preview-zoom-control="in"/);
+  assert.match(shell, /data-preview-zoom-control="out"/);
+  assert.match(shell, /stepPreviewZoom/);
   assert.match(styles, /\.pdf-page-canvas-wrap \{[^}]*height: auto[^}]*min-height: 0[^}]*overflow: auto/);
+  assert.match(styles, /\.pdf-page-canvas-wrap \{[^}]*max-width: 100%[^}]*min-width: 0/);
   assert.match(styles, /\.pdf-page-canvas-wrap\[data-preview-zoomed="false"\] \.pdf-page-canvas-surface/);
   assert.match(shell, /surfaceSize/);
   assert.match(shell, /imagePreviewStyle\(page, image, placement\)/);
